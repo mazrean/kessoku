@@ -9,10 +9,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: [1.24.x]
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -20,7 +16,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version-file: go.mod
 
       - name: Cache Go modules
         uses: actions/cache@v4
