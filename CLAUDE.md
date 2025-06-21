@@ -29,7 +29,7 @@ go fmt ./...
 ### Linting
 ```bash
 # Run comprehensive Go analyzer linter
-go run tools lint ./...
+go run ./tools lint ./...
 ```
 
 ### Release Management
@@ -77,3 +77,10 @@ The tools module provides a comprehensive linting setup combining:
 - Always create git commits at appropriate granular units for code changes
 - Each commit should represent a logical, atomic change
 - Write clear, descriptive commit messages that explain the purpose of the change
+
+### Go Code Quality Rules
+- **ALWAYS run lint and test after any Go code changes**
+- Run `go run ./tools lint ./...` to check for code quality issues
+- Run `go test -v ./...` to ensure all tests pass
+- Fix any linting errors or test failures before committing
+- These checks are mandatory for maintaining code quality standards
