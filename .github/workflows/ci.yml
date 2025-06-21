@@ -84,6 +84,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -103,8 +105,8 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Build binary
-        run: go build -o bin/kessoku ./cmd/kessoku
+      - name: Build with GoReleaser (snapshot)
+        run: go tool goreleaser build --snapshot --clean
 
       - name: Test binary execution
-        run: ./bin/kessoku --version
+        run: ./dist/kessoku_linux_amd64_v1/kessoku --version
