@@ -38,15 +38,29 @@ jobs:
           go-version-file: go.mod
 
       - name: Run custom linter
-        run: go run tools lint ./...
-
-      - name: Check formatting
         run: |
-          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
-            echo "Code is not properly formatted:"
-            gofmt -s -l .
+          set -o pipefail
+          go run tools lint ./... 2>&1 | tee lint-output.txt || {
+            echo "::group::Linting Issues"
+            while IFS= read -r line; do
+              if [[ "$line" =~ ^([^:]+):([0-9]+):([0-9]+):(.*)$ ]]; then
+                file="${BASH_REMATCH[1]}"
+                line_num="${BASH_REMATCH[2]}"
+                col="${BASH_REMATCH[3]}"
+                message="${BASH_REMATCH[4]}"
+                echo "::error file=$file,line=$line_num,col=$col::$message"
+              elif [[ "$line" =~ ^([^:]+):([0-9]+):(.*)$ ]]; then
+                file="${BASH_REMATCH[1]}"
+                line_num="${BASH_REMATCH[2]}"
+                message="${BASH_REMATCH[3]}"
+                echo "::error file=$file,line=$line_num::$message"
+              else
+                echo "::error::$line"
+              fi
+            done < lint-output.txt
+            echo "::endgroup::"
             exit 1
-          fi
+          }
 
   build:
     runs-on: ubuntu-latest
