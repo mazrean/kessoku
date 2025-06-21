@@ -1,3 +1,4 @@
+// Package config provides CLI configuration and application logic for kessoku.
 package config
 
 import (
