@@ -2,9 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
 
 jobs:
   test:
@@ -17,10 +16,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
-
-      - name: Download dependencies
-        run: go mod download
 
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out ./...
@@ -41,10 +36,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
-
-      - name: Download dependencies
-        run: go mod download
 
       - name: Run custom linter
         run: go run tools lint ./...
@@ -69,10 +60,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
-
-      - name: Download dependencies
-        run: go mod download
 
       - name: Build with GoReleaser (snapshot)
         run: go tool goreleaser build --snapshot --clean
