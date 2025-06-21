@@ -40,7 +40,7 @@ jobs:
       - name: Run custom linter
         run: |
           set -o pipefail
-          go run tools lint ./... 2>&1 | tee lint-output.txt || {
+          go run ./tools lint ./... 2>&1 | tee lint-output.txt || {
             echo "::group::Linting Issues"
             while IFS= read -r line; do
               if [[ "$line" =~ ^([^:]+):([0-9]+):([0-9]+):(.*)$ ]]; then
