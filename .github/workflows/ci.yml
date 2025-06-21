@@ -8,6 +8,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    environment: Test
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -25,6 +26,7 @@ jobs:
         with:
           file: ./coverage.out
           fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   lint:
     runs-on: ubuntu-latest
