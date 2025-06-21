@@ -1,0 +1,101 @@
+version: 2
+
+project_name: kessoku
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - "386"
+      - amd64
+      - arm
+      - arm64
+    goarm:
+      - "7"
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ignore:
+      - goos: darwin
+        goarch: "386"
+    main: ./cmd/kessoku
+    binary: kessoku
+    ldflags:
+      - -s
+      - -w
+      - -X 'github.com/mazrean/kessoku/internal/config.version={{.Version}}'
+      - -X 'github.com/mazrean/kessoku/internal/config.commit={{.Commit}}'
+      - -X 'github.com/mazrean/kessoku/internal/config.date={{.Date}}'
+
+archives:
+  - name_template: >-
+      {{- .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end -}}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    builds_info:
+      group: root
+      owner: root
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: README.md
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+      - src: LICENSE
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+nfpms:
+  - id: mcp-tarmaq-nfpm
+    file_name_template: "{{ .ProjectName }}_{{ .Arch }}"
+    homepage: https://github.com/mazrean/kessoku
+    maintainer: Shunsuke Wakamatsu <shunsuke.w04@gmail.com>
+    description: A CLI tool for managing kessoku
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    mtime: "{{ .CommitDate }}"
+
+# Modern Homebrew configuration (recommended)
+homebrew_casks:
+  - repository:
+      owner: mazrean
+      name: homebrew-tap
+    homepage: https://github.com/mazrean/kessoku
+    description: A CLI tool for managing kessoku
+    license: MIT
+    commit_author:
+      name: Shunsuke Wakamatsu
+      email: shunsuke.w04@gmail.com
+    commit_msg_template: "Cask update for {{ .ProjectName }} version {{ .Tag }}"
+
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
