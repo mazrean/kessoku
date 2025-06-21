@@ -84,3 +84,18 @@ The tools module provides a comprehensive linting setup combining:
 - Run `go test -v ./...` to ensure all tests pass
 - Fix any linting errors or test failures before committing
 - These checks are mandatory for maintaining code quality standards
+
+### Documentation Maintenance Rules
+- **ALWAYS update documentation when making code or feature changes**
+- Update CLAUDE.md when:
+  - Architecture or module structure changes
+  - New commands or development workflows are added
+  - Build, test, or deployment processes change
+  - Development guidelines or rules are modified
+- Update README.md when:
+  - User-facing features or functionality change
+  - Installation or usage instructions change
+  - New command-line options or examples are added
+  - Project description or overview needs updating
+- Keep documentation in sync with actual implementation
+- Documentation updates should be part of the same commit as the related code changes
