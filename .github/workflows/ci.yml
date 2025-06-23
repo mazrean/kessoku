@@ -92,7 +92,6 @@ jobs:
 
   api-compatibility:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -106,25 +105,16 @@ jobs:
 
       - name: Check API compatibility
         run: |
-          MODULE_PATH=$(go list -m)
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          
-          # Check if base version has public API
-          git checkout "$BASE_SHA" 2>/dev/null || exit 0
-          if ! find . -name "*.go" -not -path "./internal/*" -not -path "./*_test.go" -not -path "./tools/*" -not -path "./examples/*" | head -1 | grep -q .; then
-            git checkout "${{ github.sha }}"
-            exit 0
-          fi
-          git checkout "${{ github.sha }}"
-          
+          MODULE_PATH="github.com/mazrean/kessoku"
           # Run API compatibility check and capture output
-          if OUTPUT=$(go tool tools apicompat "${MODULE_PATH}@${BASE_SHA}" "${MODULE_PATH}" 2>&1); then
+          if OUTPUT=$(go tool tools apicompat "${MODULE_PATH}@latest" "${MODULE_PATH}" 2>&1); then
             echo "No breaking API changes detected"
           else
             echo "$OUTPUT"
             
-            # Comment on PR with the results (or update existing comment)
-            gh pr comment ${{ github.event.pull_request.number }} --edit-last --body "## ⚠️ API Compatibility Check Failed
+            if [ -n "${{ github.event.pull_request.number }}" ]; then
+              # Comment on PR with the results (or update existing comment)
+              gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body "## ⚠️ API Compatibility Check Failed
             
             Breaking changes detected in the public API:
             
@@ -136,6 +126,23 @@ jobs:
             - Whether these breaking changes are intentional
             - Updating the major version if breaking changes are required
             - Providing migration guidance for users"
+            else
+              # Output to job summary for non-PR events
+              cat >> $GITHUB_STEP_SUMMARY << EOF
+            ## ⚠️ API Compatibility Check Failed
+            
+            Breaking changes detected in the public API:
+            
+            \`\`\`
+            $OUTPUT
+            \`\`\`
+            
+            Please review these changes and consider:
+            - Whether these breaking changes are intentional
+            - Updating the major version if breaking changes are required
+            - Providing migration guidance for users
+            EOF
+            fi
             
             exit 1
           fi
