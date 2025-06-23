@@ -61,7 +61,7 @@ func (p *Parser) ParseFile(filename string) (*MetaData, []*BuildDirective, error
 
 	metaData := &MetaData{
 		Package: pkg.Name,
-		Imports: astFile.Imports,
+		Imports: make(map[string]*ast.ImportSpec),
 	}
 
 	slog.Debug("kessoku package", "kessokuPkg", kessokuPkg)
@@ -83,7 +83,7 @@ func (p *Parser) ParseFile(filename string) (*MetaData, []*BuildDirective, error
 		return nil, nil, fmt.Errorf("target file not found in package syntax")
 	}
 
-	builds, err := p.findInjectDirectives(targetFile, pkg.TypesInfo, kessokuPackageScope)
+	builds, err := p.findInjectDirectives(targetFile, pkg.TypesInfo, kessokuPackageScope, metaData.Imports, astFile.Imports)
 	if err != nil {
 		return nil, nil, fmt.Errorf("find inject directives: %w", err)
 	}
@@ -137,7 +137,7 @@ func (p *Parser) initializePackages(filename string) (*packages.Package, error) 
 }
 
 // FindInjectDirectives finds all kessoku.Inject calls in the AST.
-func (p *Parser) findInjectDirectives(file *ast.File, typeInfo *types.Info, kessokuPackageScope *types.Scope) ([]*BuildDirective, error) {
+func (p *Parser) findInjectDirectives(file *ast.File, typeInfo *types.Info, kessokuPackageScope *types.Scope, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec) ([]*BuildDirective, error) {
 	injectorObj := kessokuPackageScope.Lookup("Inject")
 	if injectorObj == nil || injectorObj.Type() == nil {
 		slog.Warn("kessoku package is imported, but kessoku.Inject function is not found")
@@ -189,7 +189,7 @@ func (p *Parser) findInjectDirectives(file *ast.File, typeInfo *types.Info, kess
 			return true
 		}
 
-		build, err := p.parseInjectCall(typeInfo, kessokuPackageScope, callExpr)
+		build, err := p.parseInjectCall(typeInfo, kessokuPackageScope, callExpr, imports, fileImports)
 		if err != nil {
 			slog.Warn("parseInjectCall failed", "callExpr", callExpr, "error", err)
 			return true
@@ -203,7 +203,7 @@ func (p *Parser) findInjectDirectives(file *ast.File, typeInfo *types.Info, kess
 }
 
 // parseInjectCall parses a kessoku.Inject call expression.
-func (p *Parser) parseInjectCall(typeInfo *types.Info, kessokuPackageScope *types.Scope, call *ast.CallExpr) (*BuildDirective, error) {
+func (p *Parser) parseInjectCall(typeInfo *types.Info, kessokuPackageScope *types.Scope, call *ast.CallExpr, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec) (*BuildDirective, error) {
 	build := &BuildDirective{
 		Providers: make([]*ProviderSpec, 0),
 	}
@@ -216,6 +216,8 @@ func (p *Parser) parseInjectCall(typeInfo *types.Info, kessokuPackageScope *type
 			Type:        returnType,
 			ASTTypeExpr: fun.Index,
 		}
+		// Collect dependencies from return type expression
+		p.collectDependencies(fun.Index, typeInfo, imports, fileImports)
 	case *ast.IndexListExpr:
 		if len(call.Fun.(*ast.IndexListExpr).Indices) == 0 {
 			return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
@@ -225,6 +227,8 @@ func (p *Parser) parseInjectCall(typeInfo *types.Info, kessokuPackageScope *type
 			Type:        returnType,
 			ASTTypeExpr: fun.Indices[0],
 		}
+		// Collect dependencies from return type expression
+		p.collectDependencies(fun.Indices[0], typeInfo, imports, fileImports)
 	default:
 		return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
 	}
@@ -247,7 +251,7 @@ func (p *Parser) parseInjectCall(typeInfo *types.Info, kessokuPackageScope *type
 
 	// Parse provider arguments (starting from index 1)
 	for _, arg := range call.Args[1:] {
-		if err := p.parseProviderArgument(typeInfo, kessokuPackageScope, arg, build); err != nil {
+		if err := p.parseProviderArgument(typeInfo, kessokuPackageScope, arg, build, imports, fileImports); err != nil {
 			return nil, fmt.Errorf("parse provider argument: %w", err)
 		}
 	}
@@ -256,7 +260,7 @@ func (p *Parser) parseInjectCall(typeInfo *types.Info, kessokuPackageScope *type
 }
 
 // parseProviderArgument parses a provider argument in kessoku.Inject call.
-func (p *Parser) parseProviderArgument(typeInfo *types.Info, kessokuPackageScope *types.Scope, arg ast.Expr, build *BuildDirective) error {
+func (p *Parser) parseProviderArgument(typeInfo *types.Info, kessokuPackageScope *types.Scope, arg ast.Expr, build *BuildDirective, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec) error {
 	providerType := typeInfo.TypeOf(arg)
 	if providerType == nil {
 		return fmt.Errorf("get type of argument")
@@ -332,6 +336,9 @@ func (p *Parser) parseProviderArgument(typeInfo *types.Info, kessokuPackageScope
 				ASTExpr:       arg,
 			})
 
+			// Collect dependencies from provider expression
+			p.collectDependencies(arg, typeInfo, imports, fileImports)
+
 			return nil
 		}
 	}
@@ -373,5 +380,48 @@ func (p *Parser) parseProviderArgument(typeInfo *types.Info, kessokuPackageScope
 		ASTTypeExpr: argTypeExpr,
 	})
 
+	// Collect dependencies from argument type expression
+	p.collectDependencies(argTypeExpr, typeInfo, imports, fileImports)
+
 	return nil
+}
+
+// collectDependencies extracts package dependencies from an AST expression
+func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec) {
+	ast.Inspect(expr, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.SelectorExpr:
+			// Check if this is a package selector (e.g., fmt.Println)
+			if ident, ok := node.X.(*ast.Ident); ok {
+				if obj := typeInfo.ObjectOf(ident); obj != nil {
+					if pkgName, ok := obj.(*types.PkgName); ok {
+						pkgPath := pkgName.Imported().Path()
+						// Find the corresponding import spec from the original file
+						for _, imp := range fileImports {
+							impPath := imp.Path.Value[1 : len(imp.Path.Value)-1] // Remove quotes
+							if impPath == pkgPath {
+								imports[pkgPath] = imp
+								break
+							}
+						}
+					}
+				}
+			}
+		case *ast.Ident:
+			// Check if this identifier refers to a type from another package
+			if obj := typeInfo.ObjectOf(node); obj != nil {
+				if pkg := obj.Pkg(); pkg != nil && pkg.Path() != "" {
+					// Find the corresponding import spec from the original file
+					for _, imp := range fileImports {
+						impPath := imp.Path.Value[1 : len(imp.Path.Value)-1] // Remove quotes
+						if impPath == pkg.Path() {
+							imports[pkg.Path()] = imp
+							break
+						}
+					}
+				}
+			}
+		}
+		return true
+	})
 }
