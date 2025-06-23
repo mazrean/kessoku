@@ -11,6 +11,11 @@ import (
 	"golang.org/x/tools/imports"
 )
 
+const (
+	// maxInjectorReturnValues represents the maximum number of return values for an injector function
+	maxInjectorReturnValues = 2
+)
+
 func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Injector) error {
 	astFile := &ast.File{
 		Name: &ast.Ident{
@@ -78,7 +83,7 @@ func generateInjectorDecl(injector *Injector) ast.Decl {
 		})
 	}
 
-	resultFields := make([]*ast.Field, 0, 2)
+	resultFields := make([]*ast.Field, 0, maxInjectorReturnValues)
 	resultFields = append(resultFields, &ast.Field{
 		Type: injector.Return.Return.ASTTypeExpr,
 	})
@@ -156,7 +161,7 @@ func generateInjectorDecl(injector *Injector) ast.Decl {
 		}
 	}
 
-	returns := make([]ast.Expr, 0, 2)
+	returns := make([]ast.Expr, 0, maxInjectorReturnValues)
 	returns = append(returns, ast.NewIdent(injector.Return.Param.Name()))
 	if injector.IsReturnError {
 		returns = append(returns, ast.NewIdent("nil"))
