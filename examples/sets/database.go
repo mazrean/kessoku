@@ -9,22 +9,15 @@ type Database struct {
 
 // NewDatabase creates a new database connection
 func NewDatabase(config *Config) (*Database, error) {
-	connectionString := fmt.Sprintf(
-		"host=%s port=%s dbname=%s user=%s password=%s",
-		config.Database.Host,
-		config.Database.Port,
-		config.Database.Database,
-		config.Database.Username,
-		config.Database.Password,
+	connectionString := fmt.Sprintf("postgres://%s:%s@%s:%s/%s",
+		config.Username,
+		config.Password,
+		config.Host,
+		config.Port,
+		config.DatabaseName,
 	)
 
 	return &Database{
 		connectionString: connectionString,
 	}, nil
-}
-
-// Close closes the database connection
-func (db *Database) Close() error {
-	fmt.Println("Database connection closed")
-	return nil
 }

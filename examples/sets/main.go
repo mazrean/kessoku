@@ -7,63 +7,57 @@ import (
 )
 
 func main() {
-	// Example 1: Initialize using basic inline Set
-	fmt.Println("=== Example 1: Inline Set ===")
-	app1, err := InitializeApp()
-	if err != nil {
-		log.Fatal(err)
-	}
-	app1.Run()
-
+	fmt.Println("kessoku.Set Examples")
+	fmt.Println("====================")
 	fmt.Println()
 
-	// Example 2: Initialize using Set variables
-	fmt.Println("=== Example 2: Set Variables ===")
-	app2, err := InitializeAppWithSets()
+	// Example 1: Basic usage without Sets (for comparison)
+	fmt.Println("1. Basic usage (without Sets):")
+	app1, err := InitializeAppBasic()
 	if err != nil {
 		log.Fatal(err)
 	}
-	app2.Run()
-
+	fmt.Printf("   ✓ App initialized with database: %s\n", app1.service.db.connectionString)
 	fmt.Println()
 
-	// Example 3: Initialize just a service
-	fmt.Println("=== Example 3: Service Only ===")
-	userService, err := InitializeUserService()
+	// Example 2: Using inline Set
+	fmt.Println("2. Using inline kessoku.Set:")
+	_, err = InitializeAppWithInlineSet()
 	if err != nil {
 		log.Fatal(err)
 	}
-	user, _ := userService.GetUser("123")
-	fmt.Printf("Retrieved user: %+v\n", user)
-
+	fmt.Printf("   ✓ App initialized with grouped providers\n")
 	fmt.Println()
 
-	// Example 4: Initialize using nested Sets
-	fmt.Println("=== Example 4: Nested Sets ===")
-	app4, err := InitializeAppWithNestedSets()
+	// Example 3: Using Set variable
+	fmt.Println("3. Using Set variable for reusability:")
+	_, err = InitializeAppWithSetVariable()
 	if err != nil {
 		log.Fatal(err)
 	}
-	app4.Run()
+	fmt.Printf("   ✓ App initialized using DatabaseSet variable\n")
+	fmt.Println()
+
+	// Example 4: Nested Sets
+	fmt.Println("4. Using nested Sets:")
+	_, err = InitializeAppWithNestedSets()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("   ✓ App initialized using ServiceSet (which includes DatabaseSet)\n")
+	fmt.Println()
+
+	fmt.Println("All examples completed successfully!")
 }
 
 // App represents the main application
 type App struct {
-	server  *Server
 	service *UserService
 }
 
-// Run starts the application
-func (a *App) Run() {
-	fmt.Printf("Starting application with server on %s\n", a.server.config.Port)
-	fmt.Printf("User service connected to database: %s\n", a.service.db.connectionString)
-	fmt.Println("Application running successfully!")
-}
-
 // NewApp creates a new application instance
-func NewApp(server *Server, service *UserService) *App {
+func NewApp(service *UserService) *App {
 	return &App{
-		server:  server,
 		service: service,
 	}
 }

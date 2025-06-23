@@ -4,49 +4,47 @@ package main
 
 import "github.com/mazrean/kessoku"
 
-func InitializeApp() (*App, error) {
-	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1 := kessoku.Provide(NewServer).Fn()(v0)
-	v2, err := kessoku.Provide(NewDatabase).Fn()(v0)
-	if err != nil {
-		var zero *App
-		return zero, err
-	}
-	v3 := kessoku.Provide(NewUserService).Fn()(v2)
-	v4 := kessoku.Provide(NewApp).Fn()(v1, v3)
-	return v4, nil
-}
-func InitializeAppWithSets() (*App, error) {
-	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1 := kessoku.Provide(NewServer).Fn()(v0)
-	v2, err := kessoku.Provide(NewDatabase).Fn()(v0)
-	if err != nil {
-		var zero *App
-		return zero, err
-	}
-	v3 := kessoku.Provide(NewUserService).Fn()(v2)
-	v4 := kessoku.Provide(NewApp).Fn()(v1, v3)
-	return v4, nil
-}
-func InitializeUserService() (*UserService, error) {
+func InitializeAppBasic() (*App, error) {
 	v0 := kessoku.Provide(NewConfig).Fn()()
 	v1, err := kessoku.Provide(NewDatabase).Fn()(v0)
 	if err != nil {
-		var zero *UserService
+		var zero *App
 		return zero, err
 	}
 	v2 := kessoku.Provide(NewUserService).Fn()(v1)
-	return v2, nil
+	v3 := kessoku.Provide(NewApp).Fn()(v2)
+	return v3, nil
 }
-func InitializeAppWithNestedSets() (*App, error) {
+func InitializeAppWithInlineSet() (*App, error) {
 	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1 := kessoku.Provide(NewServer).Fn()(v0)
-	v2, err := kessoku.Provide(NewDatabase).Fn()(v0)
+	v1, err := kessoku.Provide(NewDatabase).Fn()(v0)
 	if err != nil {
 		var zero *App
 		return zero, err
 	}
-	v3 := kessoku.Provide(NewUserService).Fn()(v2)
-	v4 := kessoku.Provide(NewApp).Fn()(v1, v3)
-	return v4, nil
+	v2 := kessoku.Provide(NewUserService).Fn()(v1)
+	v3 := kessoku.Provide(NewApp).Fn()(v2)
+	return v3, nil
+}
+func InitializeAppWithSetVariable() (*App, error) {
+	v0 := kessoku.Provide(NewConfig).Fn()()
+	v1, err := kessoku.Provide(NewDatabase).Fn()(v0)
+	if err != nil {
+		var zero *App
+		return zero, err
+	}
+	v2 := kessoku.Provide(NewUserService).Fn()(v1)
+	v3 := kessoku.Provide(NewApp).Fn()(v2)
+	return v3, nil
+}
+func InitializeAppWithNestedSets() (*App, error) {
+	v0 := kessoku.Provide(NewConfig).Fn()()
+	v1, err := kessoku.Provide(NewDatabase).Fn()(v0)
+	if err != nil {
+		var zero *App
+		return zero, err
+	}
+	v2 := kessoku.Provide(NewUserService).Fn()(v1)
+	v3 := kessoku.Provide(NewApp).Fn()(v2)
+	return v3, nil
 }
