@@ -19,8 +19,8 @@ var (
 
 type Config struct {
 	LogLevel string           `kong:"short='l',help='Log level',enum='debug,info,warn,error',default='info'"`
-	Version  kong.VersionFlag `kong:"short='v',help='Show version and exit.'"`
 	Files    []string         `kong:"arg,help='Go files to process'"`
+	Version  kong.VersionFlag `kong:"short='v',help='Show version and exit.'"`
 }
 
 func (c *Config) Run() error {

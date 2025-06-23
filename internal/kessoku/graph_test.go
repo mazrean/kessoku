@@ -11,29 +11,29 @@ func createTestTypes() (configType, serviceType, intType types.Type) {
 		types.NewStruct(nil, nil),
 		nil,
 	))
-	
+
 	serviceType = types.NewPointer(types.NewNamed(
 		types.NewTypeName(0, types.NewPackage("test", "test"), "Service", nil),
 		types.NewStruct(nil, nil),
 		nil,
 	))
-	
+
 	intType = types.Typ[types.Int]
-	
+
 	return configType, serviceType, intType
 }
 
 func TestNewGraph(t *testing.T) {
 	t.Parallel()
-	
+
 	configType, serviceType, intType := createTestTypes()
-	
+
 	tests := []struct {
-		name            string
-		build           *BuildDirective
-		expectError     bool
-		expectedName    string
-		errorContains   string
+		build         *BuildDirective
+		name          string
+		expectedName  string
+		errorContains string
+		expectError   bool
 	}{
 		{
 			name: "basic dependency graph",
@@ -111,9 +111,9 @@ func TestNewGraph(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			graph, err := NewGraph(tt.build)
-			
+
 			if tt.expectError {
 				if err == nil {
 					t.Fatal("Expected NewGraph to fail")
@@ -123,19 +123,19 @@ func TestNewGraph(t *testing.T) {
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Fatalf("NewGraph failed: %v", err)
 			}
-			
+
 			if graph == nil {
 				t.Fatal("Expected graph to be created")
 			}
-			
+
 			if graph.injectorName != tt.expectedName {
 				t.Errorf("Expected injector name %q, got %q", tt.expectedName, graph.injectorName)
 			}
-			
+
 			if graph.returnValue == nil {
 				t.Fatal("Expected return value to be set")
 			}
@@ -145,28 +145,28 @@ func TestNewGraph(t *testing.T) {
 
 func TestGraphBuild(t *testing.T) {
 	t.Parallel()
-	
+
 	configType, serviceType, _ := createTestTypes()
-	
+
 	tests := []struct {
-		name             string
-		graph            *Graph
-		expectedName     string
-		expectedStmts    int
-		expectError      bool
+		name          string
+		graph         *Graph
+		expectedName  string
+		expectedStmts int
+		expectError   bool
 	}{
 		{
-			name: "basic injector build",
-			expectedName: "InitializeService",
+			name:          "basic injector build",
+			expectedName:  "InitializeService",
 			expectedStmts: 2,
-			expectError: false,
+			expectError:   false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			// Create a test graph
 			build := &BuildDirective{
 				InjectorName: tt.expectedName,
@@ -189,37 +189,37 @@ func TestGraphBuild(t *testing.T) {
 					},
 				},
 			}
-			
+
 			graph, err := NewGraph(build)
 			if err != nil {
 				t.Fatalf("Failed to create graph: %v", err)
 			}
-			
+
 			injector, err := graph.Build()
-			
+
 			if tt.expectError {
 				if err == nil {
 					t.Fatal("Expected Build to fail")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Fatalf("Build failed: %v", err)
 			}
-			
+
 			if injector == nil {
 				t.Fatal("Expected injector to be created")
 			}
-			
+
 			if injector.Name != tt.expectedName {
 				t.Errorf("Expected injector name %q, got %q", tt.expectedName, injector.Name)
 			}
-			
+
 			if len(injector.Stmts) != tt.expectedStmts {
 				t.Errorf("Expected %d statements, got %d", tt.expectedStmts, len(injector.Stmts))
 			}
-			
+
 			if injector.Return == nil {
 				t.Fatal("Expected injector to have return")
 			}
@@ -229,9 +229,9 @@ func TestGraphBuild(t *testing.T) {
 
 func TestCreateInjector(t *testing.T) {
 	t.Parallel()
-	
+
 	configType, serviceType, _ := createTestTypes()
-	
+
 	tests := []struct {
 		name         string
 		metadata     *MetaData
@@ -297,24 +297,24 @@ func TestCreateInjector(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			injector, err := CreateInjector(tt.metadata, tt.build)
-			
+
 			if tt.expectError {
 				if err == nil {
 					t.Fatal("Expected CreateInjector to fail")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Fatalf("CreateInjector failed: %v", err)
 			}
-			
+
 			if injector == nil {
 				t.Fatal("Expected injector to be created")
 			}
-			
+
 			if injector.Name != tt.expectedName {
 				t.Errorf("Expected injector name %q, got %q", tt.expectedName, injector.Name)
 			}
@@ -324,7 +324,7 @@ func TestCreateInjector(t *testing.T) {
 
 func TestNewGraphWithCircularDependency(t *testing.T) {
 	// Note: Current implementation doesn't have explicit cycle detection
-	// This test is skipped for now as cycle detection would require 
+	// This test is skipped for now as cycle detection would require
 	// more sophisticated graph analysis
 	t.Skip("Cycle detection not implemented yet")
 }

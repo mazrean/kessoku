@@ -26,9 +26,9 @@ func createTestAST() (serviceTypeExpr, intTypeExpr ast.Expr, configProviderExpr,
 	serviceTypeExpr = &ast.StarExpr{
 		X: &ast.Ident{Name: "Service"},
 	}
-	
+
 	intTypeExpr = &ast.Ident{Name: "int"}
-	
+
 	configProviderExpr = &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
 			X:   &ast.Ident{Name: "kessoku"},
@@ -38,7 +38,7 @@ func createTestAST() (serviceTypeExpr, intTypeExpr ast.Expr, configProviderExpr,
 			&ast.Ident{Name: "NewConfig"},
 		},
 	}
-	
+
 	serviceProviderExpr = &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
 			X:   &ast.Ident{Name: "kessoku"},
@@ -48,23 +48,23 @@ func createTestAST() (serviceTypeExpr, intTypeExpr ast.Expr, configProviderExpr,
 			&ast.Ident{Name: "NewService"},
 		},
 	}
-	
+
 	return
 }
 
 func TestGenerate(t *testing.T) {
 	t.Parallel()
-	
+
 	configType, serviceType, intType := createTestTypes()
 	serviceTypeExpr, intTypeExpr, configProviderExpr, serviceProviderExpr := createTestAST()
-	
+
 	tests := []struct {
-		name               string
-		metaData           *MetaData
-		injectors          []*Injector
-		expectedContains   []string
+		name                string
+		metaData            *MetaData
+		injectors           []*Injector
+		expectedContains    []string
 		expectedNotContains []string
-		shouldError        bool
+		shouldError         bool
 	}{
 		{
 			name:     "basic generation",
@@ -151,7 +151,7 @@ func TestGenerate(t *testing.T) {
 								p.Ref()
 								return p
 							}()},
-							Returns:   []*InjectorParam{NewInjectorParam("v0")},
+							Returns: []*InjectorParam{NewInjectorParam("v0")},
 						},
 					},
 					Return: &InjectorReturn{
@@ -314,30 +314,30 @@ func TestGenerate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			var buf bytes.Buffer
 			err := Generate(&buf, "test.go", tt.metaData, tt.injectors)
-			
+
 			if tt.shouldError {
 				if err == nil {
 					t.Fatal("Expected Generate to fail")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Fatalf("Generate failed: %v", err)
 			}
-			
+
 			generated := buf.String()
-			
+
 			// Check expected content
 			for _, expected := range tt.expectedContains {
 				if !strings.Contains(generated, expected) {
 					t.Errorf("Expected generated code to contain %q, got:\n%s", expected, generated)
 				}
 			}
-			
+
 			// Check content that should not be present
 			for _, notExpected := range tt.expectedNotContains {
 				if strings.Contains(generated, notExpected) {

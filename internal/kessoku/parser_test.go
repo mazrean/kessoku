@@ -1,15 +1,15 @@
 package kessoku
 
 import (
+	"go/types"
 	"os"
 	"path/filepath"
 	"testing"
-	"go/types"
 )
 
 func TestNewParser(t *testing.T) {
 	t.Parallel()
-	
+
 	tests := []struct {
 		name string
 	}{
@@ -22,15 +22,15 @@ func TestNewParser(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			parser := NewParser()
-			
+
 			if parser == nil {
 				t.Fatal("Expected parser to be created")
 			}
-			
+
 			if parser.fset == nil {
 				t.Error("Expected file set to be initialized")
 			}
-			
+
 			if parser.packages == nil {
 				t.Error("Expected packages map to be initialized")
 			}
@@ -40,17 +40,17 @@ func TestNewParser(t *testing.T) {
 
 func TestParseFile(t *testing.T) {
 	t.Parallel()
-	
+
 	tests := []struct {
-		name                string
-		content             string
-		expectedBuilds      int
-		expectedProviders   int
-		expectedArgs        int
+		content              string
 		expectedInjectorName string
 		expectedProviderType string
-		shouldError         bool
-		errorContains       string
+		errorContains        string
+		name                 string
+		expectedBuilds       int
+		expectedProviders    int
+		expectedArgs         int
+		shouldError          bool
 	}{
 		{
 			name: "valid kessoku code",
@@ -210,17 +210,17 @@ func invalid syntax here {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			tempDir := t.TempDir()
 			testFile := filepath.Join(tempDir, "test.go")
-			
+
 			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
 				t.Fatalf("Failed to write test file: %v", err)
 			}
-			
+
 			parser := NewParser()
 			metadata, builds, err := parser.ParseFile(testFile)
-			
+
 			if tt.shouldError {
 				if err == nil {
 					t.Fatal("Expected ParseFile to fail")
@@ -230,11 +230,11 @@ func invalid syntax here {
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Fatalf("ParseFile failed: %v", err)
 			}
-			
+
 			if tt.expectedBuilds == 0 {
 				if metadata != nil {
 					t.Error("Expected metadata to be nil")
@@ -244,32 +244,32 @@ func invalid syntax here {
 				}
 				return
 			}
-			
+
 			if metadata == nil {
 				t.Fatal("Expected metadata to be returned")
 			}
-			
+
 			if len(builds) != tt.expectedBuilds {
 				t.Fatalf("Expected %d build directives, got %d", tt.expectedBuilds, len(builds))
 			}
-			
+
 			build := builds[0]
 			if build.InjectorName != tt.expectedInjectorName {
 				t.Errorf("Expected injector name %q, got %q", tt.expectedInjectorName, build.InjectorName)
 			}
-			
+
 			if len(build.Providers) != tt.expectedProviders {
 				t.Errorf("Expected %d providers, got %d", tt.expectedProviders, len(build.Providers))
 			}
-			
+
 			if len(build.Arguments) != tt.expectedArgs {
 				t.Errorf("Expected %d arguments, got %d", tt.expectedArgs, len(build.Arguments))
 			}
-			
+
 			if build.Return == nil {
 				t.Fatal("Expected return type to be set")
 			}
-			
+
 			// Check specific provider type if specified
 			if tt.expectedProviderType != "" {
 				var foundProvider *ProviderSpec
@@ -282,23 +282,23 @@ func invalid syntax here {
 						}
 					}
 				}
-				
+
 				if foundProvider == nil {
 					t.Errorf("Expected to find provider for type %q", tt.expectedProviderType)
 				}
 			}
-			
+
 			// Check argument type for arg test
 			if tt.expectedArgs > 0 {
 				arg := build.Arguments[0]
 				if arg.Name != "value" {
 					t.Errorf("Expected argument name 'value', got %q", arg.Name)
 				}
-				
+
 				if arg.Type == nil {
 					t.Fatal("Expected argument type to be set")
 				}
-				
+
 				if !types.Identical(arg.Type, types.Typ[types.Int]) {
 					t.Errorf("Expected argument type to be int, got %v", arg.Type)
 				}

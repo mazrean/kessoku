@@ -6,12 +6,12 @@ import (
 
 func TestInjectorParam(t *testing.T) {
 	t.Parallel()
-	
+
 	tests := []struct {
-		name         string
 		paramName    string
-		refCount     int
 		expectedName string
+		name         string
+		refCount     int
 	}{
 		{
 			name:         "unreferenced parameter",
@@ -37,17 +37,17 @@ func TestInjectorParam(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			param := NewInjectorParam(tt.paramName)
-			
+
 			// Verify ID is unique
 			if param.ID == 0 && injectorParamIDCounter > 1 {
 				t.Error("Expected unique ID to be assigned")
 			}
-			
+
 			// Add references
 			for i := 0; i < tt.refCount; i++ {
 				param.Ref()
 			}
-			
+
 			if got := param.Name(); got != tt.expectedName {
 				t.Errorf("Name() = %v, want %v", got, tt.expectedName)
 			}
@@ -57,12 +57,12 @@ func TestInjectorParam(t *testing.T) {
 
 func TestInjectorParamIDCounter(t *testing.T) {
 	// Note: Cannot be parallel because it tests global counter state
-	
+
 	tests := []struct {
-		name               string
-		numParams          int
-		expectUnique       bool
-		expectSequential   bool
+		name             string
+		numParams        int
+		expectUnique     bool
+		expectSequential bool
 	}{
 		{
 			name:             "create two parameters",
@@ -83,12 +83,12 @@ func TestInjectorParamIDCounter(t *testing.T) {
 			// Cannot be parallel because it modifies global counter
 			initialCounter := injectorParamIDCounter
 			var params []*InjectorParam
-			
+
 			for i := 0; i < tt.numParams; i++ {
 				param := NewInjectorParam("test")
 				params = append(params, param)
 			}
-			
+
 			if tt.expectUnique {
 				// Check all IDs are unique
 				seen := make(map[uint64]bool)
@@ -99,7 +99,7 @@ func TestInjectorParamIDCounter(t *testing.T) {
 					seen[param.ID] = true
 				}
 			}
-			
+
 			if tt.expectSequential && len(params) > 1 {
 				// Check IDs are sequential
 				for i := 1; i < len(params); i++ {
@@ -108,7 +108,7 @@ func TestInjectorParamIDCounter(t *testing.T) {
 					}
 				}
 			}
-			
+
 			expectedCounterIncrease := uint64(tt.numParams)
 			if injectorParamIDCounter != initialCounter+expectedCounterIncrease {
 				t.Errorf("Expected counter to increment by %d, got %d", expectedCounterIncrease, injectorParamIDCounter-initialCounter)
@@ -119,7 +119,7 @@ func TestInjectorParamIDCounter(t *testing.T) {
 
 func TestProviderType(t *testing.T) {
 	t.Parallel()
-	
+
 	tests := []struct {
 		name         string
 		providerType ProviderType

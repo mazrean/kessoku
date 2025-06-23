@@ -21,18 +21,18 @@ const (
 
 // Argument represents a function argument.
 type Argument struct {
-	Name        string
 	Type        types.Type
 	ASTTypeExpr ast.Expr
+	Name        string
 }
 
 // ProviderSpec represents a provider specification from annotations.
 type ProviderSpec struct {
+	ASTExpr       ast.Expr
 	Type          ProviderType
 	Provides      []types.Type
 	Requires      []types.Type
 	IsReturnError bool
-	ASTExpr       ast.Expr // The full AST expression from Inject call
 }
 
 type Return struct {
@@ -54,8 +54,8 @@ type BuildDirective struct {
 }
 
 type InjectorParam struct {
-	ID         uint64
 	name       string
+	ID         uint64
 	refCounter int
 }
 
@@ -99,10 +99,10 @@ type InjectorStmt struct {
 }
 
 type Injector struct {
+	Return        *InjectorReturn
 	Name          string
 	Params        []*InjectorParam
 	Args          []*InjectorArgument
 	Stmts         []*InjectorStmt
-	Return        *InjectorReturn
 	IsReturnError bool
 }

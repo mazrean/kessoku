@@ -27,10 +27,10 @@ func CreateInjector(metaData *MetaData, build *BuildDirective) (*Injector, error
 }
 
 type node struct {
-	requireCount int
 	arg          *Argument
 	providerSpec *ProviderSpec
 	providerArgs []*InjectorParam
+	requireCount int
 }
 
 type edgeNode struct {
@@ -45,12 +45,12 @@ type returnVal struct {
 }
 
 type Graph struct {
-	injectorName string
 	returnType     *Return
 	returnValue    *returnVal
 	waitNodes      *collection.Queue[*node]
 	waitNodesAdded map[*node]bool
 	edges          map[*node][]*edgeNode
+	injectorName   string
 }
 
 func NewGraph(build *BuildDirective) (*Graph, error) {
@@ -144,12 +144,12 @@ func NewGraph(build *BuildDirective) (*Graph, error) {
 			continue
 		}
 		visited[n1] = true
-		
+
 		// Skip argument nodes - they don't have dependencies to process
 		if n1.providerSpec == nil {
 			continue
 		}
-		
+
 		for i, t := range n1.providerSpec.Requires {
 			key := t.String()
 			var (
