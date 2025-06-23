@@ -50,5 +50,8 @@ func (a *App) handleGetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Fprintf(w, "User: %+v\n", user)
+	if _, err := fmt.Fprintf(w, "User: %+v\n", user); err != nil {
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
+		return
+	}
 }

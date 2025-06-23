@@ -28,7 +28,11 @@ func (s *UserService) GetUser(id int) (*User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query user: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			s.logger.Error("Failed to close rows", "error", closeErr)
+		}
+	}()
 
 	if !rows.Next() {
 		return nil, fmt.Errorf("user not found")
@@ -44,9 +48,9 @@ func (s *UserService) GetUser(id int) (*User, error) {
 
 // User represents a user entity.
 type User struct {
-	ID    int    `json:"id"`
 	Name  string `json:"name"`
 	Email string `json:"email"`
+	ID    int    `json:"id"`
 }
 
 // NewLogger creates a new logger instance.

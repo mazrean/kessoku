@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
@@ -28,5 +29,5 @@ func (db *Database) Close() error {
 
 // Query executes a query.
 func (db *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
-	return db.conn.Query(query, args...)
+	return db.conn.QueryContext(context.Background(), query, args...)
 }
