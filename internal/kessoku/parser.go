@@ -266,6 +266,29 @@ func (p *Parser) parseProviderArgument(typeInfo *types.Info, kessokuPackageScope
 		return fmt.Errorf("get type of argument")
 	}
 
+	// Check if this is a Set call first
+	if callExpr, ok := arg.(*ast.CallExpr); ok {
+		if selExpr, ok := callExpr.Fun.(*ast.SelectorExpr); ok {
+			if ident, ok := selExpr.X.(*ast.Ident); ok {
+				if obj := typeInfo.ObjectOf(ident); obj != nil {
+					if pkgName, ok := obj.(*types.PkgName); ok && pkgName.Imported().Path() == kessokuPackage {
+						if selExpr.Sel.Name == "Set" {
+							// This is a kessoku.Set(...) call, parse its arguments as providers
+							for _, setArg := range callExpr.Args {
+								if err := p.parseProviderArgument(typeInfo, kessokuPackageScope, setArg, build, imports, fileImports); err != nil {
+									return fmt.Errorf("parse Set provider argument: %w", err)
+								}
+							}
+							// Collect dependencies from the Set call expression
+							p.collectDependencies(arg, typeInfo, imports, fileImports)
+							return nil
+						}
+					}
+				}
+			}
+		}
+	}
+
 	methodSet := types.NewMethodSet(providerType)
 	for method := range methodSet.Methods() {
 		if method == nil {
