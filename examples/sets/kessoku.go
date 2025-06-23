@@ -54,7 +54,7 @@ var _ = kessoku.Inject[*UserService](
 	kessoku.Provide(NewUserService),
 )
 
-// Example 4: Nested Sets with complex organization
+// CoreInfrastructureSet demonstrates nested Sets with complex organization
 var CoreInfrastructureSet = kessoku.Set(
 	kessoku.Set( // Nested inline Set
 		kessoku.Provide(NewDatabase),
