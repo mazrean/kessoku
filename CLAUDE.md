@@ -35,6 +35,21 @@ go fmt ./...
 go run ./tools lint ./...
 ```
 
+### API Compatibility
+```bash
+# Check API compatibility against a previous version
+go run ./tools apicompat <base_version> [target_version]
+
+# Example: Check current changes against main branch
+go run ./tools apicompat main
+
+# Example: Check against a specific tag
+go run ./tools apicompat v1.0.0
+
+# Use the helper script
+./scripts/check-api-compat.sh v1.0.0
+```
+
 ### Release Management
 ```bash
 # Create a snapshot release (local testing)
@@ -49,7 +64,7 @@ go tool goreleaser release --clean
 
 ### Module Structure
 - **Main module**: `github.com/mazrean/kessoku` (Go 1.24)
-- **Tools module**: `./tools` - Contains custom linting analyzers
+- **Tools module**: `./tools` - Contains custom linting analyzers and API compatibility checker
 - **Go workspace**: Uses go.work with main module and tools
 
 ### Code Organization
