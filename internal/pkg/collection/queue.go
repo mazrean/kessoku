@@ -29,13 +29,13 @@ func (q *Queue[T]) Pop() T {
 }
 
 func (q *Queue[T]) Peek() T {
-	e := q.data.Front().Value
+	e := q.data.Front()
 	if e == nil {
 		var zero T
 		return zero
 	}
 
-	return e.(T)
+	return e.Value.(T)
 }
 
 func (q *Queue[T]) Len() int {
