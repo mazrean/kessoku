@@ -83,7 +83,7 @@ func (p *Parser) ParseFile(filename string) (*MetaData, []*BuildDirective, error
 		return nil, nil, fmt.Errorf("target file not found in package syntax")
 	}
 
-	builds, err := p.findInjectDirectives(targetFile, pkg.TypesInfo, kessokuPackageScope, metaData.Imports, astFile.Imports)
+	builds, err := p.findInjectDirectives(targetFile, pkg.TypesInfo, kessokuPackageScope, metaData.Imports, astFile.Imports, pkg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("find inject directives: %w", err)
 	}
@@ -137,7 +137,7 @@ func (p *Parser) initializePackages(filename string) (*packages.Package, error) 
 }
 
 // FindInjectDirectives finds all kessoku.Inject calls in the AST.
-func (p *Parser) findInjectDirectives(file *ast.File, typeInfo *types.Info, kessokuPackageScope *types.Scope, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec) ([]*BuildDirective, error) {
+func (p *Parser) findInjectDirectives(file *ast.File, typeInfo *types.Info, kessokuPackageScope *types.Scope, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, pkg *packages.Package) ([]*BuildDirective, error) {
 	injectorObj := kessokuPackageScope.Lookup("Inject")
 	if injectorObj == nil || injectorObj.Type() == nil {
 		slog.Warn("kessoku package is imported, but kessoku.Inject function is not found")
@@ -189,7 +189,7 @@ func (p *Parser) findInjectDirectives(file *ast.File, typeInfo *types.Info, kess
 			return true
 		}
 
-		build, err := p.parseInjectCall(typeInfo, kessokuPackageScope, callExpr, imports, fileImports)
+		build, err := p.parseInjectCall(typeInfo, kessokuPackageScope, callExpr, imports, fileImports, pkg)
 		if err != nil {
 			slog.Warn("parseInjectCall failed", "callExpr", callExpr, "error", err)
 			return true
@@ -203,7 +203,7 @@ func (p *Parser) findInjectDirectives(file *ast.File, typeInfo *types.Info, kess
 }
 
 // parseInjectCall parses a kessoku.Inject call expression.
-func (p *Parser) parseInjectCall(typeInfo *types.Info, kessokuPackageScope *types.Scope, call *ast.CallExpr, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec) (*BuildDirective, error) {
+func (p *Parser) parseInjectCall(typeInfo *types.Info, kessokuPackageScope *types.Scope, call *ast.CallExpr, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, pkg *packages.Package) (*BuildDirective, error) {
 	build := &BuildDirective{
 		Providers: make([]*ProviderSpec, 0),
 	}
@@ -251,7 +251,7 @@ func (p *Parser) parseInjectCall(typeInfo *types.Info, kessokuPackageScope *type
 
 	// Parse provider arguments (starting from index 1)
 	for _, arg := range call.Args[1:] {
-		if err := p.parseProviderArgument(typeInfo, kessokuPackageScope, arg, build, imports, fileImports); err != nil {
+		if err := p.parseProviderArgument(typeInfo, kessokuPackageScope, arg, build, imports, fileImports, pkg); err != nil {
 			return nil, fmt.Errorf("parse provider argument: %w", err)
 		}
 	}
@@ -260,13 +260,13 @@ func (p *Parser) parseInjectCall(typeInfo *types.Info, kessokuPackageScope *type
 }
 
 // parseProviderArgument parses a provider argument in kessoku.Inject call.
-func (p *Parser) parseProviderArgument(typeInfo *types.Info, kessokuPackageScope *types.Scope, arg ast.Expr, build *BuildDirective, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec) error {
+func (p *Parser) parseProviderArgument(typeInfo *types.Info, kessokuPackageScope *types.Scope, arg ast.Expr, build *BuildDirective, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, pkg *packages.Package) error {
 	providerType := typeInfo.TypeOf(arg)
 	if providerType == nil {
 		return fmt.Errorf("get type of argument")
 	}
 
-	// Check if this is a Set call first
+	// Check if this is a Set call or Set variable first
 	if callExpr, ok := arg.(*ast.CallExpr); ok {
 		if selExpr, ok := callExpr.Fun.(*ast.SelectorExpr); ok {
 			if ident, ok := selExpr.X.(*ast.Ident); ok {
@@ -275,7 +275,7 @@ func (p *Parser) parseProviderArgument(typeInfo *types.Info, kessokuPackageScope
 						if selExpr.Sel.Name == "Set" {
 							// This is a kessoku.Set(...) call, parse its arguments as providers
 							for _, setArg := range callExpr.Args {
-								if err := p.parseProviderArgument(typeInfo, kessokuPackageScope, setArg, build, imports, fileImports); err != nil {
+								if err := p.parseProviderArgument(typeInfo, kessokuPackageScope, setArg, build, imports, fileImports, pkg); err != nil {
 									return fmt.Errorf("parse Set provider argument: %w", err)
 								}
 							}
@@ -287,6 +287,11 @@ func (p *Parser) parseProviderArgument(typeInfo *types.Info, kessokuPackageScope
 				}
 			}
 		}
+	}
+
+	// Check if this is a variable/identifier of set type
+	if err := p.parseSetVariable(typeInfo, kessokuPackageScope, arg, build, imports, fileImports, pkg); err == nil {
+		return nil
 	}
 
 	methodSet := types.NewMethodSet(providerType)
@@ -407,6 +412,146 @@ func (p *Parser) parseProviderArgument(typeInfo *types.Info, kessokuPackageScope
 	p.collectDependencies(argTypeExpr, typeInfo, imports, fileImports)
 
 	return nil
+}
+
+// parseSetVariable handles variables of set type (including cross-package variables)
+func (p *Parser) parseSetVariable(typeInfo *types.Info, kessokuPackageScope *types.Scope, arg ast.Expr, build *BuildDirective, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, pkg *packages.Package) error {
+	var obj types.Object
+	var objName string
+
+	// Handle different types of expressions
+	switch expr := arg.(type) {
+	case *ast.Ident:
+		// Local variable: mySet
+		obj = typeInfo.ObjectOf(expr)
+		objName = expr.Name
+	case *ast.SelectorExpr:
+		// Cross-package variable: providers.DatabaseSet
+		if ident, ok := expr.X.(*ast.Ident); ok {
+			if pkgObj := typeInfo.ObjectOf(ident); pkgObj != nil {
+				if pkgName, ok := pkgObj.(*types.PkgName); ok {
+					// Look up the selector in the imported package
+					if scope := pkgName.Imported().Scope(); scope != nil {
+						obj = scope.Lookup(expr.Sel.Name)
+						objName = expr.Sel.Name
+					}
+				}
+			}
+		}
+	default:
+		return fmt.Errorf("unsupported set variable expression type")
+	}
+
+	if obj == nil {
+		return fmt.Errorf("cannot resolve variable")
+	}
+
+	// Check if the object's type is 'set'
+	objType := obj.Type()
+	if objType == nil {
+		return fmt.Errorf("cannot get variable type")
+	}
+
+	// Check if this is a set type from kessoku package
+	if named, ok := objType.(*types.Named); ok {
+		if named.Obj().Name() == "set" && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == kessokuPackage {
+			// This is a set variable, try to find its initialization
+			if err := p.findAndParseSetInitialization(typeInfo, kessokuPackageScope, obj, objName, build, imports, fileImports, pkg); err != nil {
+				slog.Warn("failed to parse set variable initialization", "error", err, "variable", objName)
+				// Even if we can't parse the initialization, we should collect dependencies from the expression
+				p.collectDependencies(arg, typeInfo, imports, fileImports)
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("not a set type variable")
+}
+
+// findAndParseSetInitialization finds the initialization expression of a set variable and parses it
+func (p *Parser) findAndParseSetInitialization(typeInfo *types.Info, kessokuPackageScope *types.Scope, obj types.Object, objName string, build *BuildDirective, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, pkg *packages.Package) error {
+	// If it's a variable, try to find its declaration and initialization
+	if varObj, ok := obj.(*types.Var); ok {
+		// For cross-package variables, we need to look in the package's syntax trees
+		if varPkg := varObj.Pkg(); varPkg != nil && varPkg != pkg.Types {
+			// Try to find the initialization expression in the package's AST
+			if err := p.findSetInitInPackage(typeInfo, kessokuPackageScope, varPkg, objName, build, imports, fileImports, pkg); err == nil {
+				return nil
+			}
+		}
+
+		// For local variables or variables in the same package, search in the available syntax trees
+		return p.findSetInitInCurrentPackage(typeInfo, kessokuPackageScope, objName, build, imports, fileImports, pkg)
+	}
+
+	return fmt.Errorf("unsupported object type for set variable")
+}
+
+// findSetInitInPackage searches for set initialization in a specific package
+func (p *Parser) findSetInitInPackage(typeInfo *types.Info, kessokuPackageScope *types.Scope, targetPkg *types.Package, objName string, build *BuildDirective, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, currentPkg *packages.Package) error {
+	// For cross-package variables, we need to load the target package's AST
+	// This is complex and would require loading the package's source files
+	slog.Debug("found cross-package set variable", "package", targetPkg.Path(), "variable", objName)
+	return fmt.Errorf("cross-package set initialization parsing not fully implemented")
+}
+
+// findSetInitInCurrentPackage searches for set initialization in the current package's syntax trees
+func (p *Parser) findSetInitInCurrentPackage(typeInfo *types.Info, kessokuPackageScope *types.Scope, objName string, build *BuildDirective, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, pkg *packages.Package) error {
+	// Search through all syntax trees in the current package
+	for _, file := range pkg.Syntax {
+		if file == nil {
+			continue
+		}
+		
+		// Look for variable declarations in this file
+		for _, decl := range file.Decls {
+			if genDecl, ok := decl.(*ast.GenDecl); ok && genDecl.Tok == token.VAR {
+				for _, spec := range genDecl.Specs {
+					if valueSpec, ok := spec.(*ast.ValueSpec); ok {
+						// Check each variable name in this declaration
+						for i, name := range valueSpec.Names {
+							if name.Name == objName && i < len(valueSpec.Values) {
+								// Found the variable, parse its initialization expression
+								initExpr := valueSpec.Values[i]
+								return p.parseSetInitExpression(typeInfo, kessokuPackageScope, initExpr, build, imports, fileImports, pkg)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	slog.Debug("set variable not found in current package", "variable", objName)
+	return fmt.Errorf("set variable %s not found in current package", objName)
+}
+
+// parseSetInitExpression parses the initialization expression of a set variable
+func (p *Parser) parseSetInitExpression(typeInfo *types.Info, kessokuPackageScope *types.Scope, initExpr ast.Expr, build *BuildDirective, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, pkg *packages.Package) error {
+	// Check if the initialization expression is a kessoku.Set(...) call
+	if callExpr, ok := initExpr.(*ast.CallExpr); ok {
+		if selExpr, ok := callExpr.Fun.(*ast.SelectorExpr); ok {
+			if ident, ok := selExpr.X.(*ast.Ident); ok {
+				if obj := typeInfo.ObjectOf(ident); obj != nil {
+					if pkgName, ok := obj.(*types.PkgName); ok && pkgName.Imported().Path() == kessokuPackage {
+						if selExpr.Sel.Name == "Set" {
+							// This is a kessoku.Set(...) initialization, parse its arguments
+							for _, setArg := range callExpr.Args {
+								if err := p.parseProviderArgument(typeInfo, kessokuPackageScope, setArg, build, imports, fileImports, pkg); err != nil {
+									return fmt.Errorf("parse set initialization provider argument: %w", err)
+								}
+							}
+							// Collect dependencies from the Set initialization expression
+							p.collectDependencies(initExpr, typeInfo, imports, fileImports)
+							return nil
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	return fmt.Errorf("set variable initialization is not a kessoku.Set call")
 }
 
 // collectDependencies extracts package dependencies from an AST expression
