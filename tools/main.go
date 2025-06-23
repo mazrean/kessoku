@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"go/types"
 	"log"
@@ -190,21 +191,13 @@ func loadPackages(packagePath string) (*types.Package, error) {
 		return nil, fmt.Errorf("failed to load packages: %w", err)
 	}
 
-	if len(pkgs) == 0 {
-		return nil, fmt.Errorf("no packages found for %s", packagePath)
+	for _, pkg := range pkgs {
+		if pkg.PkgPath == packagePath {
+			return pkg.Types, nil
+		}
 	}
 
-	// Take the first package, which should be the main package
-	pkg := pkgs[0]
-	if pkg.Types == nil {
-		return nil, fmt.Errorf("no type information available for package %s", packagePath)
-	}
-
-	if len(pkg.Errors) > 0 {
-		return nil, fmt.Errorf("package has errors: %v", pkg.Errors)
-	}
-
-	return pkg.Types, nil
+	return nil, errors.New("not implemented")
 }
 
 func compareAPIs(basePackage, targetPackage *types.Package) error {
