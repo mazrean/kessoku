@@ -8,7 +8,7 @@ A dependency injection code generator for Go, similar to [google/wire](https://g
 - ✅ **Automatic dependency resolution** - Topological sorting of dependencies  
 - ✅ **Error handling** - Proper error propagation in generated code
 - ✅ **Cycle detection** - Prevents circular dependencies
-- ✅ **Wire compatibility** - Similar API to google/wire
+- ✅ **Go generate integration** - Works seamlessly with `go generate`
 - ✅ **Cross-platform support** (Linux, Windows, macOS)
 
 ## Installation
@@ -81,28 +81,36 @@ func NewApp(config *Config, service *UserService) *App {
 
 ### 2. Define Injector Function
 
+Create a file `kessoku.go` with injector declarations:
+
 ```go
+package main
+
+//go:generate go tool kessoku $GOFILE
+
+import "github.com/mazrean/kessoku"
+
 // InitializeApp creates the application with all dependencies.
-func InitializeApp() (*App, error) {
-    kessoku.Build(
-        NewConfig,
-        NewDatabase,
-        NewUserService,
-        NewApp,
-    )
-    return nil, nil // This will be replaced by generated code
-}
+var _ = kessoku.Inject[*App](
+    "InitializeApp",
+    kessoku.Provide(NewConfig),
+    kessoku.Provide(NewDatabase),
+    kessoku.Provide(NewUserService),
+    kessoku.Provide(NewApp),
+)
 ```
 
 ### 3. Generate Dependency Injection Code
 
 ```bash
-kessoku  # Generate code in current directory
-# or
-kessoku -d ./path/to/your/package
+# Using go generate (recommended)
+go generate ./...
+
+# Or run kessoku directly
+go tool kessoku kessoku.go
 ```
 
-This generates `*_gen.go` files with the actual dependency injection implementation.
+This generates `*_band.go` files with the actual dependency injection implementation.
 
 ### 4. Use the Generated Code
 
@@ -121,58 +129,47 @@ func main() {
 ## CLI Usage
 
 ```bash
-# Generate DI code in current directory
-kessoku
+# Generate DI code for specific files
+go tool kessoku kessoku.go
 
-# Generate DI code in specific directory
-kessoku -d ./path/to/package
+# Multiple files
+go tool kessoku file1.go file2.go
+
+# Using go generate (recommended)
+go generate ./...
 
 # Show version
-kessoku --version
+go tool kessoku --version
 ```
 
 ### Options
 
-- `-d, --dir` - Directory to process (defaults to current directory)
 - `-l, --log-level` - Log level (debug, info, warn, error)
-- `--version` - Show version information
+- `-v, --version` - Show version information
 
 ## API Reference
 
-### kessoku.Build
+### kessoku.Inject
 
-Declares the dependencies needed for an injector function:
+Declares an injector function with its dependencies:
 
 ```go
-func InitializeApp() (*App, error) {
-    kessoku.Build(
-        NewConfig,    // Provider functions
-        NewDatabase,
-        NewService,
-        NewApp,
-    )
-    return nil, nil
-}
+var _ = kessoku.Inject[*App](
+    "InitializeApp",       // Function name to generate
+    kessoku.Provide(NewConfig),    // Provider functions
+    kessoku.Provide(NewDatabase),
+    kessoku.Provide(NewService),
+    kessoku.Provide(NewApp),
+)
 ```
 
-### kessoku.NewSet
+### kessoku.Provide
 
-Groups related providers into a set:
+Wraps a provider function for dependency injection:
 
 ```go
-var DatabaseSet = kessoku.NewSet(
-    NewConfig,
-    NewDatabase,
-)
-
-func InitializeApp() (*App, error) {
-    kessoku.Build(
-        DatabaseSet,
-        NewService,
-        NewApp,
-    )
-    return nil, nil
-}
+kessoku.Provide(NewConfig)     // Provides *Config
+kessoku.Provide(NewDatabase)   // Provides *Database, error
 ```
 
 ### kessoku.Bind
@@ -180,7 +177,11 @@ func InitializeApp() (*App, error) {
 Binds an interface to its implementation:
 
 ```go
-var UserRepositoryBinding = kessoku.Bind(new(UserRepository), new(*userRepositoryImpl))
+var _ = kessoku.Inject[*App](
+    "InitializeApp",
+    kessoku.Bind[UserRepository](kessoku.Provide(NewUserRepositoryImpl)),
+    kessoku.Provide(NewApp),
+)
 ```
 
 ### kessoku.Value
@@ -188,7 +189,23 @@ var UserRepositoryBinding = kessoku.Bind(new(UserRepository), new(*userRepositor
 Provides a constant value:
 
 ```go
-var DatabaseURL = kessoku.Value("postgres://localhost/mydb")
+var _ = kessoku.Inject[*App](
+    "InitializeApp",
+    kessoku.Value("postgres://localhost/mydb"),  // Provides string
+    kessoku.Provide(NewApp),
+)
+```
+
+### kessoku.Arg
+
+Declares a runtime argument to be passed to the injector:
+
+```go
+var _ = kessoku.Inject[*App](
+    "InitializeApp",
+    kessoku.Arg[*Config]("config"),  // Runtime argument
+    kessoku.Provide(NewApp),
+)
 ```
 
 ## Examples
@@ -209,7 +226,7 @@ See the [examples/](./examples/) directory for complete working examples.
 go build -o bin/kessoku ./cmd/kessoku
 
 # Run directly
-go run ./cmd/kessoku -d ./examples/basic
+go run ./cmd/kessoku ./examples/basic/kessoku.go
 ```
 
 ### Testing
@@ -223,6 +240,9 @@ go fmt ./...
 
 # Run Go analyzer linter
 go run ./tools lint ./...
+
+# Test code generation
+go generate ./examples/...
 ```
 
 ### Releasing

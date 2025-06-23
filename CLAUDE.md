@@ -13,11 +13,11 @@ Kessoku is a dependency injection CLI tool and library for Go, similar to google
 # Build the binary
 go build -o bin/kessoku ./cmd/kessoku
 
-# Generate dependency injection code (current directory)
-go run ./cmd/kessoku
+# Generate dependency injection code using go generate
+go generate ./...
 
-# Generate dependency injection code for specific directory
-go run ./cmd/kessoku -d [directory]
+# Generate dependency injection code directly
+go tool kessoku [files...]
 ```
 
 ### Testing
@@ -54,14 +54,17 @@ go tool goreleaser release --clean
 
 ### Code Organization
 - `cmd/kessoku/main.go`: Entry point that calls `config.Run()`
-- `wire.go`: Public API (Build, NewSet, Bind, Value functions) - **Public package root**
-- `internal/config/config.go`: CLI configuration and wire generation orchestration
-- `internal/wire/`: Dependency injection implementation
-  - `parser.go`: AST parsing for provider functions and build directives
+- `annotation.go`: Public API (Inject, Provide, Bind, Value, Arg functions) - **Public package root**
+- `internal/config/config.go`: CLI configuration and kessoku generation orchestration
+- `internal/kessoku/`: Dependency injection implementation
+  - `parser.go`: AST parsing for kessoku.Inject calls and provider functions
   - `graph.go`: Dependency graph construction and cycle detection
   - `generator.go`: Code generation for injector functions
   - `processor.go`: File processing and orchestration
   - `provider.go`: Core data structures for providers and injectors
+  - `const.go`: Package constants
+- `internal/pkg/collection/`: Utility data structures
+  - `queue.go`: Queue implementation for graph traversal
 - `tools/main.go`: Custom multi-checker with comprehensive Go analyzers
 - `examples/`: Example applications demonstrating usage
 
@@ -69,6 +72,7 @@ go tool goreleaser release --clean
 - `github.com/alecthomas/kong`: CLI argument parsing
 - Standard library `log/slog`: Structured logging
 - Standard library `go/*`: AST parsing and type checking
+- `golang.org/x/tools/go/packages`: Package loading and type information
 
 ### Build Configuration
 - GoReleaser for cross-platform releases (Linux, Windows, macOS)
@@ -96,24 +100,26 @@ func NewDatabase(config *Config) (*Database, error) {
 }
 ```
 
-#### Injector Functions
-Use kessoku.Build to declare dependencies:
+#### Injector Declarations
+Use kessoku.Inject to declare dependencies:
 ```go
+package main
+
+//go:generate go tool kessoku $GOFILE
+
 import "github.com/mazrean/kessoku"
 
-func InitializeApp() (*App, error) {
-    kessoku.Build(
-        NewConfig,
-        NewDatabase,
-        NewUserService,
-        NewApp,
-    )
-    return nil, nil
-}
+var _ = kessoku.Inject[*App](
+    "InitializeApp",
+    kessoku.Provide(NewConfig),
+    kessoku.Provide(NewDatabase),
+    kessoku.Provide(NewUserService),
+    kessoku.Provide(NewApp),
+)
 ```
 
 #### Code Generation
-Run `kessoku` to generate `*_gen.go` files with dependency injection implementations.
+Run `go generate` or `go tool kessoku` to generate `*_band.go` files with dependency injection implementations.
 
 ## Development Guidelines
 
