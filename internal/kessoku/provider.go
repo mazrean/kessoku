@@ -8,8 +8,8 @@ import (
 )
 
 type MetaData struct {
+	Imports map[string]*ast.ImportSpec // Map from package path to import spec
 	Package string
-	Imports []*ast.ImportSpec
 }
 
 // ProviderType represents the type of provider.
