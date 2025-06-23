@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
+	"go/types"
 	"log"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 
 	"github.com/alingse/asasalint"
 	"github.com/breml/bidichk/pkg/bidichk"
@@ -23,6 +21,7 @@ import (
 	"github.com/timakin/bodyclose/passes/bodyclose"
 	gomnd "github.com/tommy-muehle/go-mnd/v2"
 	"github.com/uudashr/iface/unused"
+	"golang.org/x/exp/apidiff"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/multichecker"
 	"golang.org/x/tools/go/analysis/passes/assign"
@@ -56,6 +55,7 @@ import (
 	"golang.org/x/tools/go/analysis/passes/unreachable"
 	"golang.org/x/tools/go/analysis/passes/unsafeptr"
 	"golang.org/x/tools/go/analysis/passes/unusedresult"
+	"golang.org/x/tools/go/packages"
 	"honnef.co/go/tools/analysis/lint"
 	"honnef.co/go/tools/simple"
 	"honnef.co/go/tools/staticcheck"
@@ -77,7 +77,11 @@ func main() {
 			log.Fatalf("Failed to run lint: %v", err)
 		}
 	case "apicompat":
-		if err := runAPICompat(); err != nil {
+		if len(os.Args) < 3 {
+			log.Fatalf("usage: apicompat <base_package_path> <target_package_path>")
+		}
+
+		if err := runAPICompat(os.Args[1], os.Args[2]); err != nil {
 			log.Fatalf("Failed to run API compatibility check: %v", err)
 		}
 	default:
@@ -160,86 +164,55 @@ func runLint() error {
 }
 
 // runAPICompat runs API compatibility checks between the current version and a base version
-func runAPICompat() error {
-	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: apicompat <base_version> [target_version]")
-	}
-
-	baseVersion := os.Args[1]
-	targetVersion := "."
-	if len(os.Args) > 2 {
-		targetVersion = os.Args[2]
-	}
-
-	log.Printf("Checking API compatibility between %s and %s", baseVersion, targetVersion)
-
-	// Get the module path
-	modulePath, err := getModulePath()
+func runAPICompat(basePackagePath, targetPackagePath string) error {
+	// Load packages for comparison
+	basePackages, err := loadPackages(basePackagePath)
 	if err != nil {
-		return fmt.Errorf("failed to get module path: %w", err)
+		return fmt.Errorf("failed to load base packages: %w", err)
 	}
 
-	// Create temporary directory for base version
-	tempDir, err := os.MkdirTemp("", "apicompat-*")
+	targetPackages, err := loadPackages(targetPackagePath)
 	if err != nil {
-		return fmt.Errorf("failed to create temp directory: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Clone base version
-	baseDir := filepath.Join(tempDir, "base")
-	if err := cloneVersion(modulePath, baseVersion, baseDir); err != nil {
-		return fmt.Errorf("failed to clone base version: %w", err)
+		return fmt.Errorf("failed to load target packages: %w", err)
 	}
 
-	// Run apidiff comparison
-	return runApidiffComparison(baseDir, targetVersion)
+	// Compare APIs
+	return compareAPIs(basePackages, targetPackages)
 }
 
-// runApidiffComparison runs apidiff to compare APIs between base and target versions
-func runApidiffComparison(baseDir, targetDir string) error {
-	// Build command to run apidiff
-	cmd := exec.Command("go", "run", "golang.org/x/exp/cmd/apidiff", baseDir, targetDir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	log.Printf("Running: %s", strings.Join(cmd.Args, " "))
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("apidiff failed: %w", err)
+func loadPackages(packagePath string) (*types.Package, error) {
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedTypes | packages.NeedTypesSizes | packages.NeedTypesInfo | packages.NeedDeps,
 	}
 
-	return nil
-}
-
-// getModulePath returns the module path from go.mod
-func getModulePath() (string, error) {
-	cmd := exec.Command("go", "list", "-m")
-	output, err := cmd.Output()
+	pkgs, err := packages.Load(cfg, packagePath)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("failed to load packages: %w", err)
 	}
-	return strings.TrimSpace(string(output)), nil
+
+	if len(pkgs) == 0 {
+		return nil, fmt.Errorf("no packages found for %s", packagePath)
+	}
+
+	// Take the first package, which should be the main package
+	pkg := pkgs[0]
+	if pkg.Types == nil {
+		return nil, fmt.Errorf("no type information available for package %s", packagePath)
+	}
+
+	if len(pkg.Errors) > 0 {
+		return nil, fmt.Errorf("package has errors: %v", pkg.Errors)
+	}
+
+	return pkg.Types, nil
 }
 
-// cloneVersion clones a specific version/tag to a directory
-func cloneVersion(modulePath, version, targetDir string) error {
-	// Try to get the repository URL from the module path
-	repoURL := fmt.Sprintf("https://%s.git", modulePath)
+func compareAPIs(basePackage, targetPackage *types.Package) error {
+	report := apidiff.Changes(basePackage, targetPackage)
 
-	// Clone the repository
-	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", version, repoURL, targetDir)
-	if err := cmd.Run(); err != nil {
-		// If tag doesn't exist, try cloning and checking out
-		cmd = exec.Command("git", "clone", repoURL, targetDir)
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to clone repository: %w", err)
-		}
-
-		// Checkout the specific version
-		cmd = exec.Command("git", "-C", targetDir, "checkout", version)
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to checkout version %s: %w", version, err)
-		}
+	// Print only incompatible changes to stdout (empty output means no breaking changes)
+	if err := report.TextIncompatible(os.Stdout, false); err != nil {
+		return fmt.Errorf("failed to print incompatible changes: %w", err)
 	}
 
 	return nil

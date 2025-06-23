@@ -370,4 +370,7 @@ require (
 	software.sslmate.com/src/go-pkcs12 v0.5.0 // indirect
 )
 
-tool github.com/goreleaser/goreleaser/v2
+tool (
+	github.com/goreleaser/goreleaser/v2
+	github.com/mazrean/kessoku/tools
+)
