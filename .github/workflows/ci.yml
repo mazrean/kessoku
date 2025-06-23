@@ -123,8 +123,8 @@ jobs:
           else
             echo "$OUTPUT"
             
-            # Comment on PR with the results
-            gh pr comment ${{ github.event.pull_request.number }} --body "## ⚠️ API Compatibility Check Failed
+            # Comment on PR with the results (or update existing comment)
+            gh pr comment ${{ github.event.pull_request.number }} --edit-last --body "## ⚠️ API Compatibility Check Failed
             
             Breaking changes detected in the public API:
             
