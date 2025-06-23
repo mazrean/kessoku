@@ -1,0 +1,266 @@
+package kessoku
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+
+	"github.com/mazrean/kessoku/internal/pkg/collection"
+)
+
+func CreateInjector(metaData *MetaData, build *BuildDirective) (*Injector, error) {
+	slog.Debug("CreateInjector", "build", build)
+	for _, provider := range build.Providers {
+		slog.Debug("provider", "provider", provider)
+	}
+	graph, err := NewGraph(build)
+	if err != nil {
+		return nil, fmt.Errorf("create graph: %w", err)
+	}
+
+	injector, err := graph.Build()
+	if err != nil {
+		return nil, fmt.Errorf("build injector: %w", err)
+	}
+
+	return injector, nil
+}
+
+type node struct {
+	requireCount int
+	arg          *Argument
+	providerSpec *ProviderSpec
+	providerArgs []*InjectorParam
+}
+
+type edgeNode struct {
+	node          *node
+	provideArgSrc int
+	provideArgDst int
+}
+
+type returnVal struct {
+	node        *node
+	returnIndex int
+}
+
+type Graph struct {
+	injectorName string
+	returnType     *Return
+	returnValue    *returnVal
+	waitNodes      *collection.Queue[*node]
+	waitNodesAdded map[*node]bool
+	edges          map[*node][]*edgeNode
+}
+
+func NewGraph(build *BuildDirective) (*Graph, error) {
+	graph := &Graph{
+		injectorName:   build.InjectorName,
+		returnType:     build.Return,
+		waitNodes:      collection.NewQueue[*node](),
+		waitNodesAdded: make(map[*node]bool),
+		edges:          make(map[*node][]*edgeNode),
+	}
+
+	argProviderMap := make(map[string]*Argument)
+	for _, arg := range build.Arguments {
+		key := arg.Type.String()
+		if _, ok := argProviderMap[key]; ok {
+			return nil, fmt.Errorf("multiple args provide %s", key)
+		}
+
+		argProviderMap[key] = arg
+	}
+
+	type typeProvider struct {
+		provider    *ProviderSpec
+		returnIndex int
+	}
+
+	typeProviderMap := make(map[string]*typeProvider)
+	for _, provider := range build.Providers {
+		for i, t := range provider.Provides {
+			key := t.String()
+			if _, ok := argProviderMap[key]; ok {
+				return nil, fmt.Errorf("multiple providers provide %s", key)
+			}
+
+			if _, ok := typeProviderMap[key]; ok {
+				return nil, fmt.Errorf("multiple providers provide %s", key)
+			}
+
+			typeProviderMap[key] = &typeProvider{
+				provider:    provider,
+				returnIndex: i,
+			}
+		}
+	}
+
+	returnTypeKey := build.Return.Type.String()
+
+	if returnArg, ok := argProviderMap[returnTypeKey]; ok {
+		returnNode := &node{
+			requireCount: 0,
+			arg:          returnArg,
+		}
+		graph.returnValue = &returnVal{
+			node:        returnNode,
+			returnIndex: 0,
+		}
+		graph.waitNodes.Push(returnNode)
+		graph.waitNodesAdded[returnNode] = true
+
+		return graph, nil
+	}
+
+	returnProvider, ok := typeProviderMap[returnTypeKey]
+	if !ok {
+		return nil, fmt.Errorf("no provider provides %s", returnTypeKey)
+	}
+
+	providerNodeMap := make(map[*ProviderSpec]*node)
+	argNodeMap := make(map[*Argument]*node)
+	queue := collection.NewQueue[*node]()
+	visited := make(map[*node]bool)
+
+	returnNode := &node{
+		requireCount: len(returnProvider.provider.Requires),
+		providerSpec: returnProvider.provider,
+		providerArgs: make([]*InjectorParam, len(returnProvider.provider.Requires)),
+	}
+	graph.returnValue = &returnVal{
+		node:        returnNode,
+		returnIndex: returnProvider.returnIndex,
+	}
+	queue.Push(returnNode)
+	if returnNode.requireCount == 0 {
+		graph.waitNodes.Push(returnNode)
+		graph.waitNodesAdded[returnNode] = true
+	}
+
+	for n1 := range queue.Iter {
+		// Skip if this node has already been processed
+		if visited[n1] {
+			continue
+		}
+		visited[n1] = true
+		
+		for i, t := range n1.providerSpec.Requires {
+			key := t.String()
+			var (
+				n2       *node
+				srcIndex int
+			)
+			if arg, ok := argProviderMap[key]; ok {
+				n2, ok = argNodeMap[arg]
+				if !ok {
+					n2 = &node{
+						requireCount: 0,
+						arg:          arg,
+					}
+					argNodeMap[arg] = n2
+					queue.Push(n2)
+				}
+
+				srcIndex = 0
+			} else if provider, ok := typeProviderMap[key]; ok {
+				n2, ok = providerNodeMap[provider.provider]
+				if !ok {
+					n2 = &node{
+						requireCount: len(provider.provider.Requires),
+						providerSpec: provider.provider,
+						providerArgs: make([]*InjectorParam, len(provider.provider.Requires)),
+					}
+					providerNodeMap[provider.provider] = n2
+					queue.Push(n2)
+				}
+
+				srcIndex = provider.returnIndex
+			} else {
+				return nil, fmt.Errorf("no provider or arg provides %s", key)
+			}
+
+			graph.edges[n2] = append(graph.edges[n2], &edgeNode{
+				node:          n1,
+				provideArgSrc: srcIndex,
+				provideArgDst: i,
+			})
+			if n2.requireCount == 0 && !graph.waitNodesAdded[n2] {
+				graph.waitNodes.Push(n2)
+				graph.waitNodesAdded[n2] = true
+			}
+		}
+	}
+
+	return graph, nil
+}
+
+func (g *Graph) Build() (*Injector, error) {
+	injector := &Injector{
+		Name:          g.injectorName,
+		IsReturnError: false,
+	}
+
+	variableNameCounter := 0
+	buildVisited := make(map[*node]bool)
+	for n := range g.waitNodes.Iter {
+		// Skip if this node has already been processed
+		if buildVisited[n] {
+			continue
+		}
+		buildVisited[n] = true
+		slog.Debug("waitNodes", "waitNodes", n)
+		var returnValues []*InjectorParam
+		switch {
+		case n.arg != nil:
+			param := NewInjectorParam(n.arg.Name)
+			injector.Params = append(injector.Params, param)
+			returnValues = append(returnValues, param)
+
+			injector.Args = append(injector.Args, &InjectorArgument{
+				Param: param,
+				Arg:   n.arg,
+			})
+		case n.providerSpec != nil:
+			returnValues = make([]*InjectorParam, 0, len(n.providerSpec.Provides))
+			for range n.providerSpec.Provides {
+				param := NewInjectorParam(fmt.Sprintf("v%d", variableNameCounter))
+				variableNameCounter++
+				injector.Params = append(injector.Params, param)
+				returnValues = append(returnValues, param)
+			}
+
+			injector.Stmts = append(injector.Stmts, &InjectorStmt{
+				Provider:  n.providerSpec,
+				Arguments: n.providerArgs,
+				Returns:   returnValues,
+			})
+
+			if n.providerSpec.IsReturnError {
+				injector.IsReturnError = true
+			}
+		default:
+			return nil, errors.New("invalid node")
+		}
+
+		for _, edge := range g.edges[n] {
+			edge.node.requireCount--
+			slog.Debug("edge", "edge", edge, "node", edge.node)
+			edge.node.providerArgs[edge.provideArgDst] = returnValues[edge.provideArgSrc]
+			returnValues[edge.provideArgSrc].Ref()
+			if edge.node.requireCount == 0 {
+				g.waitNodes.Push(edge.node)
+			}
+		}
+
+		if n == g.returnValue.node {
+			returnValues[g.returnValue.returnIndex].Ref()
+			injector.Return = &InjectorReturn{
+				Param:  returnValues[g.returnValue.returnIndex],
+				Return: g.returnType,
+			}
+		}
+	}
+
+	return injector, nil
+}
