@@ -106,39 +106,38 @@ jobs:
 
       - name: Check API compatibility
         run: |
-          echo "🔍 Checking API compatibility..."
-          
-          # Get the module path
           MODULE_PATH=$(go list -m)
-          echo "Module path: $MODULE_PATH"
-          
-          # Get base commit for comparison (target branch)
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          echo "Base SHA: $BASE_SHA"
           
-          # Check if base version has any public API
-          git checkout "$BASE_SHA" 2>/dev/null || {
-            echo "ℹ️ Could not checkout base SHA, skipping API compatibility check"
-            exit 0
-          }
-          
+          # Check if base version has public API
+          git checkout "$BASE_SHA" 2>/dev/null || exit 0
           if ! find . -name "*.go" -not -path "./internal/*" -not -path "./*_test.go" -not -path "./tools/*" -not -path "./examples/*" | head -1 | grep -q .; then
-            echo "ℹ️ No public API found in base version, skipping compatibility check"
             git checkout "${{ github.sha }}"
             exit 0
           fi
-          
           git checkout "${{ github.sha }}"
           
-          # Run API compatibility check
-          echo "Comparing: ${MODULE_PATH}@${BASE_SHA} vs ${MODULE_PATH}"
-          OUTPUT=$(go tool tools apicompat "${MODULE_PATH}@${BASE_SHA}" "${MODULE_PATH}" 2>&1)
-          
-          if [ -n "$OUTPUT" ]; then
-            echo "❌ Breaking API changes detected:"
-            echo "$OUTPUT"
-            echo "::error::Breaking API changes detected. See output above for details."
-            exit 1
+          # Run API compatibility check and capture output
+          if OUTPUT=$(go tool tools apicompat "${MODULE_PATH}@${BASE_SHA}" "${MODULE_PATH}" 2>&1); then
+            echo "No breaking API changes detected"
           else
-            echo "✅ No breaking API changes detected"
+            echo "$OUTPUT"
+            
+            # Comment on PR with the results
+            gh pr comment ${{ github.event.pull_request.number }} --body "## ⚠️ API Compatibility Check Failed
+            
+            Breaking changes detected in the public API:
+            
+            \`\`\`
+            $OUTPUT
+            \`\`\`
+            
+            Please review these changes and consider:
+            - Whether these breaking changes are intentional
+            - Updating the major version if breaking changes are required
+            - Providing migration guidance for users"
+            
+            exit 1
           fi
+        env:
+          GH_TOKEN: ${{ github.token }}
