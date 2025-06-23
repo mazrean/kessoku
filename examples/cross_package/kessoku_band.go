@@ -3,8 +3,8 @@
 package main
 
 import (
-	"github.com/mazrean/kessoku"
 	"github.com/mazrean/kessoku/examples/cross_package/providers"
+	"github.com/mazrean/kessoku"
 )
 
 func InitializeCrossPackageService() *providers.ExternalService {
