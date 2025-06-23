@@ -42,7 +42,7 @@ jobs:
       - name: Run custom linter
         run: |
           set -o pipefail
-          go run ./tools lint ./... 2>&1 | tee lint-output.txt || {
+          go tool tools lint ./... 2>&1 | tee lint-output.txt || {
             echo "::group::Linting Issues"
             while IFS= read -r line; do
               if [[ "$line" =~ ^([^:]+):([0-9]+):([0-9]+):(.*)$ ]]; then
@@ -89,3 +89,56 @@ jobs:
           name: kessoku-binaries
           path: dist/
           retention-days: 30
+
+  api-compatibility:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check API compatibility
+        run: |
+          echo "🔍 Checking API compatibility..."
+          
+          # Get the module path
+          MODULE_PATH=$(go list -m)
+          echo "Module path: $MODULE_PATH"
+          
+          # Get base commit for comparison (target branch)
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          echo "Base SHA: $BASE_SHA"
+          
+          # Check if base version has any public API
+          git checkout "$BASE_SHA" 2>/dev/null || {
+            echo "ℹ️ Could not checkout base SHA, skipping API compatibility check"
+            exit 0
+          }
+          
+          if ! find . -name "*.go" -not -path "./internal/*" -not -path "./*_test.go" -not -path "./tools/*" -not -path "./examples/*" | head -1 | grep -q .; then
+            echo "ℹ️ No public API found in base version, skipping compatibility check"
+            git checkout "${{ github.sha }}"
+            exit 0
+          fi
+          
+          git checkout "${{ github.sha }}"
+          
+          # Run API compatibility check
+          echo "Comparing: ${MODULE_PATH}@${BASE_SHA} vs ${MODULE_PATH}"
+          OUTPUT=$(go tool tools apicompat "${MODULE_PATH}@${BASE_SHA}" "${MODULE_PATH}" 2>&1)
+          
+          if [ -n "$OUTPUT" ]; then
+            echo "❌ Breaking API changes detected:"
+            echo "$OUTPUT"
+            echo "::error::Breaking API changes detected. See output above for details."
+            exit 1
+          else
+            echo "✅ No breaking API changes detected"
+          fi

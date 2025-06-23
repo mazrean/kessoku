@@ -32,22 +32,19 @@ go fmt ./...
 ### Linting
 ```bash
 # Run comprehensive Go analyzer linter
-go run ./tools lint ./...
+go tool tools lint ./...
 ```
 
 ### API Compatibility
 ```bash
 # Check API compatibility against a previous version
-go run ./tools apicompat <base_version> [target_version]
+go tool tools apicompat <base_package_path> <target_package_path>
 
-# Example: Check current changes against main branch
-go run ./tools apicompat main
+# Example: Check current changes against latest released version
+go tool tools apicompat github.com/mazrean/kessoku@latest github.com/mazrean/kessoku
 
-# Example: Check against a specific tag
-go run ./tools apicompat v1.0.0
-
-# Use the helper script
-./scripts/check-api-compat.sh v1.0.0
+# Example: Check against a specific version
+go tool tools apicompat github.com/mazrean/kessoku@v1.0.0 github.com/mazrean/kessoku
 ```
 
 ### Release Management
@@ -145,7 +142,7 @@ Run `go generate` or `go tool kessoku` to generate `*_band.go` files with depend
 
 ### Go Code Quality Rules
 - **ALWAYS run lint and test after any Go code changes**
-- Run `go run ./tools lint ./...` to check for code quality issues
+- Run `go tool tools lint ./...` to check for code quality issues
 - Run `go test -v ./...` to ensure all tests pass
 - Fix any linting errors or test failures before committing
 - These checks are mandatory for maintaining code quality standards
