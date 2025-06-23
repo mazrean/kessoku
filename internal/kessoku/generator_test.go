@@ -11,8 +11,8 @@ import (
 func createTestMetaData() *MetaData {
 	return &MetaData{
 		Package: "main",
-		Imports: []*ast.ImportSpec{
-			{
+		Imports: map[string]*ast.ImportSpec{
+			"github.com/mazrean/kessoku": {
 				Path: &ast.BasicLit{
 					Kind:  0,
 					Value: `"github.com/mazrean/kessoku"`,
@@ -273,7 +273,7 @@ func TestGenerate(t *testing.T) {
 			name: "no imports",
 			metaData: &MetaData{
 				Package: "main",
-				Imports: nil,
+				Imports: make(map[string]*ast.ImportSpec),
 			},
 			injectors: []*Injector{
 				{
