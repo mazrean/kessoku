@@ -50,9 +50,9 @@ func (p *Processor) processFile(filename string) error {
 
 	injectors := make([]*Injector, 0, len(builds))
 	for _, build := range builds {
-		injector, err := CreateInjector(metaData, build)
-		if err != nil {
-			return fmt.Errorf("create injector: %w", err)
+		injector, injectorErr := CreateInjector(metaData, build)
+		if injectorErr != nil {
+			return fmt.Errorf("create injector: %w", injectorErr)
 		}
 
 		injectors = append(injectors, injector)
@@ -64,11 +64,14 @@ func (p *Processor) processFile(filename string) error {
 	if err != nil {
 		return fmt.Errorf("create file %s: %w", outputFileName, err)
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			slog.Error("Failed to close file", "error", closeErr)
+		}
+	}()
 
-	err = Generate(f, filename, metaData, injectors)
-	if err != nil {
-		return fmt.Errorf("generate: %w", err)
+	if genErr := Generate(f, filename, metaData, injectors); genErr != nil {
+		return fmt.Errorf("generate: %w", genErr)
 	}
 
 	return nil
