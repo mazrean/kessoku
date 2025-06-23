@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Kessoku is a simple CLI tool built with Go that demonstrates basic CLI patterns with structured logging. It's a greeting application that showcases proper Go project structure using Kong for CLI parsing and slog for structured logging.
+Kessoku is a dependency injection CLI tool and library for Go, similar to google/wire. It generates Go code for dependency injection based on provider functions and injector declarations. The tool performs compile-time dependency injection through code generation, eliminating runtime reflection overhead.
 
 ## Common Commands
 
@@ -13,13 +13,16 @@ Kessoku is a simple CLI tool built with Go that demonstrates basic CLI patterns 
 # Build the binary
 go build -o bin/kessoku ./cmd/kessoku
 
-# Run directly
-go run ./cmd/kessoku [name]
+# Generate dependency injection code (current directory)
+go run ./cmd/kessoku
+
+# Generate dependency injection code for specific directory
+go run ./cmd/kessoku -d [directory]
 ```
 
 ### Testing
 ```bash
-# Run tests (note: no test files currently exist)
+# Run tests
 go test -v ./...
 
 # Format code
@@ -51,12 +54,21 @@ go tool goreleaser release --clean
 
 ### Code Organization
 - `cmd/kessoku/main.go`: Entry point that calls `config.Run()`
-- `internal/config/config.go`: Core application logic with Kong CLI parsing and slog setup
-- `tools/main.go`: Custom multi-checker with comprehensive Go analyzers (govet, golangci-lint, staticcheck)
+- `wire.go`: Public API (Build, NewSet, Bind, Value functions) - **Public package root**
+- `internal/config/config.go`: CLI configuration and wire generation orchestration
+- `internal/wire/`: Dependency injection implementation
+  - `parser.go`: AST parsing for provider functions and build directives
+  - `graph.go`: Dependency graph construction and cycle detection
+  - `generator.go`: Code generation for injector functions
+  - `processor.go`: File processing and orchestration
+  - `provider.go`: Core data structures for providers and injectors
+- `tools/main.go`: Custom multi-checker with comprehensive Go analyzers
+- `examples/`: Example applications demonstrating usage
 
 ### Key Dependencies
 - `github.com/alecthomas/kong`: CLI argument parsing
 - Standard library `log/slog`: Structured logging
+- Standard library `go/*`: AST parsing and type checking
 
 ### Build Configuration
 - GoReleaser for cross-platform releases (Linux, Windows, macOS)
@@ -70,6 +82,38 @@ The tools module provides a comprehensive linting setup combining:
 - golangci-lint defaults and optional analyzers  
 - staticcheck, simple, and stylecheck analyzers
 - Custom multi-checker implementation for unified execution
+
+### Dependency Injection System
+
+Kessoku generates dependency injection code similar to google/wire:
+
+#### Provider Functions
+Create provider functions that return dependencies:
+```go
+// NewDatabase creates a database connection.
+func NewDatabase(config *Config) (*Database, error) {
+    // implementation
+}
+```
+
+#### Injector Functions
+Use kessoku.Build to declare dependencies:
+```go
+import "github.com/mazrean/kessoku"
+
+func InitializeApp() (*App, error) {
+    kessoku.Build(
+        NewConfig,
+        NewDatabase,
+        NewUserService,
+        NewApp,
+    )
+    return nil, nil
+}
+```
+
+#### Code Generation
+Run `kessoku` to generate `*_gen.go` files with dependency injection implementations.
 
 ## Development Guidelines
 

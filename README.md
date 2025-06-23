@@ -1,14 +1,15 @@
-# kessoku
+# Kessoku
 
-A simple CLI tool built with Go and Kong that demonstrates basic CLI patterns with structured logging.
+A dependency injection code generator for Go, similar to [google/wire](https://github.com/google/wire). Kessoku generates Go code for compile-time dependency injection, eliminating runtime reflection overhead.
 
 ## Features
 
-- Simple greeting functionality
-- Command-line argument parsing with Kong
-- Structured logging with slog
-- Cross-platform support (Linux, Windows, macOS)
-- Version information injection at build time
+- ✅ **Compile-time dependency injection** - No runtime reflection
+- ✅ **Automatic dependency resolution** - Topological sorting of dependencies  
+- ✅ **Error handling** - Proper error propagation in generated code
+- ✅ **Cycle detection** - Prevents circular dependencies
+- ✅ **Wire compatibility** - Similar API to google/wire
+- ✅ **Cross-platform support** (Linux, Windows, macOS)
 
 ## Installation
 
@@ -28,16 +29,103 @@ Download the latest binary from the [releases page](https://github.com/mazrean/k
 brew install mazrean/tap/kessoku
 ```
 
-## Usage
+## Quick Start
 
-Basic usage:
+### 1. Create Provider Functions
+
+```go
+package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+    DatabaseURL string
+    Port        int
+}
+
+func NewConfig() *Config {
+    return &Config{
+        DatabaseURL: "postgres://localhost/mydb",
+        Port:        8080,
+    }
+}
+
+type Database struct {
+    url string
+}
+
+func NewDatabase(config *Config) (*Database, error) {
+    return &Database{url: config.DatabaseURL}, nil
+}
+
+type UserService struct {
+    db *Database
+}
+
+func NewUserService(db *Database) *UserService {
+    return &UserService{db: db}
+}
+
+type App struct {
+    config  *Config
+    service *UserService
+}
+
+func NewApp(config *Config, service *UserService) *App {
+    return &App{
+        config:  config,
+        service: service,
+    }
+}
+```
+
+### 2. Define Injector Function
+
+```go
+// InitializeApp creates the application with all dependencies.
+func InitializeApp() (*App, error) {
+    kessoku.Build(
+        NewConfig,
+        NewDatabase,
+        NewUserService,
+        NewApp,
+    )
+    return nil, nil // This will be replaced by generated code
+}
+```
+
+### 3. Generate Dependency Injection Code
 
 ```bash
-# Default greeting
+kessoku  # Generate code in current directory
+# or
+kessoku -d ./path/to/your/package
+```
+
+This generates `*_gen.go` files with the actual dependency injection implementation.
+
+### 4. Use the Generated Code
+
+```go
+func main() {
+    app, err := InitializeApp()
+    if err != nil {
+        log.Fatal("Failed to initialize app:", err)
+    }
+    
+    // Use your app
+    fmt.Printf("App running on port %d\n", app.config.Port)
+}
+```
+
+## CLI Usage
+
+```bash
+# Generate DI code in current directory
 kessoku
 
-# Greet a specific name
-kessoku Alice
+# Generate DI code in specific directory
+kessoku -d ./path/to/package
 
 # Show version
 kessoku --version
@@ -45,9 +133,67 @@ kessoku --version
 
 ### Options
 
+- `-d, --dir` - Directory to process (defaults to current directory)
 - `-l, --log-level` - Log level (debug, info, warn, error)
 - `--version` - Show version information
-- `[name]` - Optional name to greet (defaults to "World")
+
+## API Reference
+
+### kessoku.Build
+
+Declares the dependencies needed for an injector function:
+
+```go
+func InitializeApp() (*App, error) {
+    kessoku.Build(
+        NewConfig,    // Provider functions
+        NewDatabase,
+        NewService,
+        NewApp,
+    )
+    return nil, nil
+}
+```
+
+### kessoku.NewSet
+
+Groups related providers into a set:
+
+```go
+var DatabaseSet = kessoku.NewSet(
+    NewConfig,
+    NewDatabase,
+)
+
+func InitializeApp() (*App, error) {
+    kessoku.Build(
+        DatabaseSet,
+        NewService,
+        NewApp,
+    )
+    return nil, nil
+}
+```
+
+### kessoku.Bind
+
+Binds an interface to its implementation:
+
+```go
+var UserRepositoryBinding = kessoku.Bind(new(UserRepository), new(*userRepositoryImpl))
+```
+
+### kessoku.Value
+
+Provides a constant value:
+
+```go
+var DatabaseURL = kessoku.Value("postgres://localhost/mydb")
+```
+
+## Examples
+
+See the [examples/](./examples/) directory for complete working examples.
 
 ## Development
 
@@ -63,7 +209,7 @@ kessoku --version
 go build -o bin/kessoku ./cmd/kessoku
 
 # Run directly
-go run ./cmd/kessoku [name]
+go run ./cmd/kessoku -d ./examples/basic
 ```
 
 ### Testing
