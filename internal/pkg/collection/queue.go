@@ -1,3 +1,4 @@
+// Package collection provides utility data structures.
 package collection
 
 import (

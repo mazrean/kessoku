@@ -1,3 +1,4 @@
+// Package providers contains shared provider functions for cross-package dependency injection.
 package providers
 
 // ExternalConfig represents configuration from another package.
