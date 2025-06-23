@@ -311,6 +311,19 @@ func (p *Parser) parseProviderArgument(typeInfo *types.Info, kessokuPackageScope
 				provides = append(provides, providerFnSig.Results().At(i).Type())
 			}
 
+			// Check if this is a bindProvider - it should provide the interface type instead of concrete type
+			if named, ok := providerType.(*types.Named); ok {
+				typeName := named.Obj().Name()
+				if typeName == "bindProvider" {
+					// For bindProvider[S, T], we want to provide type S (the interface)
+					// but keep the original requires from the wrapped provider
+					if typeArgs := named.TypeArgs(); typeArgs != nil && typeArgs.Len() >= 1 {
+						interfaceType := typeArgs.At(0)
+						provides = []types.Type{interfaceType}
+					}
+				}
+			}
+
 			build.Providers = append(build.Providers, &ProviderSpec{
 				Type:          ProviderTypeFunction,
 				Requires:      requires,
