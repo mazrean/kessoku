@@ -4,6 +4,7 @@ package kessoku
 import (
 	"go/ast"
 	"go/types"
+	"sync/atomic"
 )
 
 type MetaData struct {
@@ -59,11 +60,10 @@ type InjectorParam struct {
 	refCounter int
 }
 
-var injectorParamIDCounter uint64 = 0
+var injectorParamIDCounter uint64
 
 func NewInjectorParam(name string) *InjectorParam {
-	id := injectorParamIDCounter
-	injectorParamIDCounter++
+	id := atomic.AddUint64(&injectorParamIDCounter, 1) - 1
 	return &InjectorParam{
 		ID:   id,
 		name: name,
