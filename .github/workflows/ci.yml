@@ -24,7 +24,7 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          file: ./coverage.out
+          files: ./coverage.out
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -128,20 +128,20 @@ jobs:
             - Providing migration guidance for users"
             else
               # Output to job summary for non-PR events
-              cat >> $GITHUB_STEP_SUMMARY << EOF
-            ## ⚠️ API Compatibility Check Failed
-            
-            Breaking changes detected in the public API:
-            
-            \`\`\`
-            $OUTPUT
-            \`\`\`
-            
-            Please review these changes and consider:
-            - Whether these breaking changes are intentional
-            - Updating the major version if breaking changes are required
-            - Providing migration guidance for users
-            EOF
+              {
+                echo "## ⚠️ API Compatibility Check Failed"
+                echo ""
+                echo "Breaking changes detected in the public API:"
+                echo ""
+                echo "\`\`\`"
+                echo "$OUTPUT"
+                echo "\`\`\`"
+                echo ""
+                echo "Please review these changes and consider:"
+                echo "- Whether these breaking changes are intentional"
+                echo "- Updating the major version if breaking changes are required"
+                echo "- Providing migration guidance for users"
+              } >> $GITHUB_STEP_SUMMARY
             fi
             
             exit 1
