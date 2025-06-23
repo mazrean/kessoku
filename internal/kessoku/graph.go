@@ -139,11 +139,16 @@ func NewGraph(build *BuildDirective) (*Graph, error) {
 	}
 
 	for n1 := range queue.Iter {
-		// Skip if this node has already been processed
-		if visited[n1] {
+		// Skip if node is nil or already been processed
+		if n1 == nil || visited[n1] {
 			continue
 		}
 		visited[n1] = true
+		
+		// Skip argument nodes - they don't have dependencies to process
+		if n1.providerSpec == nil {
+			continue
+		}
 		
 		for i, t := range n1.providerSpec.Requires {
 			key := t.String()
