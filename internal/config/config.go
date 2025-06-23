@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/alecthomas/kong"
+	"github.com/mazrean/kessoku/internal/kessoku"
 )
 
 var (
@@ -18,15 +19,33 @@ var (
 
 type Config struct {
 	LogLevel string           `kong:"short='l',help='Log level',enum='debug,info,warn,error',default='info'"`
-	Name     string           `kong:"arg,optional,help='Name to greet',default='World'"`
 	Version  kong.VersionFlag `kong:"short='v',help='Show version and exit.'"`
+	Files    []string         `kong:"arg,help='Go files to process'"`
+}
+
+func (c *Config) Run() error {
+	// Setup slog with TextHandler
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: parseLogLevel(c.LogLevel),
+	})
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+
+	if len(c.Files) == 0 {
+		return fmt.Errorf("no files specified")
+	}
+
+	slog.Info("Generating dependency injection code", "files", c.Files)
+
+	processor := kessoku.NewProcessor()
+	return processor.ProcessFiles(c.Files)
 }
 
 func Run() error {
 	var cli Config
 	kongCtx := kong.Parse(&cli,
 		kong.Name("kessoku"),
-		kong.Description("A CLI tool for managing kessoku"),
+		kong.Description("A dependency injection code generator for Go, similar to google/wire"),
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{
 			Compact: true,
@@ -39,24 +58,8 @@ func Run() error {
 	return kongCtx.Run()
 }
 
-func (c *Config) Run() error {
-	// Setup slog with TextHandler
-	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: c.parseLogLevel(),
-	})
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
-
-	slog.Debug("Starting application", "name", c.Name, "log_level", c.LogLevel)
-
-	fmt.Printf("Hello, %s!\n", c.Name)
-
-	slog.Debug("Application completed successfully")
-	return nil
-}
-
-func (c *Config) parseLogLevel() slog.Level {
-	switch strings.ToLower(c.LogLevel) {
+func parseLogLevel(level string) slog.Level {
+	switch strings.ToLower(level) {
 	case "debug":
 		return slog.LevelDebug
 	case "info":
