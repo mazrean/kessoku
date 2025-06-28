@@ -1,5 +1,12 @@
 package main
 
+import "fmt"
+
+const (
+	// ExampleArgValue is an example integer value for demonstration
+	ExampleArgValue = 10
+)
+
 type Config struct {
 	Value string
 }
@@ -39,10 +46,7 @@ func NewService(config *Config, impl Interface, value string, arg int) *Service 
 }
 
 func main() {
-	/*service, err := InitializeComplexService(10)
-	if err != nil {
-		panic(err)
-	}
+	service := InitializeComplexService(ExampleArgValue)
 	fmt.Printf("Service initialized with config: %v, impl: %v, value: %s, arg: %d\n",
-		service.config, service.impl.DoSomething(), service.value, service.arg)*/
+		service.config, service.impl.DoSomething(), service.value, service.arg)
 }

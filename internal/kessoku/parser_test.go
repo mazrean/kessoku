@@ -4,6 +4,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -128,7 +129,7 @@ var _ = kessoku.Inject[*Service](
 			shouldError:          false,
 		},
 		{
-			name: "kessoku arg",
+			name: "dependency with missing provider",
 			content: `package main
 
 import "github.com/mazrean/kessoku"
@@ -143,13 +144,12 @@ func NewService(value int) *Service {
 
 var _ = kessoku.Inject[*Service](
 	"InitializeService",
-	kessoku.Arg[int]("value"),
 	kessoku.Provide(NewService),
 )
 `,
 			expectedBuilds:       1,
 			expectedProviders:    1,
-			expectedArgs:         1,
+			expectedArgs:         0, // Parser doesn't auto-detect yet - that happens in graph phase
 			expectedInjectorName: "InitializeService",
 			shouldError:          false,
 		},
@@ -573,11 +573,12 @@ var _ = kessoku.Inject[*Service](
 				}
 			}
 
-			// Check argument type for arg test
+			// Check argument type for auto-detected argument test
 			if tt.expectedArgs > 0 {
 				arg := build.Arguments[0]
-				if arg.Name != "value" {
-					t.Errorf("Expected argument name 'value', got %q", arg.Name)
+				// Auto-detected arguments have names like "arg0", "arg1", etc.
+				if !strings.HasPrefix(arg.Name, "arg") {
+					t.Errorf("Expected auto-detected argument name to start with 'arg', got %q", arg.Name)
 				}
 
 				if arg.Type == nil {
