@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 type Config struct {
 	Value string
 }
@@ -39,10 +41,7 @@ func NewService(config *Config, impl Interface, value string, arg int) *Service 
 }
 
 func main() {
-	/*service, err := InitializeComplexService(10)
-	if err != nil {
-		panic(err)
-	}
+	service := InitializeComplexService(10)
 	fmt.Printf("Service initialized with config: %v, impl: %v, value: %s, arg: %d\n",
-		service.config, service.impl.DoSomething(), service.value, service.arg)*/
+		service.config, service.impl.DoSomething(), service.value, service.arg)
 }
