@@ -142,3 +142,11 @@ func Inject[T any](name name, providers ...provider) struct{} {
 	// The actual implementation is generated and written to *_band.go files.
 	return struct{}{}
 }
+
+type set struct{}
+
+func (s set) provide() {}
+
+func Set(providers ...provider) set {
+	return set{}
+}
