@@ -434,47 +434,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 		}
 	}
 
-	callExpr, ok := arg.(*ast.CallExpr)
-	if !ok || callExpr.Fun == nil || len(callExpr.Args) != 1 {
-		return errors.New("invalid provider expression. kessoku.Arg(name name) must be used directly")
-	}
-
-	argNameType, ok := pkg.TypesInfo.Types[callExpr.Args[0]]
-	if !ok || argNameType.Type == nil {
-		return errors.New("invalid provider expression. kessoku.Arg(name name) must be used directly")
-	}
-
-	if argNameType.Value == nil || argNameType.Value.Kind() != constant.String {
-		return errors.New("invalid provider expression. kessoku.Arg requires a string literal")
-	}
-
-	argName := constant.StringVal(argNameType.Value)
-
-	var argTypeExpr ast.Expr
-	switch fun := callExpr.Fun.(type) {
-	case *ast.IndexExpr:
-		argTypeExpr = fun.Index
-	case *ast.IndexListExpr:
-		argTypeExpr = fun.Indices[0]
-	default:
-		return errors.New("invalid provider expression. kessoku.Arg(name name) must be used directly")
-	}
-
-	argType := pkg.TypesInfo.TypeOf(argTypeExpr)
-	if argType == nil {
-		return fmt.Errorf("get type of argument")
-	}
-
-	build.Arguments = append(build.Arguments, &Argument{
-		Name:        argName,
-		Type:        argType,
-		ASTTypeExpr: argTypeExpr,
-	})
-
-	// Collect dependencies from argument type expression
-	p.collectDependencies(argTypeExpr, pkg.TypesInfo, imports, fileImports)
-
-	return nil
+	return errors.New("unsupported provider expression")
 }
 
 func (p *Parser) getVarDecl(pkg *packages.Package, obj *types.Var) ast.Expr {
