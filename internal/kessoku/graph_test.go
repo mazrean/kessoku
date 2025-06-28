@@ -87,7 +87,7 @@ func TestNewGraph(t *testing.T) {
 			expectedName: "InitializeService",
 		},
 		{
-			name: "missing provider",
+			name: "auto-detected argument for missing provider",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Arguments:    nil,
@@ -98,13 +98,13 @@ func TestNewGraph(t *testing.T) {
 					{
 						Type:          ProviderTypeFunction,
 						Provides:      []types.Type{serviceType},
-						Requires:      []types.Type{configType}, // Config provider is missing
+						Requires:      []types.Type{configType}, // Config provider is missing - should be auto-detected
 						IsReturnError: false,
 					},
 				},
 			},
-			expectError:   true,
-			errorContains: "no provider",
+			expectError:  false, // Should succeed and auto-detect the missing Config argument
+			expectedName: "InitializeService",
 		},
 	}
 
@@ -270,7 +270,7 @@ func TestCreateInjector(t *testing.T) {
 			expectError:  false,
 		},
 		{
-			name: "missing provider error",
+			name: "auto-detected argument in CreateInjector",
 			metadata: &MetaData{
 				Package: "test",
 				Imports: nil,
@@ -285,12 +285,13 @@ func TestCreateInjector(t *testing.T) {
 					{
 						Type:          ProviderTypeFunction,
 						Provides:      []types.Type{serviceType},
-						Requires:      []types.Type{configType}, // Missing provider
+						Requires:      []types.Type{configType}, // Missing provider - should be auto-detected
 						IsReturnError: false,
 					},
 				},
 			},
-			expectError: true,
+			expectedName: "InitializeService", // Should succeed with auto-detected argument
+			expectError:  false,
 		},
 	}
 
