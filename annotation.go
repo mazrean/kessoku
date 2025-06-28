@@ -83,33 +83,13 @@ func Value[T any](v T) fnProvider[func() T] {
 	}
 }
 
-// argProvider represents a function argument that will be passed to the generated injector.
-// This allows the injector function to accept parameters that are not provided
-// by other dependencies in the graph.
-type argProvider[T any] struct{}
-
-// provide implements the provider interface for argProvider.
-func (p argProvider[T]) provide() {}
-
-// Arg declares a function parameter for the generated injector function.
-// The parameter will have the specified name and type T.
-// This is useful when you need to pass runtime values that cannot be
-// determined at code generation time.
-//
-// Example:
-//
-//	kessoku.Arg[*Config]("config")  // adds a *Config parameter named "config"
-//	kessoku.Arg[string]("dbURL")    // adds a string parameter named "dbURL"
-func Arg[T any](name name) argProvider[T] {
-	return argProvider[T]{}
-}
 
 // Inject declares a dependency injection build directive.
 // It generates a function with the specified name that constructs and returns
 // an instance of type T using the provided dependency providers.
 //
 // The generated function will:
-// 1. Accept any arguments declared with Arg as parameters
+// 1. Automatically detect missing dependencies and add them as function parameters
 // 2. Call provider functions in the correct order based on dependencies
 // 3. Return an instance of type T (and error if any provider returns an error)
 //
@@ -123,10 +103,11 @@ func Arg[T any](name name) argProvider[T] {
 //		kessoku.Provide(NewApp),
 //	)
 //
-// This generates a function like:
+// If NewConfig requires a string parameter that's not provided, 
+// this generates a function like:
 //
-//	func InitializeApp() (*App, error) {
-//		config := NewConfig()
+//	func InitializeApp(arg0 string) (*App, error) {
+//		config := NewConfig(arg0)
 //		db, err := NewDatabase(config)
 //		if err != nil { return nil, err }
 //		userService := NewUserService(db)
