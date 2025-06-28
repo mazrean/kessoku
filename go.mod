@@ -3,7 +3,7 @@ module github.com/mazrean/kessoku
 go 1.24.0
 
 require (
-	github.com/alecthomas/kong v1.11.0
+	github.com/alecthomas/kong v1.12.0
 	golang.org/x/tools v0.34.0
 )
 
