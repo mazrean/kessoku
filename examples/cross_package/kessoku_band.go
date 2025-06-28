@@ -7,8 +7,8 @@ import (
 	"github.com/mazrean/kessoku"
 )
 
-func InitializeCrossPackageService() *providers.ExternalService {
-	v0 := kessoku.Provide(providers.NewExternalConfig).Fn()()
+func InitializeCrossPackageService(arg0 providers.APIKey) *providers.ExternalService {
+	v0 := kessoku.Provide(providers.NewExternalConfig).Fn()(arg0)
 	v1 := kessoku.Provide(providers.NewExternalService).Fn()(v0)
 	return v1
 }

@@ -1,9 +1,12 @@
 package main
 
+import (
+	"fmt"
+
+	"github.com/mazrean/kessoku/examples/cross_package/providers"
+)
+
 func main() {
-	/*service, err := InitializeCrossPackageService()
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("Cross-package service initialized: %s\n", service.GetInfo())*/
+	service := InitializeCrossPackageService(providers.APIKey("apiKey"))
+	fmt.Printf("Cross-package service initialized: %s\n", service.GetInfo())
 }

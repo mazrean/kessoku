@@ -7,10 +7,12 @@ type ExternalConfig struct {
 	APIKey      string
 }
 
+type APIKey string
+
 // NewExternalConfig creates a new external configuration.
-func NewExternalConfig() *ExternalConfig {
+func NewExternalConfig(apiKey APIKey) *ExternalConfig {
 	return &ExternalConfig{
 		DatabaseURL: "postgres://localhost/testdb",
-		APIKey:      "secret-api-key",
+		APIKey:      string(apiKey),
 	}
 }
