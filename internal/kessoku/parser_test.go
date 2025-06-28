@@ -205,6 +205,291 @@ func invalid syntax here {
 			shouldError:   true,
 			errorContains: "parse file",
 		},
+		{
+			name: "kessoku inline Set call",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Value string
+}
+
+func NewConfig() *Config {
+	return &Config{Value: "test"}
+}
+
+type Database struct {
+	config *Config
+}
+
+func NewDatabase(config *Config) (*Database, error) {
+	return &Database{config: config}, nil
+}
+
+type Service struct {
+	db *Database
+}
+
+func NewService(db *Database) *Service {
+	return &Service{db: db}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	kessoku.Set(
+		kessoku.Provide(NewConfig),
+		kessoku.Provide(NewDatabase),
+	),
+	kessoku.Provide(NewService),
+)
+`,
+			expectedBuilds:       1,
+			expectedProviders:    3,
+			expectedArgs:         0,
+			expectedInjectorName: "InitializeService",
+			shouldError:          false,
+		},
+		{
+			name: "kessoku Set variable",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Value string
+}
+
+func NewConfig() *Config {
+	return &Config{Value: "test"}
+}
+
+type Database struct {
+	config *Config
+}
+
+func NewDatabase(config *Config) (*Database, error) {
+	return &Database{config: config}, nil
+}
+
+type Service struct {
+	db *Database
+}
+
+func NewService(db *Database) *Service {
+	return &Service{db: db}
+}
+
+var DatabaseSet = kessoku.Set(
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewDatabase),
+)
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	DatabaseSet,
+	kessoku.Provide(NewService),
+)
+`,
+			expectedBuilds:       1,
+			expectedProviders:    3,
+			expectedArgs:         0,
+			expectedInjectorName: "InitializeService",
+			shouldError:          false,
+		},
+		{
+			name: "kessoku nested Set variables",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Value string
+}
+
+func NewConfig() *Config {
+	return &Config{Value: "test"}
+}
+
+type Database struct {
+	config *Config
+}
+
+func NewDatabase(config *Config) (*Database, error) {
+	return &Database{config: config}, nil
+}
+
+type UserService struct {
+	db *Database
+}
+
+func NewUserService(db *Database) *UserService {
+	return &UserService{db: db}
+}
+
+type App struct {
+	service *UserService
+}
+
+func NewApp(service *UserService) *App {
+	return &App{service: service}
+}
+
+var DatabaseSet = kessoku.Set(
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewDatabase),
+)
+
+var ServiceSet = kessoku.Set(
+	DatabaseSet,
+	kessoku.Provide(NewUserService),
+)
+
+var _ = kessoku.Inject[*App](
+	"InitializeApp",
+	ServiceSet,
+	kessoku.Provide(NewApp),
+)
+`,
+			expectedBuilds:       1,
+			expectedProviders:    4,
+			expectedArgs:         0,
+			expectedInjectorName: "InitializeApp",
+			shouldError:          false,
+		},
+		{
+			name: "kessoku multiple injectors with Set variables",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Value string
+}
+
+func NewConfig() *Config {
+	return &Config{Value: "test"}
+}
+
+type Database struct {
+	config *Config
+}
+
+func NewDatabase(config *Config) (*Database, error) {
+	return &Database{config: config}, nil
+}
+
+type Service struct {
+	db *Database
+}
+
+func NewService(db *Database) *Service {
+	return &Service{db: db}
+}
+
+type App struct {
+	service *Service
+}
+
+func NewApp(service *Service) *App {
+	return &App{service: service}
+}
+
+var DatabaseSet = kessoku.Set(
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewDatabase),
+)
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	DatabaseSet,
+	kessoku.Provide(NewService),
+)
+
+var _ = kessoku.Inject[*App](
+	"InitializeApp",
+	DatabaseSet,
+	kessoku.Provide(NewService),
+	kessoku.Provide(NewApp),
+)
+`,
+			expectedBuilds:       2,
+			expectedProviders:    3, // Check first injector
+			expectedArgs:         0,
+			expectedInjectorName: "InitializeService",
+			shouldError:          false,
+		},
+	}
+
+	// Additional test for edge cases related to Set variable parsing
+	setVariableEdgeCases := []struct {
+		content         string
+		name            string
+		expectedBuilds  int
+		shouldHaveError bool
+	}{
+		{
+			name: "undefined Set variable graceful handling",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Service struct {
+	value string
+}
+
+func NewService(value string) *Service {
+	return &Service{value: value}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	UndefinedSet,
+	kessoku.Provide(NewService),
+)
+`,
+			expectedBuilds:  0, // Should skip this injector due to parse error
+			shouldHaveError: false, // Parser should not fail completely, just skip the injector
+		},
+	}
+
+	// Run edge case tests
+	for _, tt := range setVariableEdgeCases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			testFile := filepath.Join(tempDir, "test.go")
+
+			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			parser := NewParser()
+			metadata, builds, err := parser.ParseFile(testFile)
+
+			if tt.shouldHaveError {
+				if err == nil {
+					t.Fatal("Expected ParseFile to fail")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ParseFile failed: %v", err)
+			}
+
+			if tt.expectedBuilds == 0 {
+				if metadata != nil && len(builds) > 0 {
+					t.Errorf("Expected no builds due to parse errors, got %d", len(builds))
+				}
+				return
+			}
+
+			if len(builds) != tt.expectedBuilds {
+				t.Fatalf("Expected %d build directives, got %d", tt.expectedBuilds, len(builds))
+			}
+		})
 	}
 
 	for _, tt := range tests {
@@ -317,4 +602,190 @@ func containsString(s, substr string) bool {
 		}
 		return false
 	}())
+}
+
+func TestParseProviderArgument_SetVariables(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		content           string
+		name              string
+		expectedProviders int
+		shouldError       bool
+	}{
+		{
+			name: "Set variable resolution",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Value string
+}
+
+func NewConfig() *Config {
+	return &Config{Value: "test"}
+}
+
+type Database struct {
+	config *Config
+}
+
+func NewDatabase(config *Config) (*Database, error) {
+	return &Database{config: config}, nil
+}
+
+var DatabaseSet = kessoku.Set(
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewDatabase),
+)
+
+type Service struct {
+	db *Database
+}
+
+func NewService(db *Database) *Service {
+	return &Service{db: db}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	DatabaseSet,
+	kessoku.Provide(NewService),
+)
+`,
+			expectedProviders: 3,
+			shouldError:       false,
+		},
+		{
+			name: "Nested Set variables",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct{}
+func NewConfig() *Config { return &Config{} }
+
+type Database struct{}
+func NewDatabase(config *Config) *Database { return &Database{} }
+
+type UserService struct{}
+func NewUserService(db *Database) *UserService { return &UserService{} }
+
+type App struct{}
+func NewApp(service *UserService) *App { return &App{} }
+
+var DatabaseSet = kessoku.Set(
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewDatabase),
+)
+
+var ServiceSet = kessoku.Set(
+	DatabaseSet,
+	kessoku.Provide(NewUserService),
+)
+
+var _ = kessoku.Inject[*App](
+	"InitializeApp",
+	ServiceSet,
+	kessoku.Provide(NewApp),
+)
+`,
+			expectedProviders: 4,
+			shouldError:       false,
+		},
+		{
+			name: "Mixed inline and variable Sets",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct{}
+func NewConfig() *Config { return &Config{} }
+
+type Database struct{}
+func NewDatabase(config *Config) *Database { return &Database{} }
+
+type Cache struct{}
+func NewCache() *Cache { return &Cache{} }
+
+type Service struct{}
+func NewService(db *Database, cache *Cache) *Service { return &Service{} }
+
+var DatabaseSet = kessoku.Set(
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewDatabase),
+)
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	DatabaseSet,
+	kessoku.Set(
+		kessoku.Provide(NewCache),
+	),
+	kessoku.Provide(NewService),
+)
+`,
+			expectedProviders: 4,
+			shouldError:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			testFile := filepath.Join(tempDir, "test.go")
+
+			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			parser := NewParser()
+			metadata, builds, err := parser.ParseFile(testFile)
+
+			if tt.shouldError {
+				if err == nil {
+					t.Fatal("Expected ParseFile to fail")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ParseFile failed: %v", err)
+			}
+
+			if metadata == nil {
+				t.Fatal("Expected metadata to be returned")
+			}
+
+			if len(builds) != 1 {
+				t.Fatalf("Expected 1 build directive, got %d", len(builds))
+			}
+
+			build := builds[0]
+			if len(build.Providers) != tt.expectedProviders {
+				t.Errorf("Expected %d providers, got %d", tt.expectedProviders, len(build.Providers))
+				
+				// Log provider details for debugging
+				t.Logf("Found providers:")
+				for i, provider := range build.Providers {
+					t.Logf("  %d: Provides %v", i, provider.Provides)
+				}
+			}
+
+			// Verify all providers have valid type information
+			for i, provider := range build.Providers {
+				if len(provider.Provides) == 0 {
+					t.Errorf("Provider %d has no provides types", i)
+				}
+				for j, providedType := range provider.Provides {
+					if providedType == nil {
+						t.Errorf("Provider %d provides type %d is nil", i, j)
+					}
+				}
+			}
+		})
+	}
 }
