@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"go/types"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/mazrean/kessoku/internal/pkg/collection"
@@ -24,9 +25,12 @@ func createASTTypeExpr(t types.Type) ast.Expr {
 	case *types.Named:
 		name := typ.Obj().Name()
 		if pkg := typ.Obj().Pkg(); pkg != nil && pkg.Name() != "main" {
-			// For types from other packages, just use the simple name
-			// The import handling will be done elsewhere
-			return ast.NewIdent(name)
+			// For types from other packages, create a selector expression
+			// Format: package.TypeName
+			return &ast.SelectorExpr{
+				X:   ast.NewIdent(pkg.Name()),
+				Sel: ast.NewIdent(name),
+			}
 		}
 		return ast.NewIdent(name)
 	case *types.Slice:
@@ -50,8 +54,26 @@ func createASTTypeExpr(t types.Type) ast.Expr {
 		if typ.NumMethods() == 0 {
 			return ast.NewIdent("interface{}")
 		}
-		// For non-empty interfaces, use the simple name
+		// For non-empty interfaces, use interface{} as fallback
+		// Named interfaces should be handled by the *types.Named case above
 		return ast.NewIdent("interface{}")
+	case *types.Chan:
+		var dir ast.ChanDir
+		switch typ.Dir() {
+		case types.SendRecv:
+			dir = ast.SEND | ast.RECV
+		case types.SendOnly:
+			dir = ast.SEND
+		case types.RecvOnly:
+			dir = ast.RECV
+		}
+		return &ast.ChanType{
+			Dir:   dir,
+			Value: createASTTypeExpr(typ.Elem()),
+		}
+	case *types.Signature:
+		// For function types, use a simplified representation
+		return ast.NewIdent("func")
 	default:
 		// Fallback: try to use the string representation
 		typeStr := t.String()
@@ -270,14 +292,7 @@ func NewGraph(build *BuildDirective) (*Graph, error) {
 	// Add auto-detected arguments to the build directive
 	for _, arg := range argProviderMap {
 		// Only add arguments that were auto-detected (not originally in build.Arguments)
-		found := false
-		for _, originalArg := range build.Arguments {
-			if originalArg == arg {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(build.Arguments, arg) {
 			build.Arguments = append(build.Arguments, arg)
 		}
 	}
