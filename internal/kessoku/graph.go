@@ -3,10 +3,65 @@ package kessoku
 import (
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/token"
+	"go/types"
 	"log/slog"
+	"strings"
 
 	"github.com/mazrean/kessoku/internal/pkg/collection"
 )
+
+// createASTTypeExpr creates an AST type expression from a types.Type
+func createASTTypeExpr(t types.Type) ast.Expr {
+	switch typ := t.(type) {
+	case *types.Basic:
+		return ast.NewIdent(typ.Name())
+	case *types.Pointer:
+		return &ast.StarExpr{
+			X: createASTTypeExpr(typ.Elem()),
+		}
+	case *types.Named:
+		name := typ.Obj().Name()
+		if pkg := typ.Obj().Pkg(); pkg != nil && pkg.Name() != "main" {
+			// For types from other packages, just use the simple name
+			// The import handling will be done elsewhere
+			return ast.NewIdent(name)
+		}
+		return ast.NewIdent(name)
+	case *types.Slice:
+		return &ast.ArrayType{
+			Elt: createASTTypeExpr(typ.Elem()),
+		}
+	case *types.Array:
+		return &ast.ArrayType{
+			Len: &ast.BasicLit{
+				Kind:  token.INT,
+				Value: fmt.Sprintf("%d", typ.Len()),
+			},
+			Elt: createASTTypeExpr(typ.Elem()),
+		}
+	case *types.Map:
+		return &ast.MapType{
+			Key:   createASTTypeExpr(typ.Key()),
+			Value: createASTTypeExpr(typ.Elem()),
+		}
+	case *types.Interface:
+		if typ.NumMethods() == 0 {
+			return ast.NewIdent("interface{}")
+		}
+		// For non-empty interfaces, use the simple name
+		return ast.NewIdent("interface{}")
+	default:
+		// Fallback: try to use the string representation
+		typeStr := t.String()
+		// Remove package paths and just use the type name
+		if idx := strings.LastIndex(typeStr, "."); idx != -1 {
+			typeStr = typeStr[idx+1:]
+		}
+		return ast.NewIdent(typeStr)
+	}
+}
 
 func CreateInjector(metaData *MetaData, build *BuildDirective) (*Injector, error) {
 	slog.Debug("CreateInjector", "build", build)
@@ -182,7 +237,22 @@ func NewGraph(build *BuildDirective) (*Graph, error) {
 
 				srcIndex = provider.returnIndex
 			} else {
-				return nil, fmt.Errorf("no provider or arg provides %s", key)
+				// Auto-detect missing dependency and create an argument for it
+				argName := fmt.Sprintf("arg%d", len(argProviderMap))
+				arg := &Argument{
+					Name:        argName,
+					Type:        t,
+					ASTTypeExpr: createASTTypeExpr(t),
+				}
+				argProviderMap[key] = arg
+				
+				n2 = &node{
+					requireCount: 0,
+					arg:          arg,
+				}
+				argNodeMap[arg] = n2
+				queue.Push(n2)
+				srcIndex = 0
 			}
 
 			graph.edges[n2] = append(graph.edges[n2], &edgeNode{
@@ -194,6 +264,21 @@ func NewGraph(build *BuildDirective) (*Graph, error) {
 				graph.waitNodes.Push(n2)
 				graph.waitNodesAdded[n2] = true
 			}
+		}
+	}
+
+	// Add auto-detected arguments to the build directive
+	for _, arg := range argProviderMap {
+		// Only add arguments that were auto-detected (not originally in build.Arguments)
+		found := false
+		for _, originalArg := range build.Arguments {
+			if originalArg == arg {
+				found = true
+				break
+			}
+		}
+		if !found {
+			build.Arguments = append(build.Arguments, arg)
 		}
 	}
 
