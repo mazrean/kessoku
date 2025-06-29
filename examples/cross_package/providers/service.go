@@ -1,5 +1,7 @@
 package providers
 
+import "context"
+
 // ExternalService represents a service from another package.
 type ExternalService struct {
 	Config *ExternalConfig
@@ -7,7 +9,7 @@ type ExternalService struct {
 }
 
 // NewExternalService creates a new external service.
-func NewExternalService(config *ExternalConfig) *ExternalService {
+func NewExternalService(ctx context.Context, config *ExternalConfig) *ExternalService {
 	return &ExternalService{
 		Config: config,
 		Name:   "External Service",
