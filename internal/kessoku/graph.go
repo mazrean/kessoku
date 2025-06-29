@@ -410,15 +410,7 @@ func getTypeBaseName(t types.Type) string {
 
 	// Handle basic types
 	if basic, ok := t.(*types.Basic); ok {
-		// Check by name first for byte and rune aliases
-		switch basic.Name() {
-		case "byte":
-			return "b"
-		case "rune":
-			return "r"
-		}
-
-		// Then check by kind
+		// Check by kind for all basic types (byte and rune are handled by their underlying types)
 		switch basic.Kind() {
 		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64:
 			return "num"
