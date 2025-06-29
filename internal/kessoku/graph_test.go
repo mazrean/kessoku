@@ -855,10 +855,10 @@ func TestSortArguments(t *testing.T) {
 	mutexType := types.NewNamed(mutexObj, types.NewStruct(nil, nil), nil)
 
 	tests := []struct {
-		name        string
-		args        []*Argument
+		name          string
+		description   string
+		args          []*Argument
 		expectedOrder []string
-		description string
 	}{
 		{
 			name: "context.Context should come first",
