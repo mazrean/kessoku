@@ -201,19 +201,21 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 
 	typeProviderMap := make(map[string]*typeProvider)
 	for _, provider := range build.Providers {
-		for i, t := range provider.Provides {
-			key := t.String()
-			if _, ok := argProviderMap[key]; ok {
-				return nil, fmt.Errorf("multiple providers provide %s", key)
-			}
+		for i, ts := range provider.Provides {
+			for _, t := range ts {
+				key := t.String()
+				if _, ok := argProviderMap[key]; ok {
+					return nil, fmt.Errorf("multiple providers provide %s", key)
+				}
 
-			if _, ok := typeProviderMap[key]; ok {
-				return nil, fmt.Errorf("multiple providers provide %s", key)
-			}
+				if _, ok := typeProviderMap[key]; ok {
+					return nil, fmt.Errorf("multiple providers provide %s", key)
+				}
 
-			typeProviderMap[key] = &typeProvider{
-				provider:    provider,
-				returnIndex: i,
+				typeProviderMap[key] = &typeProvider{
+					provider:    provider,
+					returnIndex: i,
+				}
 			}
 		}
 	}

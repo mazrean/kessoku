@@ -88,7 +88,7 @@ var _ = kessoku.Inject[*Service](
 			shouldError:          false,
 		},
 		{
-			name: "kessoku bind",
+			name: "kessoku as",
 			content: `package main
 
 import "github.com/mazrean/kessoku"
@@ -117,7 +117,7 @@ func NewService(impl Interface) *Service {
 
 var _ = kessoku.Inject[*Service](
 	"InitializeService",
-	kessoku.Bind[Interface](kessoku.Provide(NewConcreteImpl)),
+	kessoku.As[Interface](kessoku.Provide(NewConcreteImpl)),
 	kessoku.Provide(NewService),
 )
 `,
@@ -560,11 +560,21 @@ var _ = kessoku.Inject[*Service](
 				var foundProvider *ProviderSpec
 				for _, provider := range build.Providers {
 					if len(provider.Provides) > 0 {
-						typeName := provider.Provides[0].String()
-						if typeName == tt.expectedProviderType {
-							foundProvider = provider
-							break
+						// Check all types in all groups provided by this provider
+						for _, typeGroup := range provider.Provides {
+							for _, providedType := range typeGroup {
+								if providedType.String() == tt.expectedProviderType {
+									foundProvider = provider
+									break
+								}
+							}
+							if foundProvider != nil {
+								break
+							}
 						}
+					}
+					if foundProvider != nil {
+						break
 					}
 				}
 
@@ -781,9 +791,14 @@ var _ = kessoku.Inject[*Service](
 				if len(provider.Provides) == 0 {
 					t.Errorf("Provider %d has no provides types", i)
 				}
-				for j, providedType := range provider.Provides {
-					if providedType == nil {
-						t.Errorf("Provider %d provides type %d is nil", i, j)
+				for j, providedTypeGroup := range provider.Provides {
+					if providedTypeGroup == nil {
+						t.Errorf("Provider %d provides type group %d is nil", i, j)
+					}
+					for k, providedType := range providedTypeGroup {
+						if providedType == nil {
+							t.Errorf("Provider %d provides type group %d type %d is nil", i, j, k)
+						}
 					}
 				}
 			}

@@ -50,13 +50,13 @@ func TestNewGraph(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
 					},
@@ -81,7 +81,7 @@ func TestNewGraph(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{intType},
 						IsReturnError: false,
 					},
@@ -101,7 +101,7 @@ func TestNewGraph(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType}, // Config provider is missing - should be auto-detected
 						IsReturnError: false,
 					},
@@ -187,13 +187,13 @@ func TestGraphBuild(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
 					},
@@ -270,13 +270,13 @@ func TestCreateInjector(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
 					},
@@ -300,7 +300,7 @@ func TestCreateInjector(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType}, // Missing provider - should be auto-detected
 						IsReturnError: false,
 					},

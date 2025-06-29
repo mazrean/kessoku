@@ -78,7 +78,7 @@ func TestGenerate(t *testing.T) {
 						{
 							Provider: &ProviderSpec{
 								Type:          ProviderTypeFunction,
-								Provides:      []types.Type{configType},
+								Provides:      [][]types.Type{{configType}},
 								Requires:      []types.Type{},
 								IsReturnError: false,
 								ASTExpr:       configProviderExpr,
@@ -89,7 +89,7 @@ func TestGenerate(t *testing.T) {
 						{
 							Provider: &ProviderSpec{
 								Type:          ProviderTypeFunction,
-								Provides:      []types.Type{serviceType},
+								Provides:      [][]types.Type{{serviceType}},
 								Requires:      []types.Type{configType},
 								IsReturnError: false,
 								ASTExpr:       serviceProviderExpr,
@@ -141,7 +141,7 @@ func TestGenerate(t *testing.T) {
 						{
 							Provider: &ProviderSpec{
 								Type:          ProviderTypeFunction,
-								Provides:      []types.Type{serviceType},
+								Provides:      [][]types.Type{{serviceType}},
 								Requires:      []types.Type{intType},
 								IsReturnError: false,
 								ASTExpr:       serviceProviderExpr,
@@ -181,7 +181,7 @@ func TestGenerate(t *testing.T) {
 						{
 							Provider: &ProviderSpec{
 								Type:          ProviderTypeFunction,
-								Provides:      []types.Type{serviceType},
+								Provides:      [][]types.Type{{serviceType}},
 								Requires:      []types.Type{},
 								IsReturnError: true,
 								ASTExpr:       serviceProviderExpr,
@@ -218,7 +218,7 @@ func TestGenerate(t *testing.T) {
 						{
 							Provider: &ProviderSpec{
 								Type:          ProviderTypeFunction,
-								Provides:      []types.Type{serviceType},
+								Provides:      [][]types.Type{{serviceType}},
 								Requires:      []types.Type{},
 								IsReturnError: false,
 								ASTExpr:       serviceProviderExpr,
@@ -244,7 +244,7 @@ func TestGenerate(t *testing.T) {
 						{
 							Provider: &ProviderSpec{
 								Type:          ProviderTypeFunction,
-								Provides:      []types.Type{serviceType},
+								Provides:      [][]types.Type{{serviceType}},
 								Requires:      []types.Type{},
 								IsReturnError: false,
 								ASTExpr:       serviceProviderExpr,
@@ -284,7 +284,7 @@ func TestGenerate(t *testing.T) {
 						{
 							Provider: &ProviderSpec{
 								Type:          ProviderTypeFunction,
-								Provides:      []types.Type{serviceType},
+								Provides:      [][]types.Type{{serviceType}},
 								Requires:      []types.Type{},
 								IsReturnError: false,
 								ASTExpr:       serviceProviderExpr,
