@@ -8,55 +8,75 @@ import (
 	"go/types"
 	"log/slog"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/mazrean/kessoku/internal/pkg/collection"
 )
 
-// createASTTypeExpr creates an AST type expression from a types.Type
-func createASTTypeExpr(t types.Type) ast.Expr {
+// createASTTypeExpr creates an AST type expression from a types.Type and returns required imports
+func createASTTypeExpr(t types.Type) (ast.Expr, []string) {
+	var imports []string
+
 	switch typ := t.(type) {
 	case *types.Basic:
-		return ast.NewIdent(typ.Name())
+		return ast.NewIdent(typ.Name()), imports
 	case *types.Pointer:
+		expr, elemImports := createASTTypeExpr(typ.Elem())
 		return &ast.StarExpr{
-			X: createASTTypeExpr(typ.Elem()),
-		}
+			X: expr,
+		}, elemImports
 	case *types.Named:
 		name := typ.Obj().Name()
 		if pkg := typ.Obj().Pkg(); pkg != nil && pkg.Name() != "main" {
 			// For types from other packages, create a selector expression
 			// Format: package.TypeName
+			imports = append(imports, pkg.Path())
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(pkg.Name()),
 				Sel: ast.NewIdent(name),
-			}
+			}, imports
 		}
-		return ast.NewIdent(name)
+		return ast.NewIdent(name), imports
 	case *types.Slice:
+		expr, elemImports := createASTTypeExpr(typ.Elem())
 		return &ast.ArrayType{
-			Elt: createASTTypeExpr(typ.Elem()),
-		}
+			Elt: expr,
+		}, elemImports
 	case *types.Array:
+		expr, elemImports := createASTTypeExpr(typ.Elem())
 		return &ast.ArrayType{
 			Len: &ast.BasicLit{
 				Kind:  token.INT,
 				Value: fmt.Sprintf("%d", typ.Len()),
 			},
-			Elt: createASTTypeExpr(typ.Elem()),
-		}
+			Elt: expr,
+		}, elemImports
 	case *types.Map:
+		keyExpr, keyImports := createASTTypeExpr(typ.Key())
+		valueExpr, valueImports := createASTTypeExpr(typ.Elem())
+		allImports := make([]string, 0, len(keyImports)+len(valueImports))
+		allImports = append(allImports, keyImports...)
+		allImports = append(allImports, valueImports...)
 		return &ast.MapType{
-			Key:   createASTTypeExpr(typ.Key()),
-			Value: createASTTypeExpr(typ.Elem()),
-		}
+			Key:   keyExpr,
+			Value: valueExpr,
+		}, allImports
 	case *types.Interface:
-		if typ.NumMethods() == 0 {
-			return ast.NewIdent("interface{}")
+		methodFields := make([]*ast.Field, 0, typ.NumMethods())
+		for method := range typ.Methods() {
+			expr, newImports := createASTTypeExpr(method.Signature())
+			imports = append(imports, newImports...)
+			methodFields = append(methodFields, &ast.Field{
+				Names: []*ast.Ident{ast.NewIdent(method.Name())},
+				Type:  expr,
+			})
 		}
-		// For non-empty interfaces, use interface{} as fallback
-		// Named interfaces should be handled by the *types.Named case above
-		return ast.NewIdent("interface{}")
+		return &ast.InterfaceType{
+			Methods: &ast.FieldList{
+				List: methodFields,
+			},
+		}, imports
 	case *types.Chan:
 		var dir ast.ChanDir
 		switch typ.Dir() {
@@ -67,13 +87,38 @@ func createASTTypeExpr(t types.Type) ast.Expr {
 		case types.RecvOnly:
 			dir = ast.RECV
 		}
+		expr, elemImports := createASTTypeExpr(typ.Elem())
 		return &ast.ChanType{
 			Dir:   dir,
-			Value: createASTTypeExpr(typ.Elem()),
-		}
+			Value: expr,
+		}, elemImports
 	case *types.Signature:
-		// For function types, use a simplified representation
-		return ast.NewIdent("func")
+		funcFields := make([]*ast.Field, 0, typ.Params().Len())
+		for i := 0; i < typ.Params().Len(); i++ {
+			expr, newImports := createASTTypeExpr(typ.Params().At(i).Type())
+			imports = append(imports, newImports...)
+			funcFields = append(funcFields, &ast.Field{
+				Names: []*ast.Ident{ast.NewIdent(fmt.Sprintf("arg%d", i))},
+				Type:  expr,
+			})
+		}
+		resultsFields := make([]*ast.Field, 0, typ.Results().Len())
+		for i := 0; i < typ.Results().Len(); i++ {
+			expr, newImports := createASTTypeExpr(typ.Results().At(i).Type())
+			imports = append(imports, newImports...)
+			resultsFields = append(resultsFields, &ast.Field{
+				Names: []*ast.Ident{ast.NewIdent(fmt.Sprintf("result%d", i))},
+				Type:  expr,
+			})
+		}
+		return &ast.FuncType{
+			Params: &ast.FieldList{
+				List: funcFields,
+			},
+			Results: &ast.FieldList{
+				List: resultsFields,
+			},
+		}, imports
 	default:
 		// Fallback: try to use the string representation
 		typeStr := t.String()
@@ -81,7 +126,7 @@ func createASTTypeExpr(t types.Type) ast.Expr {
 		if idx := strings.LastIndex(typeStr, "."); idx != -1 {
 			typeStr = typeStr[idx+1:]
 		}
-		return ast.NewIdent(typeStr)
+		return ast.NewIdent(typeStr), imports
 	}
 }
 
@@ -90,7 +135,7 @@ func CreateInjector(metaData *MetaData, build *BuildDirective) (*Injector, error
 	for _, provider := range build.Providers {
 		slog.Debug("provider", "provider", provider)
 	}
-	graph, err := NewGraph(build)
+	graph, err := NewGraph(metaData, build)
 	if err != nil {
 		return nil, fmt.Errorf("create graph: %w", err)
 	}
@@ -130,7 +175,7 @@ type Graph struct {
 	injectorName   string
 }
 
-func NewGraph(build *BuildDirective) (*Graph, error) {
+func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 	graph := &Graph{
 		injectorName:   build.InjectorName,
 		returnType:     build.Return,
@@ -260,14 +305,30 @@ func NewGraph(build *BuildDirective) (*Graph, error) {
 				srcIndex = provider.returnIndex
 			} else {
 				// Auto-detect missing dependency and create an argument for it
-				argName := fmt.Sprintf("arg%d", len(argProviderMap))
+				// Generate argument name from type name
+				argName := generateArgName(t, argProviderMap)
+				expr, requiredImports := createASTTypeExpr(t)
+
+				// Add required imports to metadata
+				for _, importPath := range requiredImports {
+					if _, exists := metaData.Imports[importPath]; !exists {
+						// Create import spec for the required package
+						metaData.Imports[importPath] = &ast.ImportSpec{
+							Path: &ast.BasicLit{
+								Kind:  token.STRING,
+								Value: fmt.Sprintf("\"%s\"", importPath),
+							},
+						}
+					}
+				}
+
 				arg := &Argument{
 					Name:        argName,
 					Type:        t,
-					ASTTypeExpr: createASTTypeExpr(t),
+					ASTTypeExpr: expr,
 				}
 				argProviderMap[key] = arg
-				
+
 				n2 = &node{
 					requireCount: 0,
 					arg:          arg,
@@ -289,15 +350,148 @@ func NewGraph(build *BuildDirective) (*Graph, error) {
 		}
 	}
 
-	// Add auto-detected arguments to the build directive
+	// Add auto-detected arguments to the build directive and sort them deterministically
+	autoDetectedArgs := make([]*Argument, 0)
 	for _, arg := range argProviderMap {
 		// Only add arguments that were auto-detected (not originally in build.Arguments)
 		if !slices.Contains(build.Arguments, arg) {
-			build.Arguments = append(build.Arguments, arg)
+			autoDetectedArgs = append(autoDetectedArgs, arg)
 		}
 	}
 
+	// Sort arguments deterministically: context.Context first, then by type name
+	sortArguments(autoDetectedArgs)
+	build.Arguments = append(build.Arguments, autoDetectedArgs...)
+
 	return graph, nil
+}
+
+// generateArgName creates a meaningful argument name from the type
+func generateArgName(t types.Type, existingArgs map[string]*Argument) string {
+	baseName := getTypeBaseName(t)
+
+	// Check for conflicts and add suffix if needed
+	counter := 0
+	name := baseName
+	for {
+		// Check if this name conflicts with any existing argument names
+		conflict := false
+		for _, arg := range existingArgs {
+			if arg.Name == name {
+				conflict = true
+				break
+			}
+		}
+		if !conflict {
+			break
+		}
+		counter++
+		name = fmt.Sprintf("%s%d", baseName, counter)
+	}
+	return name
+}
+
+var ()
+
+// getTypeBaseName extracts a base name from a type for argument naming
+func getTypeBaseName(t types.Type) string {
+	if named, ok := t.(*types.Named); ok {
+		if obj := named.Obj(); obj != nil && obj.Pkg() != nil {
+			if obj.Pkg().Path() == "context" && obj.Name() == "Context" {
+				return "ctx"
+			}
+		}
+	}
+
+	// For pointers, recurse on the element type
+	if ptr, ok := t.(*types.Pointer); ok {
+		return getTypeBaseName(ptr.Elem())
+	}
+
+	// Handle basic types
+	if basic, ok := t.(*types.Basic); ok {
+		// Check by name first for byte and rune aliases
+		switch basic.Name() {
+		case "byte":
+			return "b"
+		case "rune":
+			return "r"
+		}
+
+		// Then check by kind
+		switch basic.Kind() {
+		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64:
+			return "num"
+		case types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64:
+			return "num"
+		case types.Float32, types.Float64:
+			return "value"
+		case types.String:
+			return "str"
+		case types.Bool:
+			return "flag"
+		case types.Complex64, types.Complex128:
+			return "complex"
+		case types.Uintptr:
+			return "ptr"
+		case types.UnsafePointer:
+			return "unsafe"
+		case types.UntypedBool, types.UntypedInt, types.UntypedRune, types.UntypedFloat, types.UntypedComplex, types.UntypedString, types.UntypedNil:
+			return "untyped"
+		case types.Invalid:
+			return "invalid"
+		default:
+			return strings.ToLower(basic.Name())
+		}
+	}
+
+	// Handle named types
+	if named, ok := t.(*types.Named); ok {
+		return strings.ToLower(named.Obj().Name())
+	}
+
+	// For other types, use the string representation and extract the type name
+	typeStr := t.String()
+	if idx := strings.LastIndex(typeStr, "."); idx != -1 {
+		typeStr = typeStr[idx+1:]
+	}
+	// Remove pointer prefix if any
+	typeStr = strings.TrimPrefix(typeStr, "*")
+
+	return strings.ToLower(typeStr)
+}
+
+// isContextType checks if a type is context.Context
+func isContextType(t types.Type) bool {
+	if named, ok := t.(*types.Named); ok {
+		if obj := named.Obj(); obj != nil && obj.Pkg() != nil {
+			return obj.Pkg().Path() == "context" && obj.Name() == "Context"
+		}
+	}
+
+	return false
+}
+
+// sortArguments sorts arguments deterministically: context.Context first, then by type name
+func sortArguments(args []*Argument) {
+	sort.Slice(args, func(i, j int) bool {
+		iType := args[i].Type
+		jType := args[j].Type
+
+		// context.Context always comes first
+		iIsContext := isContextType(iType)
+		jIsContext := isContextType(jType)
+
+		if iIsContext && !jIsContext {
+			return true
+		}
+		if !iIsContext && jIsContext {
+			return false
+		}
+
+		// For non-context types, sort by type name
+		return iType.String() < jType.String()
+	})
 }
 
 func (g *Graph) Build() (*Injector, error) {
