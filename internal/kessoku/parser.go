@@ -278,7 +278,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 		slog.Warn("kessoku package is imported, but kessoku.Set function is not found")
 		return nil
 	}
-	
+
 	// Get the return type of the Set function
 	sig, sigOk := setFuncType.(*types.Signature)
 	if !sigOk || sig.Results().Len() != 1 {
@@ -286,10 +286,10 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 		return nil
 	}
 	setType := sig.Results().At(0).Type()
-	
+
 	if types.Identical(providerType, setType) {
 		var (
-			callExpr *ast.CallExpr
+			callExpr   *ast.CallExpr
 			currentArg = arg
 		)
 		for callExpr == nil && currentArg != nil {
@@ -320,11 +320,11 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 				continue
 			}
 		}
-		
+
 		if callExpr == nil {
 			return fmt.Errorf("invalid Set call expression")
 		}
-		
+
 		for _, setArg := range callExpr.Args {
 			if err := p.parseProviderArgument(pkg, kessokuPackageScope, setArg, build, imports, fileImports); err != nil {
 				return fmt.Errorf("parse Set provider argument: %w", err)
