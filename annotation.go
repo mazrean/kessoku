@@ -13,6 +13,11 @@ type provider interface {
 	provide()
 }
 
+type iFnProvider[T any] interface {
+	provider
+	Fn() T
+}
+
 // fnProvider wraps a function to be used as a dependency provider.
 // The generic type T should be a function type that returns one or more values,
 // where the returned values become available dependencies.
@@ -41,31 +46,58 @@ func Provide[T any](fn T) fnProvider[T] {
 	return fnProvider[T]{fn: fn}
 }
 
-// bindProvider represents a type binding that maps one type to another.
+// asProvider represents a type binding that maps one type to another.
 // S is the source type and T is the target type that the binding maps to.
-type bindProvider[S, T any] fnProvider[T]
-
-// provide implements the provider interface for bindProvider.
-func (p bindProvider[_, _]) provide() {}
-
-// Fn returns the wrapped function for the bind provider.
-// This method is used internally by the code generator.
-func (p bindProvider[_, T]) Fn() T {
-	return p.fn
+type asProvider[Dst, Fn any, Provider iFnProvider[Fn]] struct {
+	provider Provider
 }
 
-// Bind creates a type binding that maps type S to type T using the given provider.
+// provide implements the provider interface for asProvider.
+func (p asProvider[_, _, _]) provide() {}
+
+// Fn returns the wrapped function for the as provider.
+// This method is used internally by the code generator.
+func (p asProvider[_, Fn, _]) Fn() Fn {
+	return p.provider.Fn()
+}
+
+// As creates a type binding that maps type S to type T using the given provider.
 // This is useful when you want to provide a concrete implementation for an interface
 // or when you need to map one type to another in the dependency graph.
 //
 // Example:
 //
-//	kessoku.Bind[UserRepository, *DatabaseUserRepo](kessoku.Provide(NewDatabaseUserRepo))
+//	kessoku.As[UserRepository](kessoku.Provide(NewDatabaseUserRepo))
 //
 // This tells kessoku that when a UserRepository is needed, it should use
 // the DatabaseUserRepo implementation provided by NewDatabaseUserRepo.
-func Bind[S, T any](fn fnProvider[T]) bindProvider[S, T] {
-	return bindProvider[S, T](fn)
+func As[Dst, Fn any, Provider iFnProvider[Fn]](fn Provider) asProvider[Dst, Fn, Provider] {
+	return asProvider[Dst, Fn, Provider]{provider: fn}
+}
+
+type asMapProvider[Dst, Src, Fn any, Provider iFnProvider[Fn]] struct {
+	provider Provider
+}
+
+func (p asMapProvider[_, _, _, _]) provide() {}
+
+func (p asMapProvider[_, _, Fn, _]) Fn() Fn {
+	return p.provider.Fn()
+}
+
+// AsMap creates a type binding that maps a source type Src to a destination type Dst.
+// This is typically used to map concrete types to interface types in a more explicit way,
+// where you want to specify both the source and destination types clearly.
+//
+// Example:
+//
+//	kessoku.AsMap[UserRepository, *DatabaseUserRepo](kessoku.Provide(NewDatabaseUserRepo))
+//
+// This tells kessoku that when a UserRepository (Dst) is needed, it should use
+// the *DatabaseUserRepo (Src) implementation provided by NewDatabaseUserRepo.
+// The source type Src is explicitly declared for better type safety and clarity.
+func AsMap[Dst, Src, Fn any, Provider iFnProvider[Fn]](fn Provider) asMapProvider[Dst, Src, Fn, Provider] {
+	return asMapProvider[Dst, Src, Fn, Provider]{provider: fn}
 }
 
 // Value creates a provider for a constant value.
@@ -82,7 +114,6 @@ func Value[T any](v T) fnProvider[func() T] {
 		fn: func() T { return v },
 	}
 }
-
 
 // Inject declares a dependency injection build directive.
 // It generates a function with the specified name that constructs and returns
@@ -103,7 +134,7 @@ func Value[T any](v T) fnProvider[func() T] {
 //		kessoku.Provide(NewApp),
 //	)
 //
-// If NewConfig requires a string parameter that's not provided, 
+// If NewConfig requires a string parameter that's not provided,
 // this generates a function like:
 //
 //	func InitializeApp(arg0 string) (*App, error) {
