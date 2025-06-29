@@ -698,3 +698,266 @@ func TestCreateASTTypeExprWithRealPackages(t *testing.T) {
 		})
 	}
 }
+
+func TestGetTypeBaseName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		createType   func() types.Type
+		expectedName string
+		description  string
+	}{
+		{
+			name: "context.Context type",
+			createType: func() types.Type {
+				pkg := types.NewPackage("context", "context")
+				obj := types.NewTypeName(0, pkg, "Context", nil)
+				return types.NewNamed(obj, types.NewInterfaceType(nil, nil), nil)
+			},
+			expectedName: "ctx",
+			description:  "context.Context should be named 'ctx'",
+		},
+		{
+			name: "pointer to context.Context",
+			createType: func() types.Type {
+				pkg := types.NewPackage("context", "context")
+				obj := types.NewTypeName(0, pkg, "Context", nil)
+				namedType := types.NewNamed(obj, types.NewInterfaceType(nil, nil), nil)
+				return types.NewPointer(namedType)
+			},
+			expectedName: "ctx",
+			description:  "Pointer to context.Context should also be named 'ctx'",
+		},
+		{
+			name: "basic int type",
+			createType: func() types.Type {
+				return types.Typ[types.Int]
+			},
+			expectedName: "num",
+			description:  "Basic int should be named 'num'",
+		},
+		{
+			name: "basic string type",
+			createType: func() types.Type {
+				return types.Typ[types.String]
+			},
+			expectedName: "str",
+			description:  "Basic string should be named 'str'",
+		},
+		{
+			name: "basic bool type",
+			createType: func() types.Type {
+				return types.Typ[types.Bool]
+			},
+			expectedName: "flag",
+			description:  "Basic bool should be named 'flag'",
+		},
+		{
+			name: "basic float64 type",
+			createType: func() types.Type {
+				return types.Typ[types.Float64]
+			},
+			expectedName: "value",
+			description:  "Basic float64 should be named 'value'",
+		},
+		{
+			name: "byte type",
+			createType: func() types.Type {
+				return types.Typ[types.Byte]
+			},
+			expectedName: "num",
+			description:  "Byte type is treated as uint8, so should be named 'num'",
+		},
+		{
+			name: "rune type",
+			createType: func() types.Type {
+				return types.Typ[types.Rune]
+			},
+			expectedName: "num",
+			description:  "Rune type is treated as int32, so should be named 'num'",
+		},
+		{
+			name: "complex128 type",
+			createType: func() types.Type {
+				return types.Typ[types.Complex128]
+			},
+			expectedName: "complex",
+			description:  "Complex128 type should be named 'complex'",
+		},
+		{
+			name: "uintptr type",
+			createType: func() types.Type {
+				return types.Typ[types.Uintptr]
+			},
+			expectedName: "ptr",
+			description:  "Uintptr type should be named 'ptr'",
+		},
+		{
+			name: "named type from other package",
+			createType: func() types.Type {
+				pkg := types.NewPackage("fmt", "fmt")
+				obj := types.NewTypeName(0, pkg, "Stringer", nil)
+				return types.NewNamed(obj, types.NewInterfaceType(nil, nil), nil)
+			},
+			expectedName: "stringer",
+			description:  "Named type should use lowercase type name",
+		},
+		{
+			name: "pointer to named type",
+			createType: func() types.Type {
+				pkg := types.NewPackage("sync", "sync")
+				obj := types.NewTypeName(0, pkg, "Mutex", nil)
+				namedType := types.NewNamed(obj, types.NewStruct(nil, nil), nil)
+				return types.NewPointer(namedType)
+			},
+			expectedName: "mutex",
+			description:  "Pointer to named type should recurse to element type",
+		},
+		{
+			name: "slice type",
+			createType: func() types.Type {
+				return types.NewSlice(types.Typ[types.String])
+			},
+			expectedName: "[]string",
+			description:  "Slice type should use full string representation",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			typ := tt.createType()
+			actualName := getTypeBaseName(typ)
+
+			if actualName != tt.expectedName {
+				t.Errorf("getTypeBaseName() for %s:\n  Expected: %q\n  Actual:   %q\n  Description: %s",
+					tt.name, tt.expectedName, actualName, tt.description)
+			}
+		})
+	}
+}
+
+func TestSortArguments(t *testing.T) {
+	t.Parallel()
+
+	// Create test types
+	contextPkg := types.NewPackage("context", "context")
+	contextObj := types.NewTypeName(0, contextPkg, "Context", nil)
+	contextType := types.NewNamed(contextObj, types.NewInterfaceType(nil, nil), nil)
+
+	stringType := types.Typ[types.String]
+	intType := types.Typ[types.Int]
+
+	syncPkg := types.NewPackage("sync", "sync")
+	mutexObj := types.NewTypeName(0, syncPkg, "Mutex", nil)
+	mutexType := types.NewNamed(mutexObj, types.NewStruct(nil, nil), nil)
+
+	tests := []struct {
+		name        string
+		args        []*Argument
+		expectedOrder []string
+		description string
+	}{
+		{
+			name: "context.Context should come first",
+			args: []*Argument{
+				{Name: "str", Type: stringType},
+				{Name: "ctx", Type: contextType},
+				{Name: "num", Type: intType},
+			},
+			expectedOrder: []string{"ctx", "num", "str"},
+			description:   "context.Context arguments should be ordered first, then by type string (int < string)",
+		},
+		{
+			name: "multiple context.Context arguments maintain relative order",
+			args: []*Argument{
+				{Name: "str", Type: stringType},
+				{Name: "ctx1", Type: contextType},
+				{Name: "ctx2", Type: contextType},
+				{Name: "num", Type: intType},
+			},
+			expectedOrder: []string{"ctx1", "ctx2", "num", "str"},
+			description:   "Multiple context.Context arguments should come first, then by type string (int < string)",
+		},
+		{
+			name: "non-context types sorted by type string",
+			args: []*Argument{
+				{Name: "mutex", Type: mutexType},
+				{Name: "num", Type: intType},
+				{Name: "str", Type: stringType},
+			},
+			expectedOrder: []string{"num", "str", "mutex"},
+			description:   "Non-context types should be sorted by type string representation",
+		},
+		{
+			name: "mixed context and non-context",
+			args: []*Argument{
+				{Name: "mutex", Type: mutexType},
+				{Name: "str", Type: stringType},
+				{Name: "ctx", Type: contextType},
+				{Name: "num", Type: intType},
+			},
+			expectedOrder: []string{"ctx", "num", "str", "mutex"},
+			description:   "context.Context first, then others sorted by type string",
+		},
+		{
+			name: "empty slice",
+			args: []*Argument{},
+			expectedOrder: []string{},
+			description:   "Empty slice should remain empty",
+		},
+		{
+			name: "single argument",
+			args: []*Argument{
+				{Name: "str", Type: stringType},
+			},
+			expectedOrder: []string{"str"},
+			description:   "Single argument should remain unchanged",
+		},
+		{
+			name: "only context arguments",
+			args: []*Argument{
+				{Name: "ctx2", Type: contextType},
+				{Name: "ctx1", Type: contextType},
+			},
+			expectedOrder: []string{"ctx2", "ctx1"},
+			description:   "Only context arguments should maintain original order",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Make a copy of the input slice to avoid modifying the original
+			argsCopy := make([]*Argument, len(tt.args))
+			copy(argsCopy, tt.args)
+
+			sortArguments(argsCopy)
+
+			// Check that the length is correct
+			if len(argsCopy) != len(tt.expectedOrder) {
+				t.Fatalf("sortArguments() length mismatch for %s:\n  Expected length: %d\n  Actual length:   %d",
+					tt.name, len(tt.expectedOrder), len(argsCopy))
+			}
+
+			// Check the order
+			for i, expectedName := range tt.expectedOrder {
+				if i >= len(argsCopy) {
+					t.Fatalf("sortArguments() result too short for %s: missing element at index %d", tt.name, i)
+				}
+				if argsCopy[i].Name != expectedName {
+					actualOrder := make([]string, len(argsCopy))
+					for j, arg := range argsCopy {
+						actualOrder[j] = arg.Name
+					}
+					t.Errorf("sortArguments() for %s:\n  Expected order: %v\n  Actual order:   %v\n  Description: %s",
+						tt.name, tt.expectedOrder, actualOrder, tt.description)
+					break
+				}
+			}
+		})
+	}
+}
