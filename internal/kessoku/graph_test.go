@@ -408,8 +408,8 @@ func TestCreateASTTypeExpr(t *testing.T) {
 			createType: func() types.Type {
 				return types.NewInterfaceType(nil, nil)
 			},
-			expectedAST: "interface{}",
-			description: "Empty interface should be represented as interface{}",
+			expectedAST: "interface {\n}",
+			description: "Empty interface should be represented as proper AST",
 		},
 		{
 			name: "non-empty interface",
@@ -418,8 +418,8 @@ func TestCreateASTTypeExpr(t *testing.T) {
 				method := types.NewFunc(0, nil, "String", types.NewSignatureType(nil, nil, nil, nil, types.NewTuple(types.NewVar(0, nil, "", types.Typ[types.String])), false))
 				return types.NewInterfaceType([]*types.Func{method}, nil)
 			},
-			expectedAST: "interface{}",
-			description: "Non-empty anonymous interface should fallback to interface{}",
+			expectedAST: "interface {\n\tString() (result0 string)\n}",
+			description: "Non-empty interface should generate proper AST with methods",
 		},
 		{
 			name: "named type in main package",
@@ -527,8 +527,8 @@ func TestCreateASTTypeExpr(t *testing.T) {
 				)
 				return types.NewSignatureType(nil, nil, nil, params, results, false)
 			},
-			expectedAST: "func",
-			description: "Function signatures should be simplified to 'func'",
+			expectedAST: "func(arg0 int, arg1 string) (result0 bool)",
+			description: "Function signatures should generate proper AST with parameters and results",
 		},
 		{
 			name: "complex nested type",
