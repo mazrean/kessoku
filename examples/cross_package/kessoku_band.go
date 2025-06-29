@@ -5,10 +5,11 @@ package main
 import (
 	"github.com/mazrean/kessoku/examples/cross_package/providers"
 	"github.com/mazrean/kessoku"
+	"context"
 )
 
-func InitializeCrossPackageService(arg0 providers.APIKey) *providers.ExternalService {
-	v0 := kessoku.Provide(providers.NewExternalConfig).Fn()(arg0)
-	v1 := kessoku.Provide(providers.NewExternalService).Fn()(v0)
+func InitializeCrossPackageService(ctx context.Context, apikey providers.APIKey) *providers.ExternalService {
+	v0 := kessoku.Provide(providers.NewExternalConfig).Fn()(apikey)
+	v1 := kessoku.Provide(providers.NewExternalService).Fn()(ctx, v0)
 	return v1
 }
