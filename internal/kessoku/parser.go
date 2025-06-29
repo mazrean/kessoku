@@ -396,27 +396,22 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 			}
 
 			isReturnError := false
-			provides := make([]types.Type, 0, providerFnSig.Results().Len())
+			provides := make([][]types.Type, 0, providerFnSig.Results().Len())
 			for i := 0; i < providerFnSig.Results().Len(); i++ {
 				if types.Identical(providerFnSig.Results().At(i).Type(), types.Universe.Lookup("error").Type()) {
 					isReturnError = true
 					continue
 				}
 
-				provides = append(provides, providerFnSig.Results().At(i).Type())
+				provides = append(provides, []types.Type{providerFnSig.Results().At(i).Type()})
 			}
 
-			// Check if this is a bindProvider - it should provide the interface type instead of concrete type
-			if named, ok := providerType.(*types.Named); ok {
-				typeName := named.Obj().Name()
-				if typeName == "bindProvider" {
-					// For bindProvider[S, T], we want to provide type S (the interface)
-					// but keep the original requires from the wrapped provider
-					if typeArgs := named.TypeArgs(); typeArgs != nil && typeArgs.Len() >= 1 {
-						interfaceType := typeArgs.At(0)
-						provides = []types.Type{interfaceType}
-					}
-				}
+			// Check if this is an asProvider or asMapProvider - resolve recursively
+			var err error
+			provides, err = p.resolveAsProviderType(provides, providerType)
+			if err != nil {
+				slog.Warn("resolve asProvider/asMapProvider", "error", err)
+				return nil
 			}
 
 			build.Providers = append(build.Providers, &ProviderSpec{
@@ -435,6 +430,90 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 	}
 
 	return errors.New("unsupported provider expression")
+}
+
+// resolveAsProviderType recursively resolves asProvider and asMapProvider types
+// to find the final destination type that should be provided.
+// Returns nil if the type is not an asProvider or asMapProvider.
+func (p *Parser) resolveAsProviderType(provides [][]types.Type, providerType types.Type) ([][]types.Type, error) {
+	named, ok := providerType.(*types.Named)
+	if !ok {
+		return nil, nil
+	}
+
+	typeName := named.Obj().Name()
+	typeArgs := named.TypeArgs()
+	if typeArgs == nil {
+		return provides, nil
+	}
+
+	switch typeName {
+	case "asProvider":
+		// asProvider[Dst, Fn, Provider]
+		if typeArgs.Len() != 3 {
+			return nil, fmt.Errorf("asProvider has unexpected number of type arguments")
+		}
+		dstType := typeArgs.At(0)
+		providerParam := typeArgs.At(2)
+
+		if !types.IsInterface(dstType) {
+			return nil, fmt.Errorf("asProvider destination type %s is not an interface", dstType.String())
+		}
+
+		dstInterface, ok := dstType.Underlying().(*types.Interface)
+		if !ok {
+			return nil, fmt.Errorf("asProvider destination type %s is not an interface", dstType.String())
+		}
+
+		for i, provide := range provides {
+			for _, t := range provide {
+				if types.Implements(t, dstInterface) {
+					provides[i] = append(provide, dstType)
+					break
+				}
+			}
+		}
+
+		// Check if the nested provider is also an asProvider/asMapProvider
+		return p.resolveAsProviderType(provides, providerParam)
+
+	case "asMapProvider":
+		// asMapProvider[Dst, Src, Fn, Provider]
+		if typeArgs.Len() != 4 {
+			return nil, fmt.Errorf("asMapProvider has unexpected number of type arguments")
+		}
+
+		dstType := typeArgs.At(0)
+		srcType := typeArgs.At(1)
+		providerParam := typeArgs.At(3)
+
+		if !types.IsInterface(dstType) {
+			return nil, fmt.Errorf("asMapProvider destination type %s is not an interface", dstType.String())
+		}
+
+		dstInterface, ok := dstType.Underlying().(*types.Interface)
+		if !ok {
+			return nil, fmt.Errorf("asMapProvider destination type %s is not an interface", dstType.String())
+		}
+
+		if !types.Implements(srcType, dstInterface) {
+			return nil, fmt.Errorf("asMapProvider source type %s does not implement destination type %s", srcType.String(), dstType.String())
+		}
+
+		for i, provide := range provides {
+			for _, t := range provide {
+				if types.Identical(t, srcType) {
+					provides[i] = append(provide, dstType)
+					break
+				}
+			}
+		}
+
+		// Check if the nested provider is also an asProvider/asMapProvider
+		return p.resolveAsProviderType(provides, providerParam)
+	}
+
+	return provides, nil
 }
 
 func (p *Parser) getVarDecl(pkg *packages.Package, obj *types.Var) ast.Expr {

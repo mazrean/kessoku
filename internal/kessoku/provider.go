@@ -31,7 +31,7 @@ type Argument struct {
 type ProviderSpec struct {
 	ASTExpr       ast.Expr
 	Type          ProviderType
-	Provides      []types.Type
+	Provides      [][]types.Type
 	Requires      []types.Type
 	IsReturnError bool
 }
