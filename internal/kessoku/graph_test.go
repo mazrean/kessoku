@@ -116,7 +116,13 @@ func TestNewGraph(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			graph, err := NewGraph(tt.build)
+			// Create test metadata
+			metaData := &MetaData{
+				Package: "test",
+				Imports: make(map[string]*ast.ImportSpec),
+			}
+
+			graph, err := NewGraph(metaData, tt.build)
 
 			if tt.expectError {
 				if err == nil {
@@ -194,7 +200,13 @@ func TestGraphBuild(t *testing.T) {
 				},
 			}
 
-			graph, err := NewGraph(build)
+			// Create test metadata
+			metaData := &MetaData{
+				Package: "test",
+				Imports: make(map[string]*ast.ImportSpec),
+			}
+
+			graph, err := NewGraph(metaData, build)
 			if err != nil {
 				t.Fatalf("Failed to create graph: %v", err)
 			}
@@ -247,7 +259,7 @@ func TestCreateInjector(t *testing.T) {
 			name: "successful creation",
 			metadata: &MetaData{
 				Package: "test",
-				Imports: nil,
+				Imports: make(map[string]*ast.ImportSpec),
 			},
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
@@ -277,7 +289,7 @@ func TestCreateInjector(t *testing.T) {
 			name: "auto-detected argument in CreateInjector",
 			metadata: &MetaData{
 				Package: "test",
-				Imports: nil,
+				Imports: make(map[string]*ast.ImportSpec),
 			},
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
@@ -543,19 +555,19 @@ func TestCreateASTTypeExpr(t *testing.T) {
 			typ := tt.createType()
 
 			// Generate AST expression
-			expr := createASTTypeExpr(typ)
+			expr, _ := createASTTypeExpr(typ)
 
 			// Convert AST expression back to string for comparison
 			actualAST := exprToString(expr)
 
 			if actualAST != tt.expectedAST {
-				t.Errorf("createASTTypeExpr() for %s:\n  Expected: %q\n  Actual:   %q\n  Description: %s",
+				t.Errorf("createASTTypeExprWithImports() for %s:\n  Expected: %q\n  Actual:   %q\n  Description: %s",
 					tt.name, tt.expectedAST, actualAST, tt.description)
 			}
 
 			// Additional validation: make sure the expression is valid AST
 			if expr == nil {
-				t.Errorf("createASTTypeExpr() returned nil for %s", tt.name)
+				t.Errorf("createASTTypeExprWithImports() returned nil for %s", tt.name)
 			}
 		})
 	}
@@ -608,7 +620,7 @@ func TestCreateASTTypeExprEdgeCases(t *testing.T) {
 			t.Parallel()
 
 			typ := tt.createType()
-			expr := createASTTypeExpr(typ)
+			expr, _ := createASTTypeExpr(typ)
 
 			if tt.expectValid {
 				if expr == nil {
@@ -642,28 +654,28 @@ func TestCreateASTTypeExprWithRealPackages(t *testing.T) {
 
 	// This test uses actual Go packages to test more realistic scenarios
 	tests := []struct {
-		name         string
-		packagePath  string
-		typeName     string
-		expectedAST  string
+		name        string
+		packagePath string
+		typeName    string
+		expectedAST string
 	}{
 		{
-			name:         "context.Context",
-			packagePath:  "context",
-			typeName:     "Context",
-			expectedAST:  "context.Context",
+			name:        "context.Context",
+			packagePath: "context",
+			typeName:    "Context",
+			expectedAST: "context.Context",
 		},
 		{
-			name:         "time.Time",
-			packagePath:  "time",
-			typeName:     "Time",
-			expectedAST:  "time.Time",
+			name:        "time.Time",
+			packagePath: "time",
+			typeName:    "Time",
+			expectedAST: "time.Time",
 		},
 		{
-			name:         "io.Reader",
-			packagePath:  "io",
-			typeName:     "Reader",
-			expectedAST:  "io.Reader",
+			name:        "io.Reader",
+			packagePath: "io",
+			typeName:    "Reader",
+			expectedAST: "io.Reader",
 		},
 	}
 
@@ -676,11 +688,11 @@ func TestCreateASTTypeExprWithRealPackages(t *testing.T) {
 			obj := types.NewTypeName(0, pkg, tt.typeName, nil)
 			namedType := types.NewNamed(obj, types.NewInterfaceType(nil, nil), nil)
 
-			expr := createASTTypeExpr(namedType)
+			expr, _ := createASTTypeExpr(namedType)
 			actualAST := exprToString(expr)
 
 			if actualAST != tt.expectedAST {
-				t.Errorf("createASTTypeExpr() for %s:\n  Expected: %q\n  Actual:   %q",
+				t.Errorf("createASTTypeExprWithImports() for %s:\n  Expected: %q\n  Actual:   %q",
 					tt.name, tt.expectedAST, actualAST)
 			}
 		})
