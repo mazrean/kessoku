@@ -8,6 +8,6 @@ var _ = kessoku.Inject[*Service](
 	"InitializeComplexService",
 	kessoku.Provide(NewConfig),
 	kessoku.Value("example value"),
-	kessoku.Bind[Interface](kessoku.Provide(NewConcreteImpl)),
+	kessoku.As[Interface](kessoku.Provide(NewConcreteImpl)),
 	kessoku.Provide(NewService),
 )

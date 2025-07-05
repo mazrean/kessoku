@@ -6,7 +6,7 @@ import "github.com/mazrean/kessoku"
 
 func InitializeComplexService(num int) *Service {
 	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1 := kessoku.Bind[Interface](kessoku.Provide(NewConcreteImpl)).Fn()()
+	v1 := kessoku.As[Interface](kessoku.Provide(NewConcreteImpl)).Fn()()
 	v2 := kessoku.Value("example value").Fn()()
 	v3 := kessoku.Provide(NewService).Fn()(v0, v1, v2, num)
 	return v3
