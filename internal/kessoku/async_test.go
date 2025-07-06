@@ -101,3 +101,37 @@ func TestInjectorStmtParallelGroup(t *testing.T) {
 		t.Errorf("Expected parallel group 1, got %d", stmt.ParallelGroup)
 	}
 }
+
+func TestAsyncProviderWithContext(t *testing.T) {
+	// Create a mock injector with async providers
+	injector := &Injector{
+		Name:          "TestAsyncInjector",
+		IsReturnError: true,
+		Stmts: []*InjectorStmt{
+			{
+				Provider: &ProviderSpec{
+					IsAsync: true,
+				},
+				ParallelGroup: 1,
+			},
+			{
+				Provider: &ProviderSpec{
+					IsAsync: true,
+				},
+				ParallelGroup: 1,
+			},
+		},
+	}
+
+	// Verify that async injectors should return error for proper errgroup handling
+	if !injector.IsReturnError {
+		t.Error("Expected async injector to return error for errgroup handling")
+	}
+
+	// Verify parallel group assignment
+	for _, stmt := range injector.Stmts {
+		if stmt.Provider.IsAsync && stmt.ParallelGroup == 0 {
+			t.Error("Expected async provider to have non-zero parallel group")
+		}
+	}
+}

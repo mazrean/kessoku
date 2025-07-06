@@ -3,26 +3,36 @@
 package main
 
 import (
+	"context"
 	"github.com/mazrean/kessoku"
 	"golang.org/x/sync/errgroup"
 )
 
-func InitializeApp() (*App, error) {
-	g := &errgroup.Group{}
+func InitializeApp(ctx context.Context) (*App, error) {
+	g, ctx := errgroup.WithContext(ctx)
 	var v0 *DatabaseService
 	var v1 *CacheService
 	var v2 *MessagingService
 	g.Go(func() error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		result := kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
 		v0 = result
 		return nil
 	})
 	g.Go(func() error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		result := kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
 		v1 = result
 		return nil
 	})
 	g.Go(func() error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		result := kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()()
 		v2 = result
 		return nil

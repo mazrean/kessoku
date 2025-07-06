@@ -14,21 +14,45 @@ const (
 )
 
 func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Injector) error {
-	// Check if any injector needs errgroup and add import
+	// Check if any injector needs errgroup and context imports and add them
 	for _, injector := range injectors {
+		hasAsyncProviders := false
 		for _, stmt := range injector.Stmts {
 			if stmt.ParallelGroup > 0 {
-				// Add errgroup import if not already present
-				if _, exists := metaData.Imports["golang.org/x/sync/errgroup"]; !exists {
-					metaData.Imports["golang.org/x/sync/errgroup"] = &ast.ImportSpec{
-						Path: &ast.BasicLit{
-							Kind:  token.STRING,
-							Value: "\"golang.org/x/sync/errgroup\"",
-						},
+				// Count how many statements are in the same parallel group
+				sameGroupCount := 0
+				for _, otherStmt := range injector.Stmts {
+					if otherStmt.ParallelGroup == stmt.ParallelGroup {
+						sameGroupCount++
 					}
 				}
-				break
+				if sameGroupCount > 1 {
+					hasAsyncProviders = true
+					break
+				}
 			}
+		}
+		
+		if hasAsyncProviders {
+			// Add errgroup import if not already present
+			if _, exists := metaData.Imports["golang.org/x/sync/errgroup"]; !exists {
+				metaData.Imports["golang.org/x/sync/errgroup"] = &ast.ImportSpec{
+					Path: &ast.BasicLit{
+						Kind:  token.STRING,
+						Value: "\"golang.org/x/sync/errgroup\"",
+					},
+				}
+			}
+			// Add context import if not already present
+			if _, exists := metaData.Imports["context"]; !exists {
+				metaData.Imports["context"] = &ast.ImportSpec{
+					Path: &ast.BasicLit{
+						Kind:  token.STRING,
+						Value: "\"context\"",
+					},
+				}
+			}
+			break
 		}
 	}
 
@@ -85,6 +109,7 @@ func generateImportDecl(imporSpecs []*ast.ImportSpec) *ast.GenDecl {
 
 func generateInjectorDecl(injector *Injector) ast.Decl {
 	// Check if we need errgroup and update injector error return before generating signature
+	hasAsyncProviders := false
 	for _, stmt := range injector.Stmts {
 		if stmt.ParallelGroup > 0 {
 			// Count how many statements are in the same parallel group
@@ -96,12 +121,25 @@ func generateInjectorDecl(injector *Injector) ast.Decl {
 			}
 			if sameGroupCount > 1 {
 				injector.IsReturnError = true
+				hasAsyncProviders = true
 				break
 			}
 		}
 	}
 
-	paramFields := make([]*ast.Field, 0, len(injector.Args))
+	paramFields := make([]*ast.Field, 0, len(injector.Args)+1)
+	
+	// Add context.Context parameter for async providers
+	if hasAsyncProviders {
+		paramFields = append(paramFields, &ast.Field{
+			Names: []*ast.Ident{ast.NewIdent("ctx")},
+			Type: &ast.SelectorExpr{
+				X:   ast.NewIdent("context"),
+				Sel: ast.NewIdent("Context"),
+			},
+		})
+	}
+
 	for _, arg := range injector.Args {
 		paramFields = append(paramFields, &ast.Field{
 			Names: []*ast.Ident{ast.NewIdent(arg.Param.Name())},
@@ -289,19 +327,17 @@ func generateParallelStmts(group []*InjectorStmt, injector *Injector, needsErrgr
 	var stmts []ast.Stmt
 	
 	if needsErrgroup {
-		// Create errgroup
+		// Create errgroup with context
 		stmts = append(stmts, &ast.AssignStmt{
 			Tok: token.DEFINE,
-			Lhs: []ast.Expr{ast.NewIdent("g")},
+			Lhs: []ast.Expr{ast.NewIdent("g"), ast.NewIdent("ctx")},
 			Rhs: []ast.Expr{
-				&ast.UnaryExpr{
-					Op: token.AND,
-					X: &ast.CompositeLit{
-						Type: &ast.SelectorExpr{
-							X:   ast.NewIdent("errgroup"),
-							Sel: ast.NewIdent("Group"),
-						},
+				&ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent("errgroup"),
+						Sel: ast.NewIdent("WithContext"),
 					},
+					Args: []ast.Expr{ast.NewIdent("ctx")},
 				},
 			},
 		})
@@ -402,9 +438,37 @@ func generateErrgroupGoroutine(stmt *InjectorStmt) ast.Stmt {
 	
 	// Create the function body for the goroutine
 	goroutineBody := []ast.Stmt{
+		// Check context cancellation first
+		&ast.IfStmt{
+			Cond: &ast.BinaryExpr{
+				X: &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent("ctx"),
+						Sel: ast.NewIdent("Err"),
+					},
+				},
+				Op: token.NEQ,
+				Y:  ast.NewIdent("nil"),
+			},
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{
+					&ast.ReturnStmt{
+						Results: []ast.Expr{
+							&ast.CallExpr{
+								Fun: &ast.SelectorExpr{
+									X:   ast.NewIdent("ctx"),
+									Sel: ast.NewIdent("Err"),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		// Execute the provider function
 		&ast.AssignStmt{
 			Tok: token.DEFINE,
-			Lhs: []ast.Expr{ast.NewIdent("result")}, // Simplified for now
+			Lhs: []ast.Expr{ast.NewIdent("result")},
 			Rhs: []ast.Expr{rhs},
 		},
 	}
