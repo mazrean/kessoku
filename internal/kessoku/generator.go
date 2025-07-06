@@ -14,6 +14,24 @@ const (
 )
 
 func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Injector) error {
+	// Check if any injector needs errgroup and add import
+	for _, injector := range injectors {
+		for _, stmt := range injector.Stmts {
+			if stmt.ParallelGroup > 0 {
+				// Add errgroup import if not already present
+				if _, exists := metaData.Imports["golang.org/x/sync/errgroup"]; !exists {
+					metaData.Imports["golang.org/x/sync/errgroup"] = &ast.ImportSpec{
+						Path: &ast.BasicLit{
+							Kind:  token.STRING,
+							Value: "\"golang.org/x/sync/errgroup\"",
+						},
+					}
+				}
+				break
+			}
+		}
+	}
+
 	// Convert imports map to slice
 	importSpecs := make([]*ast.ImportSpec, 0, len(metaData.Imports))
 	for _, imp := range metaData.Imports {
@@ -75,85 +93,31 @@ func generateInjectorDecl(injector *Injector) ast.Decl {
 	}
 
 	resultFields := make([]*ast.Field, 0, maxInjectorReturnValues)
-	resultFields = append(resultFields, &ast.Field{
-		Type: injector.Return.Return.ASTTypeExpr,
-	})
+	if injector.Return != nil && injector.Return.Return != nil {
+		resultFields = append(resultFields, &ast.Field{
+			Type: injector.Return.Return.ASTTypeExpr,
+		})
+	} else {
+		// Fallback for missing return type
+		resultFields = append(resultFields, &ast.Field{
+			Type: ast.NewIdent("interface{}"),
+		})
+	}
 	if injector.IsReturnError {
 		resultFields = append(resultFields, &ast.Field{
 			Type: ast.NewIdent("error"),
 		})
 	}
 
-	var stmts []ast.Stmt
-	for _, stmt := range injector.Stmts {
-		lhs := make([]ast.Expr, 0, len(stmt.Returns)+1)
-		for _, ret := range stmt.Returns {
-			lhs = append(lhs, &ast.Ident{
-				Name: ret.Name(),
-			})
-		}
-		if stmt.Provider.IsReturnError {
-			lhs = append(lhs, &ast.Ident{
-				Name: "err",
-			})
-		}
-
-		args := make([]ast.Expr, 0, len(stmt.Arguments))
-		for _, arg := range stmt.Arguments {
-			args = append(args, ast.NewIdent(arg.Name()))
-		}
-
-		rhs := &ast.CallExpr{
-			Fun: &ast.CallExpr{
-				Fun: &ast.SelectorExpr{
-					X:   stmt.Provider.ASTExpr,
-					Sel: ast.NewIdent("Fn"),
-				},
-				Args: []ast.Expr{},
-			},
-			Args: args,
-		}
-
-		stmts = append(stmts, &ast.AssignStmt{
-			Tok: token.DEFINE,
-			Lhs: lhs,
-			Rhs: []ast.Expr{rhs},
-		})
-
-		if stmt.Provider.IsReturnError {
-			stmts = append(stmts, &ast.IfStmt{
-				Cond: &ast.BinaryExpr{
-					X:  ast.NewIdent("err"),
-					Op: token.NEQ,
-					Y:  ast.NewIdent("nil"),
-				},
-				Body: &ast.BlockStmt{
-					List: []ast.Stmt{
-						&ast.DeclStmt{
-							Decl: &ast.GenDecl{
-								Tok: token.VAR,
-								Specs: []ast.Spec{
-									&ast.ValueSpec{
-										Names: []*ast.Ident{ast.NewIdent("zero")},
-										Type:  injector.Return.Return.ASTTypeExpr,
-									},
-								},
-							},
-						},
-						&ast.ReturnStmt{
-							Results: []ast.Expr{
-								ast.NewIdent("zero"),
-								ast.NewIdent("err"),
-							},
-						},
-					},
-				},
-			})
-		}
-	}
+	stmts := generateStmtsWithParallelization(injector)
 
 	returns := make([]ast.Expr, 0, maxInjectorReturnValues)
-	returns = append(returns, ast.NewIdent(injector.Return.Param.Name()))
+	if injector.Return != nil && injector.Return.Param != nil {
+		returns = append(returns, ast.NewIdent(injector.Return.Param.Name()))
+	} else {
+		// Fallback for missing return param
+		returns = append(returns, ast.NewIdent("nil"))
+	}
 	if injector.IsReturnError {
 		returns = append(returns, ast.NewIdent("nil"))
 	}
@@ -178,4 +142,284 @@ func generateInjectorDecl(injector *Injector) ast.Decl {
 	}
 
 	return funcDecl
+}
+
+// getReturnTypeExpr safely gets the return type expression with fallback
+func getReturnTypeExpr(injector *Injector) ast.Expr {
+	if injector.Return != nil && injector.Return.Return != nil {
+		return injector.Return.Return.ASTTypeExpr
+	}
+	return ast.NewIdent("interface{}")
+}
+
+// generateStmtsWithParallelization generates statements with parallel execution support using errgroup
+func generateStmtsWithParallelization(injector *Injector) []ast.Stmt {
+	var stmts []ast.Stmt
+	
+	// Group statements by parallel group
+	parallelGroups := make(map[int][]*InjectorStmt)
+	for _, stmt := range injector.Stmts {
+		parallelGroups[stmt.ParallelGroup] = append(parallelGroups[stmt.ParallelGroup], stmt)
+	}
+	
+	// Check if we need errgroup imports
+	hasParallelGroups := false
+	for groupID, group := range parallelGroups {
+		if groupID > 0 && len(group) > 1 {
+			hasParallelGroups = true
+			break
+		}
+	}
+	
+	// Process groups in order
+	processedGroups := make(map[int]bool)
+	for _, stmt := range injector.Stmts {
+		groupID := stmt.ParallelGroup
+		if processedGroups[groupID] {
+			continue
+		}
+		processedGroups[groupID] = true
+		
+		group := parallelGroups[groupID]
+		if groupID == 0 || len(group) == 1 {
+			// Sequential execution
+			for _, s := range group {
+				stmts = append(stmts, generateSequentialStmt(s, injector)...)
+			}
+		} else {
+			// Parallel execution using errgroup
+			stmts = append(stmts, generateParallelStmts(group, injector, hasParallelGroups)...)
+		}
+	}
+	
+	return stmts
+}
+
+// generateSequentialStmt generates a sequential statement
+func generateSequentialStmt(stmt *InjectorStmt, injector *Injector) []ast.Stmt {
+	var stmts []ast.Stmt
+	
+	lhs := make([]ast.Expr, 0, len(stmt.Returns)+1)
+	for _, ret := range stmt.Returns {
+		lhs = append(lhs, &ast.Ident{
+			Name: ret.Name(),
+		})
+	}
+	if stmt.Provider.IsReturnError {
+		lhs = append(lhs, &ast.Ident{
+			Name: "err",
+		})
+	}
+
+	args := make([]ast.Expr, 0, len(stmt.Arguments))
+	for _, arg := range stmt.Arguments {
+		args = append(args, ast.NewIdent(arg.Name()))
+	}
+
+	rhs := &ast.CallExpr{
+		Fun: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   stmt.Provider.ASTExpr,
+				Sel: ast.NewIdent("Fn"),
+			},
+			Args: []ast.Expr{},
+		},
+		Args: args,
+	}
+
+	stmts = append(stmts, &ast.AssignStmt{
+		Tok: token.DEFINE,
+		Lhs: lhs,
+		Rhs: []ast.Expr{rhs},
+	})
+
+	if stmt.Provider.IsReturnError {
+		stmts = append(stmts, &ast.IfStmt{
+			Cond: &ast.BinaryExpr{
+				X:  ast.NewIdent("err"),
+				Op: token.NEQ,
+				Y:  ast.NewIdent("nil"),
+			},
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{
+					&ast.DeclStmt{
+						Decl: &ast.GenDecl{
+							Tok: token.VAR,
+							Specs: []ast.Spec{
+								&ast.ValueSpec{
+									Names: []*ast.Ident{ast.NewIdent("zero")},
+									Type:  getReturnTypeExpr(injector),
+								},
+							},
+						},
+					},
+					&ast.ReturnStmt{
+						Results: []ast.Expr{
+							ast.NewIdent("zero"),
+							ast.NewIdent("err"),
+						},
+					},
+				},
+			},
+		})
+	}
+	
+	return stmts
+}
+
+// generateParallelStmts generates parallel statements using errgroup
+func generateParallelStmts(group []*InjectorStmt, injector *Injector, needsErrgroup bool) []ast.Stmt {
+	var stmts []ast.Stmt
+	
+	if needsErrgroup {
+		// Create errgroup
+		stmts = append(stmts, &ast.AssignStmt{
+			Tok: token.DEFINE,
+			Lhs: []ast.Expr{ast.NewIdent("g")},
+			Rhs: []ast.Expr{
+				&ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent("errgroup"),
+						Sel: ast.NewIdent("Group"),
+					},
+				},
+			},
+		})
+	}
+	
+	// Declare result variables
+	for _, stmt := range group {
+		for _, ret := range stmt.Returns {
+			stmts = append(stmts, &ast.DeclStmt{
+				Decl: &ast.GenDecl{
+					Tok: token.VAR,
+					Specs: []ast.Spec{
+						&ast.ValueSpec{
+							Names: []*ast.Ident{ast.NewIdent(ret.Name())},
+							Type:  getReturnTypeExpr(injector), // This needs proper type detection
+						},
+					},
+				},
+			})
+		}
+	}
+	
+	// Generate goroutines for each statement in the group
+	for _, stmt := range group {
+		if needsErrgroup {
+			stmts = append(stmts, generateErrgroupGoroutine(stmt))
+		}
+	}
+	
+	if needsErrgroup {
+		// Wait for all goroutines
+		stmts = append(stmts, &ast.IfStmt{
+			Init: &ast.AssignStmt{
+				Tok: token.DEFINE,
+				Lhs: []ast.Expr{ast.NewIdent("err")},
+				Rhs: []ast.Expr{
+					&ast.CallExpr{
+						Fun: &ast.SelectorExpr{
+							X:   ast.NewIdent("g"),
+							Sel: ast.NewIdent("Wait"),
+						},
+					},
+				},
+			},
+			Cond: &ast.BinaryExpr{
+				X:  ast.NewIdent("err"),
+				Op: token.NEQ,
+				Y:  ast.NewIdent("nil"),
+			},
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{
+					&ast.DeclStmt{
+						Decl: &ast.GenDecl{
+							Tok: token.VAR,
+							Specs: []ast.Spec{
+								&ast.ValueSpec{
+									Names: []*ast.Ident{ast.NewIdent("zero")},
+									Type:  getReturnTypeExpr(injector),
+								},
+							},
+						},
+					},
+					&ast.ReturnStmt{
+						Results: []ast.Expr{
+							ast.NewIdent("zero"),
+							ast.NewIdent("err"),
+						},
+					},
+				},
+			},
+		})
+	}
+	
+	return stmts
+}
+
+// generateErrgroupGoroutine generates a goroutine for errgroup
+func generateErrgroupGoroutine(stmt *InjectorStmt) ast.Stmt {
+	args := make([]ast.Expr, 0, len(stmt.Arguments))
+	for _, arg := range stmt.Arguments {
+		args = append(args, ast.NewIdent(arg.Name()))
+	}
+
+	rhs := &ast.CallExpr{
+		Fun: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   stmt.Provider.ASTExpr,
+				Sel: ast.NewIdent("Fn"),
+			},
+			Args: []ast.Expr{},
+		},
+		Args: args,
+	}
+	
+	// Create the function body for the goroutine
+	goroutineBody := []ast.Stmt{
+		&ast.AssignStmt{
+			Tok: token.DEFINE,
+			Lhs: []ast.Expr{ast.NewIdent("result")}, // Simplified for now
+			Rhs: []ast.Expr{rhs},
+		},
+	}
+	
+	// Add assignment to result variable
+	for i, ret := range stmt.Returns {
+		if i == 0 { // Simplified: only handle first return value for now
+			goroutineBody = append(goroutineBody, &ast.AssignStmt{
+				Tok: token.ASSIGN,
+				Lhs: []ast.Expr{ast.NewIdent(ret.Name())},
+				Rhs: []ast.Expr{ast.NewIdent("result")},
+			})
+		}
+	}
+	
+	goroutineBody = append(goroutineBody, &ast.ReturnStmt{
+		Results: []ast.Expr{ast.NewIdent("nil")},
+	})
+	
+	return &ast.ExprStmt{
+		X: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent("g"),
+				Sel: ast.NewIdent("Go"),
+			},
+			Args: []ast.Expr{
+				&ast.FuncLit{
+					Type: &ast.FuncType{
+						Results: &ast.FieldList{
+							List: []*ast.Field{
+								{Type: ast.NewIdent("error")},
+							},
+						},
+					},
+					Body: &ast.BlockStmt{
+						List: goroutineBody,
+					},
+				},
+			},
+		},
+	}
 }

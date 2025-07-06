@@ -34,6 +34,7 @@ type ProviderSpec struct {
 	Provides      []types.Type
 	Requires      []types.Type
 	IsReturnError bool
+	IsAsync       bool
 }
 
 type Return struct {
@@ -93,9 +94,10 @@ type InjectorReturn struct {
 }
 
 type InjectorStmt struct {
-	Provider  *ProviderSpec
-	Arguments []*InjectorParam
-	Returns   []*InjectorParam
+	Provider       *ProviderSpec
+	Arguments      []*InjectorParam
+	Returns        []*InjectorParam
+	ParallelGroup  int // Group ID for parallel execution (0 means sequential)
 }
 
 type Injector struct {
