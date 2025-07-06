@@ -3,8 +3,8 @@
 package main
 
 import (
-	"golang.org/x/sync/errgroup"
 	"github.com/mazrean/kessoku"
+	"golang.org/x/sync/errgroup"
 )
 
 func InitializeApp() (*App, error) {
