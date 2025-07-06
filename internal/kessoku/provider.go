@@ -100,11 +100,45 @@ type InjectorStmt struct {
 	ParallelGroup  int // Group ID for parallel execution (0 means sequential)
 }
 
+// DependencyChain represents a sequence of providers that must be executed in order within a single goroutine
+type DependencyChain struct {
+	ID         int               // Unique chain ID within the parallel group
+	Statements []*InjectorStmt   // Providers in execution order
+	Inputs     []*ChannelInput   // Channels to receive data from other chains
+	Outputs    []*ChannelOutput  // Channels to send data to other chains
+}
+
+// ChannelInput represents input from another dependency chain
+type ChannelInput struct {
+	FromChainID   int             // Source chain ID
+	ParamName     string          // Parameter name to receive
+	ParamType     *InjectorParam  // Parameter reference
+	ChannelName   string          // Generated channel variable name
+}
+
+// ChannelOutput represents output to another dependency chain
+type ChannelOutput struct {
+	ToChainID     int             // Target chain ID
+	ParamName     string          // Parameter name to send
+	ParamType     *InjectorParam  // Parameter reference
+	ChannelName   string          // Generated channel variable name
+}
+
+// ParallelExecutionPlan represents the optimized execution plan for a parallel group
+type ParallelExecutionPlan struct {
+	GroupID    int                 // Parallel group ID
+	Chains     []*DependencyChain  // Dependency chains that can run in parallel
+	Channels   map[string]string   // Channel name mapping (param -> channel name)
+}
+
 type Injector struct {
-	Return        *InjectorReturn
-	Name          string
-	Params        []*InjectorParam
-	Args          []*InjectorArgument
-	Stmts         []*InjectorStmt
-	IsReturnError bool
+	Return             *InjectorReturn
+	Name               string
+	Params             []*InjectorParam
+	Args               []*InjectorArgument
+	Stmts              []*InjectorStmt
+	IsReturnError      bool
+	HasExistingContext bool
+	ContextParamName   string
+	ExecutionPlans     map[int]*ParallelExecutionPlan // Map from parallel group ID to execution plan
 }
