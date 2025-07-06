@@ -16,30 +16,21 @@ const (
 )
 
 func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Injector) error {
-	// Check if any injector needs errgroup and context imports and add them
-	hasAsyncProviders := false
+	// Add context import if any injector has context.Context arguments
+	hasContextArgs := false
 	for _, injector := range injectors {
-		for _, stmt := range injector.Stmts {
-			if stmt.HasAsync() {
-				hasAsyncProviders = true
+		for _, arg := range injector.Args {
+			if arg.Arg.Type.String() == "context.Context" {
+				hasContextArgs = true
 				break
 			}
 		}
-		if hasAsyncProviders {
+		if hasContextArgs {
 			break
 		}
 	}
 
-	if hasAsyncProviders {
-		// Add errgroup import if not already present
-		if _, exists := metaData.Imports["golang.org/x/sync/errgroup"]; !exists {
-			metaData.Imports["golang.org/x/sync/errgroup"] = &ast.ImportSpec{
-				Path: &ast.BasicLit{
-					Kind:  token.STRING,
-					Value: "\"golang.org/x/sync/errgroup\"",
-				},
-			}
-		}
+	if hasContextArgs {
 		// Add context import if not already present
 		if _, exists := metaData.Imports["context"]; !exists {
 			metaData.Imports["context"] = &ast.ImportSpec{

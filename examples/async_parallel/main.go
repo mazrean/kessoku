@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -12,10 +11,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	app, err := InitializeApp(ctx)
-	if err != nil {
-		log.Fatal("Failed to initialize app:", err)
-	}
+	app := InitializeApp(ctx)
 
 	fmt.Println("App initialized successfully!")
 	app.Run()

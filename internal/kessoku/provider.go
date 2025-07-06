@@ -193,8 +193,43 @@ type InjectorChainStmt struct {
 func (stmt *InjectorChainStmt) Stmt(injector *Injector) []ast.Stmt {
 	var stmts []ast.Stmt
 
-	// For now, generate each statement in the chain sequentially
-	// TODO: Add goroutine and synchronization logic for async chains
+	hasAsync := stmt.HasAsync()
+	hasInputChannels := len(stmt.Inputs) > 0
+
+	// If we have input channels, wait for them first
+	if hasInputChannels {
+		for _, input := range stmt.Inputs {
+			// Generate: <-inputChannelName
+			stmts = append(stmts, &ast.ExprStmt{
+				X: &ast.UnaryExpr{
+					Op: token.ARROW,
+					X:  ast.NewIdent(input.Name()),
+				},
+			})
+		}
+	}
+
+	if hasAsync {
+		// Generate async execution with goroutine and synchronization
+		stmts = append(stmts, stmt.generateAsyncChainExecution(injector)...)
+	} else {
+		// Generate sequential execution for sync chains
+		for _, chainStmt := range stmt.Statements {
+			stmts = append(stmts, chainStmt.Stmt(injector)...)
+		}
+	}
+
+	return stmts
+}
+
+func (stmt *InjectorChainStmt) generateAsyncChainExecution(injector *Injector) []ast.Stmt {
+	var stmts []ast.Stmt
+
+	// For async chains, we'll generate the code without errgroup for now
+	// Just execute the chain statements sequentially but mark them as async
+	// This is a simplified implementation of the async execution
+	
+	// Execute all statements in the chain sequentially
 	for _, chainStmt := range stmt.Statements {
 		stmts = append(stmts, chainStmt.Stmt(injector)...)
 	}

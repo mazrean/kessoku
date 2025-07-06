@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"github.com/mazrean/kessoku"
-	"golang.org/x/sync/errgroup"
 )
 
 func InitializeApp(ctx context.Context) *App {
