@@ -174,7 +174,7 @@ type Graph struct {
 	waitNodesAdded map[*node]bool
 	edges          map[*node][]*edgeNode
 	injectorName   string
-	allNodes       []*node // Track all nodes in the graph
+	allNodes       []*node
 }
 
 func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
@@ -184,7 +184,6 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 		waitNodes:      collection.NewQueue[*node](),
 		waitNodesAdded: make(map[*node]bool),
 		edges:          make(map[*node][]*edgeNode),
-		allNodes:       make([]*node, 0),
 	}
 
 	argProviderMap := make(map[string]*Argument)
@@ -496,29 +495,22 @@ func sortArguments(args []*Argument) {
 
 func (g *Graph) Build() (*Injector, error) {
 	injector := &Injector{
-		Name:           g.injectorName,
-		IsReturnError:  false,
-		ExecutionPlans: make(map[int]*ParallelExecutionPlan),
+		Name:          g.injectorName,
+		IsReturnError: false,
 	}
-
-	// Analyze parallel execution groups
-	g.analyzeParallelGroups()
-
-	// Check for existing context.Context and determine if async providers need context
-	g.analyzeContextRequirements(injector)
 
 	// Collect all nodes and parameters using topological traversal
 	nodeParams := make(map[*node][]*InjectorParam)
 	variableNameCounter := 0
 	buildVisited := make(map[*node]bool)
-	
+
 	// Traverse nodes in dependency order to collect parameters
 	for n := range g.waitNodes.Iter {
 		if buildVisited[n] {
 			continue
 		}
 		buildVisited[n] = true
-		
+
 		slog.Debug("waitNodes", "waitNodes", n)
 		var returnValues []*InjectorParam
 		switch {
@@ -546,7 +538,7 @@ func (g *Graph) Build() (*Injector, error) {
 		default:
 			return nil, errors.New("invalid node")
 		}
-		
+
 		nodeParams[n] = returnValues
 
 		for _, edge := range g.edges[n] {
@@ -567,451 +559,347 @@ func (g *Graph) Build() (*Injector, error) {
 			}
 		}
 	}
-	
-	// Build statements in correct dependency order using topological sort
-	orderedProviderNodes := g.topologicalSortNodes(nodeParams)
-	for _, n := range orderedProviderNodes {
-		if n.providerSpec != nil {
-			returnValues := nodeParams[n]
-			injector.Stmts = append(injector.Stmts, &InjectorStmt{
-				Provider:      n.providerSpec,
-				Arguments:     n.providerArgs,
-				Returns:       returnValues,
-				ParallelGroup: n.parallelGroup,
-			})
-		}
+
+	if injector.Return == nil {
+		return nil, errors.New("no return value provider found")
 	}
 
-	// Analyze execution plans for optimized parallel execution
-	g.analyzeExecutionPlans(injector)
+	// Build optimized execution chains using job chaining strategy
+	injector.Stmts = g.buildOptimizedExecutionChains(nodeParams)
 
 	return injector, nil
 }
 
-// analyzeParallelGroups analyzes the DAG to determine parallel execution groups
-func (g *Graph) analyzeParallelGroups() {
-	// Initialize parallel groups
-	parallelGroupCounter := 1
+// buildOptimizedExecutionChains creates optimized execution chains using job chaining strategy
+func (g *Graph) buildOptimizedExecutionChains(nodeParams map[*node][]*InjectorParam) []InjectorStmt {
+	// Build dependency graph between nodes
+	depGraph := g.buildNodeDependencyGraph()
 	
-	// Use all nodes in the graph, not just waitNodes
-	currentNodes := g.allNodes
+	// Find optimal execution chains
+	chains := g.findOptimalJobChains(depGraph, nodeParams)
 	
-	// Simple parallel group assignment for async providers
-	// Find nodes that can be executed in parallel (same level in dependency graph)
-	for _, n := range currentNodes {
-		if n.providerSpec != nil && n.providerSpec.IsAsync {
-			// Check if there are other async nodes at the same level
-			asyncPeers := make([]*node, 0)
-			for _, peer := range currentNodes {
-				if peer != n && peer.providerSpec != nil && peer.providerSpec.IsAsync && peer.requireCount == n.requireCount {
-					asyncPeers = append(asyncPeers, peer)
-				}
-			}
-			
-			if len(asyncPeers) > 0 {
-				// Assign same parallel group to async nodes at the same level
-				if n.parallelGroup == 0 {
-					groupID := parallelGroupCounter
-					parallelGroupCounter++
-					n.parallelGroup = groupID
-					
-					for _, peer := range asyncPeers {
-						if peer.parallelGroup == 0 {
-							peer.parallelGroup = groupID
-						}
-					}
-				}
-			} else {
-				// Single async node can still benefit from async execution
-				if n.parallelGroup == 0 {
-					n.parallelGroup = parallelGroupCounter
-					parallelGroupCounter++
-				}
-			}
-		} else {
-			// Non-async nodes get sequential execution
-			n.parallelGroup = 0
-		}
-	}
+	// Convert chains to statements
+	return g.convertChainsToStatements(chains, nodeParams)
 }
 
-
-// analyzeContextRequirements checks for existing context.Context and determines context needs
-func (g *Graph) analyzeContextRequirements(injector *Injector) {
-	// Check if any async providers need parallel execution
-	hasAsyncProviders := false
-	for _, n := range g.allNodes {
-		if n.providerSpec != nil && n.providerSpec.IsAsync && n.parallelGroup > 0 {
-			hasAsyncProviders = true
-			break
-		}
-	}
-
-	if !hasAsyncProviders {
-		return
-	}
-
-	// Check if context.Context already exists in arguments
-	existingContextArg := ""
-	for _, n := range g.allNodes {
-		if n.arg != nil && isContextType(n.arg.Type) {
-			existingContextArg = n.arg.Name
-			break
-		}
-	}
-
-	// Check if context.Context is provided by any provider
-	existingContextProvider := ""
-	for _, n := range g.allNodes {
-		if n.providerSpec != nil {
-			for _, providedType := range n.providerSpec.Provides {
-				if isContextType(providedType) {
-					// Find the corresponding return parameter name
-					for _, stmt := range injector.Stmts {
-						if stmt.Provider == n.providerSpec {
-							for i, ret := range stmt.Returns {
-								if i < len(n.providerSpec.Provides) && isContextType(n.providerSpec.Provides[i]) {
-									existingContextProvider = ret.Name()
-									break
-								}
-							}
-							break
-						}
-					}
-					break
-				}
+// buildNodeDependencyGraph creates a dependency graph between provider nodes
+func (g *Graph) buildNodeDependencyGraph() map[*node][]*node {
+	graph := make(map[*node][]*node)
+	
+	// Build adjacency list from edges
+	for parent, edges := range g.edges {
+		for _, edge := range edges {
+			if edge.node.providerSpec != nil {
+				graph[parent] = append(graph[parent], edge.node)
 			}
-			if existingContextProvider != "" {
-				break
 			}
-		}
 	}
-
-	if existingContextArg != "" {
-		injector.HasExistingContext = true
-		injector.ContextParamName = existingContextArg
-		injector.IsReturnError = true
-	} else if existingContextProvider != "" {
-		injector.HasExistingContext = true
-		injector.ContextParamName = existingContextProvider
-		injector.IsReturnError = true
-	} else {
-		// No existing context found, need to add context parameter
-		injector.HasExistingContext = false
-		injector.ContextParamName = "ctx"
-		injector.IsReturnError = true
-	}
+	
+	return graph
 }
 
-// analyzeExecutionPlans creates optimized execution plans for parallel groups
-func (g *Graph) analyzeExecutionPlans(injector *Injector) {
-	// Group statements by parallel group
-	parallelGroups := make(map[int][]*InjectorStmt)
-	for _, stmt := range injector.Stmts {
-		if stmt.ParallelGroup > 0 {
-			parallelGroups[stmt.ParallelGroup] = append(parallelGroups[stmt.ParallelGroup], stmt)
-		}
-	}
-
-	// Build execution plans for each parallel group
-	for groupID, statements := range parallelGroups {
-		if len(statements) > 1 {
-			plan := g.buildExecutionPlan(groupID, statements)
-			injector.ExecutionPlans[groupID] = plan
-		}
-	}
+// ExecutionChain represents a sequence of jobs that can run in the same goroutine
+type ExecutionChain struct {
+	nodes      []*node
+	isAsync    bool
+	chainID    string
+	waitFor    []*ExecutionChain // chains this chain must wait for
+	completeCh *InjectorChannel   // channel to signal completion
 }
 
-// buildExecutionPlan creates a detailed execution plan for a parallel group
-func (g *Graph) buildExecutionPlan(groupID int, statements []*InjectorStmt) *ParallelExecutionPlan {
-	// Build dependency chains within the parallel group
-	chains := g.buildDependencyChains(statements)
+// findOptimalJobChains identifies optimal execution chains using job chaining rules
+func (g *Graph) findOptimalJobChains(depGraph map[*node][]*node, nodeParams map[*node][]*InjectorParam) []*ExecutionChain {
+	visited := make(map[*node]bool)
+	chains := make([]*ExecutionChain, 0)
+	chainCounter := 0
 	
-	// Identify channel communication needs between chains
-	channels := g.identifyChannelCommunication(chains)
+	// Find provider nodes sorted by dependency order
+	providerNodes := g.getProviderNodesInTopologicalOrder()
 	
-	return &ParallelExecutionPlan{
-		GroupID:  groupID,
-		Chains:   chains,
-		Channels: channels,
-	}
-}
-
-// buildDependencyChains analyzes statements to build dependency chains
-func (g *Graph) buildDependencyChains(statements []*InjectorStmt) []*DependencyChain {
-	// Create a map of parameter dependencies
-	paramProviders := make(map[*InjectorParam]*InjectorStmt)
-	paramConsumers := make(map[*InjectorParam][]*InjectorStmt)
-	
-	// Build dependency mapping
-	for _, stmt := range statements {
-		// Map each return parameter to its provider
-		for _, ret := range stmt.Returns {
-			paramProviders[ret] = stmt
+	for _, node := range providerNodes {
+		if visited[node] || node.providerSpec == nil {
+			continue
 		}
 		
-		// Map each argument parameter to its consumers
-		for _, arg := range stmt.Arguments {
-			paramConsumers[arg] = append(paramConsumers[arg], stmt)
-		}
-	}
-	
-	// Find statements with no dependencies within this parallel group
-	independentStmts := make([]*InjectorStmt, 0)
-	for _, stmt := range statements {
-		hasInternalDependency := false
-		for _, arg := range stmt.Arguments {
-			if provider, exists := paramProviders[arg]; exists {
-				// This statement depends on another statement in the same parallel group
-				_ = provider
-				hasInternalDependency = true
-				break
-			}
-		}
-		if !hasInternalDependency {
-			independentStmts = append(independentStmts, stmt)
-		}
-	}
-	
-	// Build chains starting from independent statements
-	chains := make([]*DependencyChain, 0)
-	visited := make(map[*InjectorStmt]bool)
-	chainIDCounter := 1
-	
-	for _, stmt := range independentStmts {
-		if !visited[stmt] {
-			chain := g.buildChainFromStatement(stmt, paramConsumers, visited, chainIDCounter)
+		chain := g.buildChainFromNode(node, depGraph, visited, chainCounter)
+		if chain != nil {
 			chains = append(chains, chain)
-			chainIDCounter++
+			chainCounter++
 		}
 	}
 	
-	// Handle any remaining unvisited statements (shouldn't happen in well-formed DAG)
-	for _, stmt := range statements {
-		if !visited[stmt] {
-			chain := &DependencyChain{
-				ID:         chainIDCounter,
-				Statements: []*InjectorStmt{stmt},
-				Inputs:     make([]*ChannelInput, 0),
-				Outputs:    make([]*ChannelOutput, 0),
-			}
-			chains = append(chains, chain)
-			chainIDCounter++
-			visited[stmt] = true
-		}
-	}
+	// Optimize chain dependencies for multiple parent scenarios
+	g.optimizeChainDependencies(chains, depGraph)
 	
 	return chains
 }
 
-// buildChainFromStatement builds a dependency chain starting from a given statement
-func (g *Graph) buildChainFromStatement(stmt *InjectorStmt, paramConsumers map[*InjectorParam][]*InjectorStmt, visited map[*InjectorStmt]bool, chainID int) *DependencyChain {
-	chain := &DependencyChain{
-		ID:         chainID,
-		Statements: make([]*InjectorStmt, 0),
-		Inputs:     make([]*ChannelInput, 0),
-		Outputs:    make([]*ChannelOutput, 0),
-	}
-	
-	// DFS to build the chain
-	var buildChain func(*InjectorStmt)
-	buildChain = func(current *InjectorStmt) {
-		if visited[current] {
-			return
-		}
-		visited[current] = true
-		chain.Statements = append(chain.Statements, current)
-		
-		// Find direct consumers within the same parallel group
-		for _, ret := range current.Returns {
-			if consumers, exists := paramConsumers[ret]; exists {
-				for _, consumer := range consumers {
-					if !visited[consumer] {
-						// Check if this consumer only depends on the current statement
-						// within this parallel group (no other internal dependencies)
-						hasOtherDependencies := false
-						for _, arg := range consumer.Arguments {
-							if arg != ret {
-								// Check if this argument is provided by another statement in the group
-								for _, otherStmt := range chain.Statements {
-									for _, otherRet := range otherStmt.Returns {
-										if arg == otherRet && otherStmt != current {
-											hasOtherDependencies = true
-											break
-										}
-									}
-									if hasOtherDependencies {
-										break
-									}
-								}
-							}
-						}
-						
-						if !hasOtherDependencies {
-							buildChain(consumer)
-						}
-					}
-				}
-			}
-		}
-	}
-	
-	buildChain(stmt)
-	return chain
-}
-
-// identifyChannelCommunication identifies necessary channel communication between chains
-func (g *Graph) identifyChannelCommunication(chains []*DependencyChain) map[string]string {
-	channels := make(map[string]string)
-	channelCounter := 1
-	
-	// Build parameter to chain mapping
-	paramToChain := make(map[*InjectorParam]*DependencyChain)
-	for _, chain := range chains {
-		for _, stmt := range chain.Statements {
-			for _, ret := range stmt.Returns {
-				paramToChain[ret] = chain
-			}
-		}
-	}
-	
-	// Identify cross-chain dependencies
-	for _, chain := range chains {
-		for _, stmt := range chain.Statements {
-			for _, arg := range stmt.Arguments {
-				if sourceChain, exists := paramToChain[arg]; exists && sourceChain != chain {
-					// This is a cross-chain dependency
-					channelName := fmt.Sprintf("ch%d", channelCounter)
-					channelCounter++
-					
-					// Add output to source chain
-					sourceChain.Outputs = append(sourceChain.Outputs, &ChannelOutput{
-						ToChainID:   chain.ID,
-						ParamName:   arg.Name(),
-						ParamType:   arg,
-						ChannelName: channelName,
-					})
-					
-					// Add input to target chain
-					chain.Inputs = append(chain.Inputs, &ChannelInput{
-						FromChainID: sourceChain.ID,
-						ParamName:   arg.Name(),
-						ParamType:   arg,
-						ChannelName: channelName,
-					})
-					
-					channels[arg.Name()] = channelName
-				}
-			}
-		}
-	}
-	
-	return channels
-}
-
-// topologicalSortNodes sorts nodes in dependency order for proper code generation
-func (g *Graph) topologicalSortNodes(nodeParams map[*node][]*InjectorParam) []*node {
-	// Build a set of all provider nodes
-	providerNodes := make([]*node, 0)
-	for n := range nodeParams {
-		if n.providerSpec != nil {
-			providerNodes = append(providerNodes, n)
-		}
-	}
-	
-	// Build dependency graph between nodes based on parameter dependencies
-	nodeDeps := make(map[*node]map[*node]bool) // nodeDeps[a][b] = true means node a depends on node b
-	paramToNode := make(map[*InjectorParam]*node)
-	
-	// Map parameters to their provider nodes
-	for n, params := range nodeParams {
-		if n.providerSpec != nil {
-			for _, param := range params {
-				paramToNode[param] = n
-			}
-		}
-	}
-	
-	// Initialize dependencies
-	for _, n := range providerNodes {
-		nodeDeps[n] = make(map[*node]bool)
-	}
-	
-	// Analyze dependencies between nodes
-	for _, n := range providerNodes {
-		for _, arg := range n.providerArgs {
-			if arg != nil {
-				if providerNode, exists := paramToNode[arg]; exists && providerNode != n {
-					// This node depends on the provider node
-					nodeDeps[n][providerNode] = true
-				}
-			}
-		}
-	}
-	
-	// Perform topological sort using Kahn's algorithm
+// getProviderNodesInTopologicalOrder returns provider nodes in topological order
+func (g *Graph) getProviderNodesInTopologicalOrder() []*node {
 	inDegree := make(map[*node]int)
-	for _, n := range providerNodes {
-		inDegree[n] = 0
-	}
+	adjacency := make(map[*node][]*node)
 	
-	// Calculate in-degrees
-	for _, n := range providerNodes {
-		for range nodeDeps[n] {
-			inDegree[n]++
+	// Initialize in-degree count for provider nodes
+	for _, n := range g.allNodes {
+		if n.providerSpec != nil {
+			inDegree[n] = len(n.providerSpec.Requires)
 		}
 	}
 	
-	// Find nodes with no dependencies
-	queue := make([]*node, 0)
-	for _, n := range providerNodes {
-		if inDegree[n] == 0 {
-			queue = append(queue, n)
+	// Build adjacency list from edges
+	for parent, edges := range g.edges {
+		for _, edge := range edges {
+			if edge.node.providerSpec != nil {
+				adjacency[parent] = append(adjacency[parent], edge.node)
+			}
 		}
 	}
 	
-	// Process queue
+	// Use Kahn's algorithm for topological sorting
+	queue := collection.NewQueue[*node]()
 	result := make([]*node, 0)
-	for len(queue) > 0 {
-		// Sort queue for deterministic output
-		sort.Slice(queue, func(i, j int) bool {
-			// Process non-async nodes first, then by parallel group, then by parameter name
-			if queue[i].providerSpec.IsAsync != queue[j].providerSpec.IsAsync {
-				return !queue[i].providerSpec.IsAsync // non-async first
-			}
-			if queue[i].parallelGroup != queue[j].parallelGroup {
-				return queue[i].parallelGroup < queue[j].parallelGroup
-			}
-			// Compare by first return parameter name for deterministic ordering
-			params_i := nodeParams[queue[i]]
-			params_j := nodeParams[queue[j]]
-			if len(params_i) > 0 && len(params_j) > 0 {
-				return params_i[0].Name() < params_j[0].Name()
-			}
-			return false
-		})
-		
-		currentNode := queue[0]
-		queue = queue[1:]
-		result = append(result, currentNode)
-		
-		// Update in-degrees for dependent nodes
-		for _, n := range providerNodes {
-			if nodeDeps[n][currentNode] {
-				inDegree[n]--
-				if inDegree[n] == 0 {
-					queue = append(queue, n)
-				}
-			}
+	
+	// Start with nodes that have no dependencies (including argument nodes)
+	for _, n := range g.allNodes {
+		if n.providerSpec != nil && inDegree[n] == 0 {
+			queue.Push(n)
+		} else if n.arg != nil {
+			// Also process argument nodes to reduce in-degree of dependent providers
+			queue.Push(n)
 		}
 	}
 	
-	// Handle any remaining nodes (shouldn't happen in a valid DAG)
-	for _, n := range providerNodes {
-		if !slices.Contains(result, n) {
+	for n := range queue.Iter {
+		if n == nil {
+			break
+		}
+		
+		// Only add provider nodes to result
+		if n.providerSpec != nil {
 			result = append(result, n)
+		}
+		
+		// Reduce in-degree for all dependent nodes
+		for _, dependent := range adjacency[n] {
+			inDegree[dependent]--
+			if inDegree[dependent] == 0 {
+				queue.Push(dependent)
+			}
 		}
 	}
 	
 	return result
 }
+
+// buildChainFromNode builds an execution chain starting from a given node
+func (g *Graph) buildChainFromNode(startNode *node, depGraph map[*node][]*node, visited map[*node]bool, chainID int) *ExecutionChain {
+	if visited[startNode] || startNode.providerSpec == nil {
+		return nil
+	}
+	
+	chain := &ExecutionChain{
+		nodes:   []*node{startNode},
+		isAsync: startNode.providerSpec.IsAsync,
+		chainID: fmt.Sprintf("chain_%d", chainID),
+	}
+	visited[startNode] = true
+	
+	current := startNode
+	
+	// Extend chain forward by following linear dependencies
+	for {
+		nextNode := g.findBestChainableNode(current, depGraph, visited)
+		if nextNode == nil {
+			break
+		}
+		
+		// Apply job chaining rules
+		currentAsync := current.providerSpec.IsAsync
+		nextAsync := nextNode.providerSpec.IsAsync
+		
+		// Job chaining rules:
+		// sync → sync: ✅, async → async: ✅, async → sync: ✅, sync → async: ❌
+		if !currentAsync && nextAsync {
+			break // Cannot chain sync → async
+		}
+		
+		chain.nodes = append(chain.nodes, nextNode)
+		visited[nextNode] = true
+		current = nextNode
+		
+		// Update chain async status
+		if nextAsync {
+			chain.isAsync = true
+		}
+	}
+	
+	return chain
+}
+
+// findBestChainableNode finds the best child node to chain with
+func (g *Graph) findBestChainableNode(currentNode *node, depGraph map[*node][]*node, visited map[*node]bool) *node {
+	children := depGraph[currentNode]
+	var candidates []*node
+	
+	// Filter unvisited children with single parent (linear dependency)
+	for _, child := range children {
+		if visited[child] || child.providerSpec == nil {
+			continue
+		}
+		
+		// Check if child has single parent
+		parentCount := g.countParentNodes(child, depGraph)
+		if parentCount == 1 {
+			candidates = append(candidates, child)
+		}
+	}
+	
+	if len(candidates) == 0 {
+		return nil
+	}
+	
+	// For single candidate, return it
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
+	
+	// For multiple candidates, choose based on priority:
+	// 1. Same async type (async → async, sync → sync)
+	// 2. Async → sync (allowed but lower priority)
+	currentAsync := currentNode.providerSpec.IsAsync
+	
+	for _, candidate := range candidates {
+		candidateAsync := candidate.providerSpec.IsAsync
+		if currentAsync == candidateAsync {
+			return candidate // Prefer same type
+		}
+	}
+	
+	// Return first async → sync candidate
+	for _, candidate := range candidates {
+		candidateAsync := candidate.providerSpec.IsAsync
+		if currentAsync && !candidateAsync {
+			return candidate
+		}
+	}
+	
+	return candidates[0] // Fallback to first candidate
+}
+
+// countParentNodes counts how many nodes depend on this node
+func (g *Graph) countParentNodes(node *node, depGraph map[*node][]*node) int {
+	count := 0
+	for _, children := range depGraph {
+		for _, child := range children {
+			if child == node {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// optimizeChainDependencies optimizes chain dependencies for multiple parent scenarios
+func (g *Graph) optimizeChainDependencies(chains []*ExecutionChain, depGraph map[*node][]*node) {
+	// Build chain dependency graph
+	chainByNode := make(map[*node]*ExecutionChain)
+	for _, chain := range chains {
+		for _, node := range chain.nodes {
+			chainByNode[node] = chain
+		}
+	}
+	
+	// For each chain, find which other chains it depends on
+	for _, chain := range chains {
+		dependentChains := make(map[*ExecutionChain]bool)
+		
+		// Check dependencies of the first node in the chain
+		if len(chain.nodes) > 0 {
+			firstNode := chain.nodes[0]
+			
+			// Find all parent nodes that this chain depends on
+			for parentNode := range depGraph {
+				for _, childNode := range depGraph[parentNode] {
+					if childNode == firstNode {
+						// This chain depends on parentNode
+						if parentChain, exists := chainByNode[parentNode]; exists && parentChain != chain {
+							dependentChains[parentChain] = true
+						}
+					}
+				}
+			}
+		}
+		
+		// Convert to slice
+		for depChain := range dependentChains {
+			chain.waitFor = append(chain.waitFor, depChain)
+		}
+	}
+	
+	// Assign completion channels to chains that others wait for
+	for _, chain := range chains {
+		if len(chain.waitFor) > 0 {
+			for _, waitChain := range chain.waitFor {
+				if waitChain.completeCh == nil {
+					waitChain.completeCh = NewInjectorChannel(fmt.Sprintf("%s_complete", waitChain.chainID))
+				}
+			}
+		}
+	}
+}
+
+// convertChainsToStatements converts execution chains to InjectorStmt objects
+func (g *Graph) convertChainsToStatements(chains []*ExecutionChain, nodeParams map[*node][]*InjectorParam) []InjectorStmt {
+	var result []InjectorStmt
+	
+	for _, chain := range chains {
+		if len(chain.nodes) == 1 {
+			// Single node, create individual statement
+			node := chain.nodes[0]
+			returnValues := nodeParams[node]
+			stmt := &InjectorProviderCallStmt{
+				Provider:  node.providerSpec,
+				Arguments: node.providerArgs,
+				Returns:   returnValues,
+				Channel:   chain.completeCh,
+			}
+			result = append(result, stmt)
+		} else {
+			// Multiple nodes, create chain statement
+			chainStmts := make([]InjectorStmt, 0, len(chain.nodes))
+			for _, node := range chain.nodes {
+				returnValues := nodeParams[node]
+				stmt := &InjectorProviderCallStmt{
+					Provider:  node.providerSpec,
+					Arguments: node.providerArgs,
+					Returns:   returnValues,
+				}
+				chainStmts = append(chainStmts, stmt)
+			}
+			
+			// Create input channels for waiting on dependencies
+			inputs := make([]*InjectorChannel, 0, len(chain.waitFor))
+			for _, waitChain := range chain.waitFor {
+				if waitChain.completeCh != nil {
+					inputs = append(inputs, waitChain.completeCh)
+				}
+			}
+			
+			chainStmt := &InjectorChainStmt{
+				Statements: chainStmts,
+				Inputs:     inputs,
+			}
+			result = append(result, chainStmt)
+		}
+	}
+	
+	return result
+}
+
+
+
+
+
+
+
+

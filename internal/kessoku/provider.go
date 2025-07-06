@@ -3,8 +3,8 @@ package kessoku
 
 import (
 	"go/ast"
+	"go/token"
 	"go/types"
-	"sync/atomic"
 )
 
 type MetaData struct {
@@ -42,11 +42,6 @@ type Return struct {
 	ASTTypeExpr ast.Expr
 }
 
-// Provider represents a legacy provider function (for backward compatibility).
-type Provider struct {
-	Fn *ast.FuncDecl
-}
-
 // BuildDirective represents a kessoku.Inject call.
 type BuildDirective struct {
 	InjectorName string
@@ -57,16 +52,11 @@ type BuildDirective struct {
 
 type InjectorParam struct {
 	name       string
-	ID         uint64
 	refCounter int
 }
 
-var injectorParamIDCounter uint64
-
 func NewInjectorParam(name string) *InjectorParam {
-	id := atomic.AddUint64(&injectorParamIDCounter, 1) - 1
 	return &InjectorParam{
-		ID:   id,
 		name: name,
 	}
 }
@@ -83,6 +73,20 @@ func (p *InjectorParam) Name() string {
 	return p.name
 }
 
+type InjectorChannel struct {
+	name string
+}
+
+func NewInjectorChannel(name string) *InjectorChannel {
+	return &InjectorChannel{
+		name: name,
+	}
+}
+
+func (c *InjectorChannel) Name() string {
+	return c.name
+}
+
 type InjectorArgument struct {
 	Param *InjectorParam
 	Arg   *Argument
@@ -93,52 +97,125 @@ type InjectorReturn struct {
 	Return *Return
 }
 
-type InjectorStmt struct {
-	Provider       *ProviderSpec
-	Arguments      []*InjectorParam
-	Returns        []*InjectorParam
-	ParallelGroup  int // Group ID for parallel execution (0 means sequential)
+type InjectorStmt interface {
+	Stmt(injector *Injector) []ast.Stmt
+	HasAsync() bool
 }
 
-// DependencyChain represents a sequence of providers that must be executed in order within a single goroutine
-type DependencyChain struct {
-	ID         int               // Unique chain ID within the parallel group
-	Statements []*InjectorStmt   // Providers in execution order
-	Inputs     []*ChannelInput   // Channels to receive data from other chains
-	Outputs    []*ChannelOutput  // Channels to send data to other chains
+type InjectorProviderCallStmt struct {
+	Provider  *ProviderSpec
+	Arguments []*InjectorParam
+	Returns   []*InjectorParam
+	Channel   *InjectorChannel
 }
 
-// ChannelInput represents input from another dependency chain
-type ChannelInput struct {
-	FromChainID   int             // Source chain ID
-	ParamName     string          // Parameter name to receive
-	ParamType     *InjectorParam  // Parameter reference
-	ChannelName   string          // Generated channel variable name
+func (stmt *InjectorProviderCallStmt) Stmt(injector *Injector) []ast.Stmt {
+	var stmts []ast.Stmt
+
+	lhs := make([]ast.Expr, 0, len(stmt.Returns)+1)
+	for _, ret := range stmt.Returns {
+		lhs = append(lhs, &ast.Ident{
+			Name: ret.Name(),
+		})
+	}
+	if stmt.Provider.IsReturnError {
+		lhs = append(lhs, &ast.Ident{
+			Name: "err",
+		})
+	}
+
+	args := make([]ast.Expr, 0, len(stmt.Arguments))
+	for _, arg := range stmt.Arguments {
+		args = append(args, ast.NewIdent(arg.Name()))
+	}
+
+	// Generate call to provider.Fn()() - call the Fn method, then call the returned function
+	rhs := &ast.CallExpr{
+		Fun: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   stmt.Provider.ASTExpr,
+				Sel: ast.NewIdent("Fn"),
+			},
+			Args: []ast.Expr{},
+		},
+		Args: args,
+	}
+
+	stmts = append(stmts, &ast.AssignStmt{
+		Tok: token.DEFINE,
+		Lhs: lhs,
+		Rhs: []ast.Expr{rhs},
+	})
+
+	if stmt.Provider.IsReturnError {
+		stmts = append(stmts, &ast.IfStmt{
+			Cond: &ast.BinaryExpr{
+				X:  ast.NewIdent("err"),
+				Op: token.NEQ,
+				Y:  ast.NewIdent("nil"),
+			},
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{
+					&ast.DeclStmt{
+						Decl: &ast.GenDecl{
+							Tok: token.VAR,
+							Specs: []ast.Spec{
+								&ast.ValueSpec{
+									Names: []*ast.Ident{ast.NewIdent("zero")},
+									Type:  injector.Return.Return.ASTTypeExpr,
+								},
+							},
+						},
+					},
+					&ast.ReturnStmt{
+						Results: []ast.Expr{
+							ast.NewIdent("zero"),
+							ast.NewIdent("err"),
+						},
+					},
+				},
+			},
+		})
+	}
+
+	return stmts
 }
 
-// ChannelOutput represents output to another dependency chain
-type ChannelOutput struct {
-	ToChainID     int             // Target chain ID
-	ParamName     string          // Parameter name to send
-	ParamType     *InjectorParam  // Parameter reference
-	ChannelName   string          // Generated channel variable name
+func (stmt *InjectorProviderCallStmt) HasAsync() bool {
+	return stmt.Provider.IsAsync
 }
 
-// ParallelExecutionPlan represents the optimized execution plan for a parallel group
-type ParallelExecutionPlan struct {
-	GroupID    int                 // Parallel group ID
-	Chains     []*DependencyChain  // Dependency chains that can run in parallel
-	Channels   map[string]string   // Channel name mapping (param -> channel name)
+type InjectorChainStmt struct {
+	Statements []InjectorStmt
+	Inputs     []*InjectorChannel
+}
+
+func (stmt *InjectorChainStmt) Stmt(injector *Injector) []ast.Stmt {
+	var stmts []ast.Stmt
+
+	// For now, generate each statement in the chain sequentially
+	// TODO: Add goroutine and synchronization logic for async chains
+	for _, chainStmt := range stmt.Statements {
+		stmts = append(stmts, chainStmt.Stmt(injector)...)
+	}
+
+	return stmts
+}
+
+func (stmt *InjectorChainStmt) HasAsync() bool {
+	for _, chainStmt := range stmt.Statements {
+		if chainStmt.HasAsync() {
+			return true
+		}
+	}
+	return false
 }
 
 type Injector struct {
-	Return             *InjectorReturn
-	Name               string
-	Params             []*InjectorParam
-	Args               []*InjectorArgument
-	Stmts              []*InjectorStmt
-	IsReturnError      bool
-	HasExistingContext bool
-	ContextParamName   string
-	ExecutionPlans     map[int]*ParallelExecutionPlan // Map from parallel group ID to execution plan
+	Return        *InjectorReturn
+	Name          string
+	Params        []*InjectorParam
+	Args          []*InjectorArgument
+	Stmts         []InjectorStmt
+	IsReturnError bool
 }
