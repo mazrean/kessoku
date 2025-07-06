@@ -84,6 +84,23 @@ func generateImportDecl(imporSpecs []*ast.ImportSpec) *ast.GenDecl {
 }
 
 func generateInjectorDecl(injector *Injector) ast.Decl {
+	// Check if we need errgroup and update injector error return before generating signature
+	for _, stmt := range injector.Stmts {
+		if stmt.ParallelGroup > 0 {
+			// Count how many statements are in the same parallel group
+			sameGroupCount := 0
+			for _, otherStmt := range injector.Stmts {
+				if otherStmt.ParallelGroup == stmt.ParallelGroup {
+					sameGroupCount++
+				}
+			}
+			if sameGroupCount > 1 {
+				injector.IsReturnError = true
+				break
+			}
+		}
+	}
+
 	paramFields := make([]*ast.Field, 0, len(injector.Args))
 	for _, arg := range injector.Args {
 		paramFields = append(paramFields, &ast.Field{
@@ -277,10 +294,13 @@ func generateParallelStmts(group []*InjectorStmt, injector *Injector, needsErrgr
 			Tok: token.DEFINE,
 			Lhs: []ast.Expr{ast.NewIdent("g")},
 			Rhs: []ast.Expr{
-				&ast.CallExpr{
-					Fun: &ast.SelectorExpr{
-						X:   ast.NewIdent("errgroup"),
-						Sel: ast.NewIdent("Group"),
+				&ast.UnaryExpr{
+					Op: token.AND,
+					X: &ast.CompositeLit{
+						Type: &ast.SelectorExpr{
+							X:   ast.NewIdent("errgroup"),
+							Sel: ast.NewIdent("Group"),
+						},
 					},
 				},
 			},
@@ -289,18 +309,22 @@ func generateParallelStmts(group []*InjectorStmt, injector *Injector, needsErrgr
 	
 	// Declare result variables
 	for _, stmt := range group {
-		for _, ret := range stmt.Returns {
-			stmts = append(stmts, &ast.DeclStmt{
-				Decl: &ast.GenDecl{
-					Tok: token.VAR,
-					Specs: []ast.Spec{
-						&ast.ValueSpec{
-							Names: []*ast.Ident{ast.NewIdent(ret.Name())},
-							Type:  getReturnTypeExpr(injector), // This needs proper type detection
+		for i, ret := range stmt.Returns {
+			if i < len(stmt.Provider.Provides) {
+				// Use the actual provider type for this return value
+				providerReturnType, _ := createASTTypeExpr(stmt.Provider.Provides[i])
+				stmts = append(stmts, &ast.DeclStmt{
+					Decl: &ast.GenDecl{
+						Tok: token.VAR,
+						Specs: []ast.Spec{
+							&ast.ValueSpec{
+								Names: []*ast.Ident{ast.NewIdent(ret.Name())},
+								Type:  providerReturnType,
+							},
 						},
 					},
-				},
-			})
+				})
+			}
 		}
 	}
 	

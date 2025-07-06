@@ -565,80 +565,42 @@ func (g *Graph) Build() (*Injector, error) {
 func (g *Graph) analyzeParallelGroups() {
 	// Initialize parallel groups
 	parallelGroupCounter := 1
-	nodeGroupMap := make(map[*node]int)
 	
-	// Create a copy of the graph to analyze
-	currentNodes := make([]*node, 0)
-	for n := range g.waitNodes.Iter {
-		currentNodes = append(currentNodes, n)
-	}
+	// Get current nodes without destroying the queue
+	currentNodes := g.waitNodes.ToSlice()
 	
-	// Reset the queue for our analysis
-	g.waitNodes = collection.NewQueue[*node]()
+	// Simple parallel group assignment for async providers
+	// Find nodes that can be executed in parallel (same level in dependency graph)
 	for _, n := range currentNodes {
-		g.waitNodes.Push(n)
-	}
-	
-	visited := make(map[*node]bool)
-	
-	// Process nodes level by level
-	for g.waitNodes.Len() > 0 {
-		levelNodes := make([]*node, 0)
-		
-		// Collect all nodes at current level
-		for n := range g.waitNodes.Iter {
-			if !visited[n] {
-				levelNodes = append(levelNodes, n)
-				visited[n] = true
-			}
-		}
-		
-		if len(levelNodes) == 0 {
-			break
-		}
-		
-		// Group async nodes that can run in parallel
-		asyncNodes := make([]*node, 0)
-		for _, n := range levelNodes {
-			if n.providerSpec != nil && n.providerSpec.IsAsync {
-				asyncNodes = append(asyncNodes, n)
-			} else {
-				// Non-async nodes get their own group (sequential execution)
-				n.parallelGroup = 0
-				nodeGroupMap[n] = 0
-			}
-		}
-		
-		// Assign parallel group to async nodes
-		if len(asyncNodes) > 1 {
-			groupID := parallelGroupCounter
-			parallelGroupCounter++
-			
-			for _, n := range asyncNodes {
-				n.parallelGroup = groupID
-				nodeGroupMap[n] = groupID
-			}
-		} else if len(asyncNodes) == 1 {
-			// Single async node doesn't need parallelization
-			asyncNodes[0].parallelGroup = 0
-			nodeGroupMap[asyncNodes[0]] = 0
-		}
-		
-		// Process edges to find next level
-		nextLevelNodes := make([]*node, 0)
-		for _, n := range levelNodes {
-			for _, edge := range g.edges[n] {
-				if !visited[edge.node] {
-					nextLevelNodes = append(nextLevelNodes, edge.node)
+		if n.providerSpec != nil && n.providerSpec.IsAsync {
+			// Check if there are other async nodes at the same level
+			asyncPeers := make([]*node, 0)
+			for _, peer := range currentNodes {
+				if peer != n && peer.providerSpec != nil && peer.providerSpec.IsAsync && peer.requireCount == n.requireCount {
+					asyncPeers = append(asyncPeers, peer)
 				}
 			}
-		}
-		
-		// Add next level nodes to queue
-		for _, n := range nextLevelNodes {
-			if !visited[n] {
-				g.waitNodes.Push(n)
+			
+			if len(asyncPeers) > 0 {
+				// Assign same parallel group to async nodes at the same level
+				if n.parallelGroup == 0 {
+					groupID := parallelGroupCounter
+					parallelGroupCounter++
+					n.parallelGroup = groupID
+					
+					for _, peer := range asyncPeers {
+						if peer.parallelGroup == 0 {
+							peer.parallelGroup = groupID
+						}
+					}
+				}
+			} else {
+				// Single async node doesn't need parallelization
+				n.parallelGroup = 0
 			}
+		} else {
+			// Non-async nodes get sequential execution
+			n.parallelGroup = 0
 		}
 	}
 }
