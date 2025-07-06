@@ -635,22 +635,6 @@ func (g *Graph) analyzeParallelGroups() {
 	}
 }
 
-// canExecuteSequentiallyAfter checks if node1 can be executed immediately after node2 in the same goroutine
-func (g *Graph) canExecuteSequentiallyAfter(node1, node2 *node) bool {
-	// Check if node1 depends directly on node2's output
-	for _, arg := range node1.providerArgs {
-		if arg != nil {
-			// Find which node provides this argument
-			for _, edge := range g.edges[node2] {
-				if edge.node == node1 {
-					// node1 depends on node2 - they can be in the same goroutine
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
 
 // analyzeContextRequirements checks for existing context.Context and determines context needs
 func (g *Graph) analyzeContextRequirements(injector *Injector) {
@@ -1024,14 +1008,7 @@ func (g *Graph) topologicalSortNodes(nodeParams map[*node][]*InjectorParam) []*n
 	
 	// Handle any remaining nodes (shouldn't happen in a valid DAG)
 	for _, n := range providerNodes {
-		found := false
-		for _, resultNode := range result {
-			if resultNode == n {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(result, n) {
 			result = append(result, n)
 		}
 	}
