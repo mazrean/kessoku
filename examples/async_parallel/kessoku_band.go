@@ -3,46 +3,17 @@
 package main
 
 import (
+	"context"
 	"github.com/mazrean/kessoku"
 	"golang.org/x/sync/errgroup"
-	"context"
 )
 
-func InitializeApp(ctx context.Context) (*App, error) {
-	g, ctx := errgroup.WithContext(ctx)
-	var v0 *DatabaseService
-	var v1 *CacheService
-	var v2 *MessagingService
-	g.Go(func() error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		result := kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
-		v0 = result
-		return nil
-	})
-	g.Go(func() error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		result := kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
-		v1 = result
-		return nil
-	})
-	g.Go(func() error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		result := kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()()
-		v2 = result
-		return nil
-	})
-	if err := g.Wait(); err != nil {
-		var zero *App
-		return zero, err
-	}
-	v3 := kessoku.Provide(NewUserService).Fn()(v0, v1)
+func InitializeApp(ctx context.Context) *App {
+	v0 := kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
+	v1 := kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
+	v2 := kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()()
 	v4 := kessoku.Provide(NewNotificationService).Fn()(v2)
+	v3 := kessoku.Provide(NewUserService).Fn()(v0, v1)
 	v5 := kessoku.Provide(NewApp).Fn()(v3, v4)
-	return v5, nil
+	return v5
 }

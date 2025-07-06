@@ -3,41 +3,19 @@
 package main
 
 import (
+	"context"
 	"github.com/mazrean/kessoku"
 	"golang.org/x/sync/errgroup"
-	"context"
 )
 
-func InitializeComplexApp(ctx context.Context) (*App, error) {
+func InitializeComplexApp(ctx context.Context) *App {
 	v0 := kessoku.Provide(NewConfig).Fn()()
-	g, ctx := errgroup.WithContext(ctx)
-	var v1 *MessagingService
-	var v2 *DatabaseService
-	var v4 *UserService
-	var v3 *CacheService
-	var v5 *SessionService
-	v1 = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(v0)
-	g.Go(func() error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		v2 = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()(v0)
-		v4 = kessoku.Async(kessoku.Provide(NewUserService)).Fn()(v2)
-		return nil
-	})
-	g.Go(func() error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		v3 = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()(v0)
-		v5 = kessoku.Async(kessoku.Provide(NewSessionService)).Fn()(v3)
-		return nil
-	})
-	if err := g.Wait(); err != nil {
-		var zero *App
-		return zero, err
-	}
+	v1 := kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(v0)
+	v2 := kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()(v0)
+	v4 := kessoku.Async(kessoku.Provide(NewUserService)).Fn()(v2)
+	v3 := kessoku.Async(kessoku.Provide(NewCacheService)).Fn()(v0)
+	v5 := kessoku.Async(kessoku.Provide(NewSessionService)).Fn()(v3)
 	v6 := kessoku.Async(kessoku.Provide(NewNotificationService)).Fn()(v4, v5, v1)
 	v7 := kessoku.Provide(NewComplexApp).Fn()(v6)
-	return v7, nil
+	return v7
 }
