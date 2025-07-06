@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/format"
 	"go/token"
+	"go/types"
 	"io"
 )
 
@@ -108,11 +109,12 @@ func generateImportDecl(imporSpecs []*ast.ImportSpec) *ast.GenDecl {
 }
 
 func generateInjectorDecl(injector *Injector) ast.Decl {
-	// Check if we need errgroup and update injector error return before generating signature
+	paramFields := make([]*ast.Field, 0, len(injector.Args)+1)
+	
+	// Add context.Context parameter for async providers if needed
 	hasAsyncProviders := false
 	for _, stmt := range injector.Stmts {
 		if stmt.ParallelGroup > 0 {
-			// Count how many statements are in the same parallel group
 			sameGroupCount := 0
 			for _, otherStmt := range injector.Stmts {
 				if otherStmt.ParallelGroup == stmt.ParallelGroup {
@@ -120,19 +122,15 @@ func generateInjectorDecl(injector *Injector) ast.Decl {
 				}
 			}
 			if sameGroupCount > 1 {
-				injector.IsReturnError = true
 				hasAsyncProviders = true
 				break
 			}
 		}
 	}
-
-	paramFields := make([]*ast.Field, 0, len(injector.Args)+1)
 	
-	// Add context.Context parameter for async providers
-	if hasAsyncProviders {
+	if hasAsyncProviders && !injector.HasExistingContext {
 		paramFields = append(paramFields, &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent("ctx")},
+			Names: []*ast.Ident{ast.NewIdent(injector.ContextParamName)},
 			Type: &ast.SelectorExpr{
 				X:   ast.NewIdent("context"),
 				Sel: ast.NewIdent("Context"),
@@ -226,28 +224,139 @@ func generateStmtsWithParallelization(injector *Injector) []ast.Stmt {
 		}
 	}
 	
-	// Process groups in order
+	// Track if errgroup variables have been declared
+	errgroupDeclared := false
+	
+	// Process statements in the order they appear in injector.Stmts
+	// This preserves the dependency order established by the topological sort
 	processedGroups := make(map[int]bool)
 	for _, stmt := range injector.Stmts {
 		groupID := stmt.ParallelGroup
-		if processedGroups[groupID] {
+		
+		// Process sequential statements immediately 
+		if groupID == 0 {
+			stmts = append(stmts, generateSequentialStmt(stmt, injector)...)
 			continue
 		}
-		processedGroups[groupID] = true
 		
-		group := parallelGroups[groupID]
-		if groupID == 0 || len(group) == 1 {
-			// Sequential execution
-			for _, s := range group {
-				stmts = append(stmts, generateSequentialStmt(s, injector)...)
+		// For parallel statements, process the entire group when first encountered
+		if !processedGroups[groupID] {
+			processedGroups[groupID] = true
+			group := parallelGroups[groupID]
+			if len(group) == 1 {
+				// Single statement (async or not) - execute synchronously to avoid unnecessary goroutine
+				stmts = append(stmts, generateSequentialStmt(stmt, injector)...)
+			} else {
+				// Multiple statements - check if execution plan exists for optimized channel-based execution
+				if plan, exists := injector.ExecutionPlans[groupID]; exists {
+					// Use optimized channel-based execution with reduced goroutines
+					stmts = append(stmts, generateOptimizedParallelStmtsWithReduction(plan, injector, hasParallelGroups, errgroupDeclared)...)
+					errgroupDeclared = true
+				} else {
+					// Fallback to simple parallel execution with reduced goroutines
+					stmts = append(stmts, generateParallelStmtsWithReduction(group, injector, hasParallelGroups, errgroupDeclared)...)
+					errgroupDeclared = true
+				}
 			}
-		} else {
-			// Parallel execution using errgroup
-			stmts = append(stmts, generateParallelStmts(group, injector, hasParallelGroups)...)
 		}
 	}
 	
 	return stmts
+}
+
+// topologicalSortGroups sorts parallel groups based on their dependencies
+func topologicalSortGroups(allStmts []*InjectorStmt, parallelGroups map[int][]*InjectorStmt) []int {
+	// Build a map from parameter to the group that provides it
+	paramToGroup := make(map[*InjectorParam]int)
+	for groupID, stmts := range parallelGroups {
+		for _, stmt := range stmts {
+			for _, ret := range stmt.Returns {
+				paramToGroup[ret] = groupID
+			}
+		}
+	}
+	
+	// Build dependency graph between groups
+	groupDeps := make(map[int]map[int]bool) // groupDeps[a][b] = true means group a depends on group b
+	for groupID := range parallelGroups {
+		groupDeps[groupID] = make(map[int]bool)
+	}
+	
+	// Analyze dependencies between groups
+	for groupID, stmts := range parallelGroups {
+		for _, stmt := range stmts {
+			for _, arg := range stmt.Arguments {
+				if providerGroupID, exists := paramToGroup[arg]; exists && providerGroupID != groupID {
+					// This group depends on the provider group
+					groupDeps[groupID][providerGroupID] = true
+				}
+			}
+		}
+	}
+	
+	// Perform topological sort using Kahn's algorithm
+	inDegree := make(map[int]int)
+	for groupID := range parallelGroups {
+		inDegree[groupID] = 0
+	}
+	
+	// Calculate in-degrees
+	for groupID := range parallelGroups {
+		for range groupDeps[groupID] {
+			inDegree[groupID]++
+		}
+	}
+	
+	// Find groups with no dependencies
+	queue := make([]int, 0)
+	for groupID, degree := range inDegree {
+		if degree == 0 {
+			queue = append(queue, groupID)
+		}
+	}
+	
+	// Process queue
+	result := make([]int, 0)
+	for len(queue) > 0 {
+		// Sort queue for deterministic output (process group 0 first, then ascending order)
+		for i := 0; i < len(queue)-1; i++ {
+			for j := i + 1; j < len(queue); j++ {
+				if queue[i] > queue[j] {
+					queue[i], queue[j] = queue[j], queue[i]
+				}
+			}
+		}
+		
+		currentGroup := queue[0]
+		queue = queue[1:]
+		result = append(result, currentGroup)
+		
+		// Update in-degrees for dependent groups
+		for groupID := range parallelGroups {
+			if groupDeps[groupID][currentGroup] {
+				inDegree[groupID]--
+				if inDegree[groupID] == 0 {
+					queue = append(queue, groupID)
+				}
+			}
+		}
+	}
+	
+	// Handle any remaining groups (shouldn't happen in a valid DAG)
+	for groupID := range parallelGroups {
+		found := false
+		for _, id := range result {
+			if id == groupID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, groupID)
+		}
+	}
+	
+	return result
 }
 
 // generateSequentialStmt generates a sequential statement
@@ -323,13 +432,17 @@ func generateSequentialStmt(stmt *InjectorStmt, injector *Injector) []ast.Stmt {
 }
 
 // generateParallelStmts generates parallel statements using errgroup
-func generateParallelStmts(group []*InjectorStmt, injector *Injector, needsErrgroup bool) []ast.Stmt {
+func generateParallelStmts(group []*InjectorStmt, injector *Injector, needsErrgroup bool, errgroupDeclared bool) []ast.Stmt {
 	var stmts []ast.Stmt
 	
 	if needsErrgroup {
-		// Create errgroup with context
+		// Create or reassign errgroup with context
+		tok := token.DEFINE
+		if errgroupDeclared {
+			tok = token.ASSIGN
+		}
 		stmts = append(stmts, &ast.AssignStmt{
-			Tok: token.DEFINE,
+			Tok: tok,
 			Lhs: []ast.Expr{ast.NewIdent("g"), ast.NewIdent("ctx")},
 			Rhs: []ast.Expr{
 				&ast.CallExpr{
@@ -337,7 +450,7 @@ func generateParallelStmts(group []*InjectorStmt, injector *Injector, needsErrgr
 						X:   ast.NewIdent("errgroup"),
 						Sel: ast.NewIdent("WithContext"),
 					},
-					Args: []ast.Expr{ast.NewIdent("ctx")},
+					Args: []ast.Expr{ast.NewIdent(injector.ContextParamName)},
 				},
 			},
 		})
@@ -510,4 +623,622 @@ func generateErrgroupGoroutine(stmt *InjectorStmt) ast.Stmt {
 			},
 		},
 	}
+}
+
+// generateOptimizedParallelStmts generates optimized parallel execution using dependency chains and channels
+func generateOptimizedParallelStmts(plan *ParallelExecutionPlan, injector *Injector, needsErrgroup bool, errgroupDeclared bool) []ast.Stmt {
+	var stmts []ast.Stmt
+	
+	if needsErrgroup {
+		// Create or reassign errgroup with context
+		tok := token.DEFINE
+		if errgroupDeclared {
+			tok = token.ASSIGN
+		}
+		stmts = append(stmts, &ast.AssignStmt{
+			Tok: tok,
+			Lhs: []ast.Expr{ast.NewIdent("g"), ast.NewIdent("ctx")},
+			Rhs: []ast.Expr{
+				&ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent("errgroup"),
+						Sel: ast.NewIdent("WithContext"),
+					},
+					Args: []ast.Expr{ast.NewIdent(injector.ContextParamName)},
+				},
+			},
+		})
+	}
+	
+	// Create channels for cross-chain communication
+	stmts = append(stmts, generateChannelDeclarations(plan)...)
+	
+	// Declare result variables for all statements
+	stmts = append(stmts, generateResultVariableDeclarations(plan)...)
+	
+	// Generate goroutines for each dependency chain
+	for _, chain := range plan.Chains {
+		if needsErrgroup {
+			stmts = append(stmts, generateChainGoroutine(chain, plan))
+		}
+	}
+	
+	if needsErrgroup {
+		// Wait for all goroutines
+		stmts = append(stmts, &ast.IfStmt{
+			Init: &ast.AssignStmt{
+				Tok: token.DEFINE,
+				Lhs: []ast.Expr{ast.NewIdent("err")},
+				Rhs: []ast.Expr{
+					&ast.CallExpr{
+						Fun: &ast.SelectorExpr{
+							X:   ast.NewIdent("g"),
+							Sel: ast.NewIdent("Wait"),
+						},
+					},
+				},
+			},
+			Cond: &ast.BinaryExpr{
+				X:  ast.NewIdent("err"),
+				Op: token.NEQ,
+				Y:  ast.NewIdent("nil"),
+			},
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{
+					&ast.DeclStmt{
+						Decl: &ast.GenDecl{
+							Tok: token.VAR,
+							Specs: []ast.Spec{
+								&ast.ValueSpec{
+									Names: []*ast.Ident{ast.NewIdent("zero")},
+									Type:  getReturnTypeExpr(injector),
+								},
+							},
+						},
+					},
+					&ast.ReturnStmt{
+						Results: []ast.Expr{
+							ast.NewIdent("zero"),
+							ast.NewIdent("err"),
+						},
+					},
+				},
+			},
+		})
+	}
+	
+	return stmts
+}
+
+// generateParallelStmtsWithReduction generates parallel statements with reduced goroutine count
+func generateParallelStmtsWithReduction(group []*InjectorStmt, injector *Injector, needsErrgroup bool, errgroupDeclared bool) []ast.Stmt {
+	var stmts []ast.Stmt
+	
+	// Separate first statement for main thread execution
+	var mainThreadStmt *InjectorStmt
+	var goroutineStmts []*InjectorStmt
+	
+	if len(group) > 0 {
+		mainThreadStmt = group[0]
+		if len(group) > 1 {
+			goroutineStmts = group[1:]
+		}
+	}
+	
+	if needsErrgroup && len(goroutineStmts) > 0 {
+		// Create or reassign errgroup with context
+		tok := token.DEFINE
+		if errgroupDeclared {
+			tok = token.ASSIGN
+		}
+		stmts = append(stmts, &ast.AssignStmt{
+			Tok: tok,
+			Lhs: []ast.Expr{ast.NewIdent("g"), ast.NewIdent("ctx")},
+			Rhs: []ast.Expr{
+				&ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent("errgroup"),
+						Sel: ast.NewIdent("WithContext"),
+					},
+					Args: []ast.Expr{ast.NewIdent(injector.ContextParamName)},
+				},
+			},
+		})
+	}
+	
+	// Declare result variables for all statements
+	for _, stmt := range group {
+		for i, ret := range stmt.Returns {
+			if i < len(stmt.Provider.Provides) {
+				// Use the actual provider type for this return value
+				providerReturnType, _ := createASTTypeExpr(stmt.Provider.Provides[i])
+				stmts = append(stmts, &ast.DeclStmt{
+					Decl: &ast.GenDecl{
+						Tok: token.VAR,
+						Specs: []ast.Spec{
+							&ast.ValueSpec{
+								Names: []*ast.Ident{ast.NewIdent(ret.Name())},
+								Type:  providerReturnType,
+							},
+						},
+					},
+				})
+			}
+		}
+	}
+	
+	// Execute main thread statement first
+	if mainThreadStmt != nil {
+		stmts = append(stmts, generateInlineStmt(mainThreadStmt)...)
+	}
+	
+	// Generate goroutines for remaining statements
+	for _, stmt := range goroutineStmts {
+		if needsErrgroup {
+			stmts = append(stmts, generateErrgroupGoroutine(stmt))
+		}
+	}
+	
+	if needsErrgroup && len(goroutineStmts) > 0 {
+		// Wait for all goroutines
+		stmts = append(stmts, &ast.IfStmt{
+			Init: &ast.AssignStmt{
+				Tok: token.DEFINE,
+				Lhs: []ast.Expr{ast.NewIdent("err")},
+				Rhs: []ast.Expr{
+					&ast.CallExpr{
+						Fun: &ast.SelectorExpr{
+							X:   ast.NewIdent("g"),
+							Sel: ast.NewIdent("Wait"),
+						},
+					},
+				},
+			},
+			Cond: &ast.BinaryExpr{
+				X:  ast.NewIdent("err"),
+				Op: token.NEQ,
+				Y:  ast.NewIdent("nil"),
+			},
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{
+					&ast.DeclStmt{
+						Decl: &ast.GenDecl{
+							Tok: token.VAR,
+							Specs: []ast.Spec{
+								&ast.ValueSpec{
+									Names: []*ast.Ident{ast.NewIdent("zero")},
+									Type:  getReturnTypeExpr(injector),
+								},
+							},
+						},
+					},
+					&ast.ReturnStmt{
+						Results: []ast.Expr{
+							ast.NewIdent("zero"),
+							ast.NewIdent("err"),
+						},
+					},
+				},
+			},
+		})
+	}
+	
+	return stmts
+}
+
+// generateInlineStmt generates an inline statement execution (without goroutine)
+func generateInlineStmt(stmt *InjectorStmt) []ast.Stmt {
+	var stmts []ast.Stmt
+	
+	lhs := make([]ast.Expr, 0, len(stmt.Returns)+1)
+	for _, ret := range stmt.Returns {
+		lhs = append(lhs, &ast.Ident{
+			Name: ret.Name(),
+		})
+	}
+	if stmt.Provider.IsReturnError {
+		lhs = append(lhs, &ast.Ident{
+			Name: "err",
+		})
+	}
+
+	args := make([]ast.Expr, 0, len(stmt.Arguments))
+	for _, arg := range stmt.Arguments {
+		args = append(args, ast.NewIdent(arg.Name()))
+	}
+
+	rhs := &ast.CallExpr{
+		Fun: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   stmt.Provider.ASTExpr,
+				Sel: ast.NewIdent("Fn"),
+			},
+			Args: []ast.Expr{},
+		},
+		Args: args,
+	}
+
+	stmts = append(stmts, &ast.AssignStmt{
+		Tok: token.ASSIGN,
+		Lhs: lhs,
+		Rhs: []ast.Expr{rhs},
+	})
+
+	if stmt.Provider.IsReturnError {
+		stmts = append(stmts, &ast.IfStmt{
+			Cond: &ast.BinaryExpr{
+				X:  ast.NewIdent("err"),
+				Op: token.NEQ,
+				Y:  ast.NewIdent("nil"),
+			},
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{
+					&ast.DeclStmt{
+						Decl: &ast.GenDecl{
+							Tok: token.VAR,
+							Specs: []ast.Spec{
+								&ast.ValueSpec{
+									Names: []*ast.Ident{ast.NewIdent("zero")},
+									Type:  ast.NewIdent("*App"), // This should be dynamic based on return type
+								},
+							},
+						},
+					},
+					&ast.ReturnStmt{
+						Results: []ast.Expr{
+							ast.NewIdent("zero"),
+							ast.NewIdent("err"),
+						},
+					},
+				},
+			},
+		})
+	}
+	
+	return stmts
+}
+
+// generateOptimizedParallelStmtsWithReduction generates optimized parallel execution with reduced goroutines
+func generateOptimizedParallelStmtsWithReduction(plan *ParallelExecutionPlan, injector *Injector, needsErrgroup bool, errgroupDeclared bool) []ast.Stmt {
+	var stmts []ast.Stmt
+	
+	// If there's only one chain, execute it inline
+	if len(plan.Chains) <= 1 {
+		for _, chain := range plan.Chains {
+			for _, stmt := range chain.Statements {
+				stmts = append(stmts, generateInlineStmt(stmt)...)
+			}
+		}
+		return stmts
+	}
+	
+	// Separate first chain for main thread execution
+	var mainThreadChain *DependencyChain
+	var goroutineChains []*DependencyChain
+	
+	if len(plan.Chains) > 0 {
+		mainThreadChain = plan.Chains[0]
+		if len(plan.Chains) > 1 {
+			goroutineChains = plan.Chains[1:]
+		}
+	}
+	
+	if needsErrgroup && len(goroutineChains) > 0 {
+		// Create or reassign errgroup with context
+		tok := token.DEFINE
+		if errgroupDeclared {
+			tok = token.ASSIGN
+		}
+		stmts = append(stmts, &ast.AssignStmt{
+			Tok: tok,
+			Lhs: []ast.Expr{ast.NewIdent("g"), ast.NewIdent("ctx")},
+			Rhs: []ast.Expr{
+				&ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent("errgroup"),
+						Sel: ast.NewIdent("WithContext"),
+					},
+					Args: []ast.Expr{ast.NewIdent(injector.ContextParamName)},
+				},
+			},
+		})
+	}
+	
+	// Create channels for cross-chain communication
+	stmts = append(stmts, generateChannelDeclarations(plan)...)
+	
+	// Declare result variables for all statements
+	stmts = append(stmts, generateResultVariableDeclarations(plan)...)
+	
+	// Execute main thread chain first
+	if mainThreadChain != nil {
+		for _, stmt := range mainThreadChain.Statements {
+			stmts = append(stmts, generateInlineStmt(stmt)...)
+		}
+	}
+	
+	// Generate goroutines for remaining chains
+	for _, chain := range goroutineChains {
+		if needsErrgroup {
+			stmts = append(stmts, generateChainGoroutine(chain, plan))
+		}
+	}
+	
+	if needsErrgroup && len(goroutineChains) > 0 {
+		// Wait for all goroutines
+		stmts = append(stmts, &ast.IfStmt{
+			Init: &ast.AssignStmt{
+				Tok: token.DEFINE,
+				Lhs: []ast.Expr{ast.NewIdent("err")},
+				Rhs: []ast.Expr{
+					&ast.CallExpr{
+						Fun: &ast.SelectorExpr{
+							X:   ast.NewIdent("g"),
+							Sel: ast.NewIdent("Wait"),
+						},
+					},
+				},
+			},
+			Cond: &ast.BinaryExpr{
+				X:  ast.NewIdent("err"),
+				Op: token.NEQ,
+				Y:  ast.NewIdent("nil"),
+			},
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{
+					&ast.DeclStmt{
+						Decl: &ast.GenDecl{
+							Tok: token.VAR,
+							Specs: []ast.Spec{
+								&ast.ValueSpec{
+									Names: []*ast.Ident{ast.NewIdent("zero")},
+									Type:  getReturnTypeExpr(injector),
+								},
+							},
+						},
+					},
+					&ast.ReturnStmt{
+						Results: []ast.Expr{
+							ast.NewIdent("zero"),
+							ast.NewIdent("err"),
+						},
+					},
+				},
+			},
+		})
+	}
+	
+	return stmts
+}
+
+// generateChannelDeclarations creates channel declarations for cross-chain communication
+func generateChannelDeclarations(plan *ParallelExecutionPlan) []ast.Stmt {
+	var stmts []ast.Stmt
+	
+	// Collect all unique channels
+	channelTypes := make(map[string]ast.Expr)
+	for _, chain := range plan.Chains {
+		for _, input := range chain.Inputs {
+			if input.ParamType != nil {
+				// Determine the type from the parameter
+				providerReturnType, _ := createASTTypeExpr(getParamType(input.ParamType, plan))
+				channelTypes[input.ChannelName] = &ast.ChanType{
+					Dir:   ast.SEND | ast.RECV,
+					Value: providerReturnType,
+				}
+			}
+		}
+	}
+	
+	// Generate channel declarations
+	for channelName, channelType := range channelTypes {
+		stmts = append(stmts, &ast.DeclStmt{
+			Decl: &ast.GenDecl{
+				Tok: token.VAR,
+				Specs: []ast.Spec{
+					&ast.ValueSpec{
+						Names: []*ast.Ident{ast.NewIdent(channelName)},
+						Type:  channelType,
+					},
+				},
+			},
+		})
+		
+		// Initialize the channel
+		stmts = append(stmts, &ast.AssignStmt{
+			Tok: token.ASSIGN,
+			Lhs: []ast.Expr{ast.NewIdent(channelName)},
+			Rhs: []ast.Expr{
+				&ast.CallExpr{
+					Fun: ast.NewIdent("make"),
+					Args: []ast.Expr{channelType},
+				},
+			},
+		})
+	}
+	
+	return stmts
+}
+
+// generateResultVariableDeclarations creates variable declarations for all result parameters
+func generateResultVariableDeclarations(plan *ParallelExecutionPlan) []ast.Stmt {
+	var stmts []ast.Stmt
+	
+	for _, chain := range plan.Chains {
+		for _, stmt := range chain.Statements {
+			for i, ret := range stmt.Returns {
+				if i < len(stmt.Provider.Provides) {
+					// Use the actual provider type for this return value
+					providerReturnType, _ := createASTTypeExpr(stmt.Provider.Provides[i])
+					stmts = append(stmts, &ast.DeclStmt{
+						Decl: &ast.GenDecl{
+							Tok: token.VAR,
+							Specs: []ast.Spec{
+								&ast.ValueSpec{
+									Names: []*ast.Ident{ast.NewIdent(ret.Name())},
+									Type:  providerReturnType,
+								},
+							},
+						},
+					})
+				}
+			}
+		}
+	}
+	
+	return stmts
+}
+
+// generateChainGoroutine generates a goroutine for a dependency chain
+func generateChainGoroutine(chain *DependencyChain, plan *ParallelExecutionPlan) ast.Stmt {
+	var goroutineBody []ast.Stmt
+	
+	// Check context cancellation first
+	goroutineBody = append(goroutineBody, &ast.IfStmt{
+		Cond: &ast.BinaryExpr{
+			X: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ast.NewIdent("ctx"),
+					Sel: ast.NewIdent("Err"),
+				},
+			},
+			Op: token.NEQ,
+			Y:  ast.NewIdent("nil"),
+		},
+		Body: &ast.BlockStmt{
+			List: []ast.Stmt{
+				&ast.ReturnStmt{
+					Results: []ast.Expr{
+						&ast.CallExpr{
+							Fun: &ast.SelectorExpr{
+								X:   ast.NewIdent("ctx"),
+								Sel: ast.NewIdent("Err"),
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	
+	// Receive values from channels for input dependencies
+	for _, input := range chain.Inputs {
+		goroutineBody = append(goroutineBody, &ast.AssignStmt{
+			Tok: token.ASSIGN,
+			Lhs: []ast.Expr{ast.NewIdent(input.ParamName)},
+			Rhs: []ast.Expr{
+				&ast.UnaryExpr{
+					Op: token.ARROW,
+					X:  ast.NewIdent(input.ChannelName),
+				},
+			},
+		})
+	}
+	
+	// Execute statements in the chain sequentially
+	for _, stmt := range chain.Statements {
+		// Generate function call
+		args := make([]ast.Expr, 0, len(stmt.Arguments))
+		for _, arg := range stmt.Arguments {
+			args = append(args, ast.NewIdent(arg.Name()))
+		}
+		
+		rhs := &ast.CallExpr{
+			Fun: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   stmt.Provider.ASTExpr,
+					Sel: ast.NewIdent("Fn"),
+				},
+				Args: []ast.Expr{},
+			},
+			Args: args,
+		}
+		
+		// Assign results
+		lhs := make([]ast.Expr, 0, len(stmt.Returns)+1)
+		for _, ret := range stmt.Returns {
+			lhs = append(lhs, ast.NewIdent(ret.Name()))
+		}
+		if stmt.Provider.IsReturnError {
+			lhs = append(lhs, ast.NewIdent("err"))
+		}
+		
+		goroutineBody = append(goroutineBody, &ast.AssignStmt{
+			Tok: token.ASSIGN,
+			Lhs: lhs,
+			Rhs: []ast.Expr{rhs},
+		})
+		
+		// Handle error
+		if stmt.Provider.IsReturnError {
+			goroutineBody = append(goroutineBody, &ast.IfStmt{
+				Cond: &ast.BinaryExpr{
+					X:  ast.NewIdent("err"),
+					Op: token.NEQ,
+					Y:  ast.NewIdent("nil"),
+				},
+				Body: &ast.BlockStmt{
+					List: []ast.Stmt{
+						&ast.ReturnStmt{
+							Results: []ast.Expr{ast.NewIdent("err")},
+						},
+					},
+				},
+			})
+		}
+	}
+	
+	// Send values to channels for output dependencies
+	for _, output := range chain.Outputs {
+		goroutineBody = append(goroutineBody, &ast.ExprStmt{
+			X: &ast.BinaryExpr{
+				X:  ast.NewIdent(output.ChannelName),
+				Op: token.ARROW,
+				Y:  ast.NewIdent(output.ParamName),
+			},
+		})
+	}
+	
+	goroutineBody = append(goroutineBody, &ast.ReturnStmt{
+		Results: []ast.Expr{ast.NewIdent("nil")},
+	})
+	
+	return &ast.ExprStmt{
+		X: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent("g"),
+				Sel: ast.NewIdent("Go"),
+			},
+			Args: []ast.Expr{
+				&ast.FuncLit{
+					Type: &ast.FuncType{
+						Results: &ast.FieldList{
+							List: []*ast.Field{
+								{Type: ast.NewIdent("error")},
+							},
+						},
+					},
+					Body: &ast.BlockStmt{
+						List: goroutineBody,
+					},
+				},
+			},
+		},
+	}
+}
+
+// getParamType extracts the type from an InjectorParam by finding the provider that creates it
+func getParamType(param *InjectorParam, plan *ParallelExecutionPlan) types.Type {
+	// Find the provider statement that creates this parameter
+	for _, chain := range plan.Chains {
+		for _, stmt := range chain.Statements {
+			for i, ret := range stmt.Returns {
+				if ret == param && i < len(stmt.Provider.Provides) {
+					return stmt.Provider.Provides[i]
+				}
+			}
+		}
+	}
+	// Fallback to interface{} if we can't find the type
+	return types.NewNamed(types.NewTypeName(0, nil, "interface{}", nil), types.NewInterface(nil, nil), nil)
 }
