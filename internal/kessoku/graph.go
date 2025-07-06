@@ -174,6 +174,7 @@ type Graph struct {
 	waitNodesAdded map[*node]bool
 	edges          map[*node][]*edgeNode
 	injectorName   string
+	allNodes       []*node // Track all nodes in the graph
 }
 
 func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
@@ -183,6 +184,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 		waitNodes:      collection.NewQueue[*node](),
 		waitNodesAdded: make(map[*node]bool),
 		edges:          make(map[*node][]*edgeNode),
+		allNodes:       make([]*node, 0),
 	}
 
 	argProviderMap := make(map[string]*Argument)
@@ -232,6 +234,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 		}
 		graph.waitNodes.Push(returnNode)
 		graph.waitNodesAdded[returnNode] = true
+		graph.allNodes = append(graph.allNodes, returnNode)
 
 		return graph, nil
 	}
@@ -256,6 +259,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 		returnIndex: returnProvider.returnIndex,
 	}
 	queue.Push(returnNode)
+	graph.allNodes = append(graph.allNodes, returnNode)
 	if returnNode.requireCount == 0 {
 		graph.waitNodes.Push(returnNode)
 		graph.waitNodesAdded[returnNode] = true
@@ -288,6 +292,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 					}
 					argNodeMap[arg] = n2
 					queue.Push(n2)
+					graph.allNodes = append(graph.allNodes, n2)
 				}
 
 				srcIndex = 0
@@ -301,6 +306,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 					}
 					providerNodeMap[provider.provider] = n2
 					queue.Push(n2)
+					graph.allNodes = append(graph.allNodes, n2)
 				}
 
 				srcIndex = provider.returnIndex
@@ -336,6 +342,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 				}
 				argNodeMap[arg] = n2
 				queue.Push(n2)
+				graph.allNodes = append(graph.allNodes, n2)
 				srcIndex = 0
 			}
 
@@ -489,21 +496,29 @@ func sortArguments(args []*Argument) {
 
 func (g *Graph) Build() (*Injector, error) {
 	injector := &Injector{
-		Name:          g.injectorName,
-		IsReturnError: false,
+		Name:           g.injectorName,
+		IsReturnError:  false,
+		ExecutionPlans: make(map[int]*ParallelExecutionPlan),
 	}
 
 	// Analyze parallel execution groups
 	g.analyzeParallelGroups()
 
+	// Check for existing context.Context and determine if async providers need context
+	g.analyzeContextRequirements(injector)
+
+	// Collect all nodes and parameters using topological traversal
+	nodeParams := make(map[*node][]*InjectorParam)
 	variableNameCounter := 0
 	buildVisited := make(map[*node]bool)
+	
+	// Traverse nodes in dependency order to collect parameters
 	for n := range g.waitNodes.Iter {
-		// Skip if this node has already been processed
 		if buildVisited[n] {
 			continue
 		}
 		buildVisited[n] = true
+		
 		slog.Debug("waitNodes", "waitNodes", n)
 		var returnValues []*InjectorParam
 		switch {
@@ -525,19 +540,14 @@ func (g *Graph) Build() (*Injector, error) {
 				returnValues = append(returnValues, param)
 			}
 
-			injector.Stmts = append(injector.Stmts, &InjectorStmt{
-				Provider:      n.providerSpec,
-				Arguments:     n.providerArgs,
-				Returns:       returnValues,
-				ParallelGroup: n.parallelGroup,
-			})
-
 			if n.providerSpec.IsReturnError {
 				injector.IsReturnError = true
 			}
 		default:
 			return nil, errors.New("invalid node")
 		}
+		
+		nodeParams[n] = returnValues
 
 		for _, edge := range g.edges[n] {
 			edge.node.requireCount--
@@ -557,6 +567,23 @@ func (g *Graph) Build() (*Injector, error) {
 			}
 		}
 	}
+	
+	// Build statements in correct dependency order using topological sort
+	orderedProviderNodes := g.topologicalSortNodes(nodeParams)
+	for _, n := range orderedProviderNodes {
+		if n.providerSpec != nil {
+			returnValues := nodeParams[n]
+			injector.Stmts = append(injector.Stmts, &InjectorStmt{
+				Provider:      n.providerSpec,
+				Arguments:     n.providerArgs,
+				Returns:       returnValues,
+				ParallelGroup: n.parallelGroup,
+			})
+		}
+	}
+
+	// Analyze execution plans for optimized parallel execution
+	g.analyzeExecutionPlans(injector)
 
 	return injector, nil
 }
@@ -566,8 +593,8 @@ func (g *Graph) analyzeParallelGroups() {
 	// Initialize parallel groups
 	parallelGroupCounter := 1
 	
-	// Get current nodes without destroying the queue
-	currentNodes := g.waitNodes.ToSlice()
+	// Use all nodes in the graph, not just waitNodes
+	currentNodes := g.allNodes
 	
 	// Simple parallel group assignment for async providers
 	// Find nodes that can be executed in parallel (same level in dependency graph)
@@ -595,12 +622,419 @@ func (g *Graph) analyzeParallelGroups() {
 					}
 				}
 			} else {
-				// Single async node doesn't need parallelization
-				n.parallelGroup = 0
+				// Single async node can still benefit from async execution
+				if n.parallelGroup == 0 {
+					n.parallelGroup = parallelGroupCounter
+					parallelGroupCounter++
+				}
 			}
 		} else {
 			// Non-async nodes get sequential execution
 			n.parallelGroup = 0
 		}
 	}
+}
+
+// canExecuteSequentiallyAfter checks if node1 can be executed immediately after node2 in the same goroutine
+func (g *Graph) canExecuteSequentiallyAfter(node1, node2 *node) bool {
+	// Check if node1 depends directly on node2's output
+	for _, arg := range node1.providerArgs {
+		if arg != nil {
+			// Find which node provides this argument
+			for _, edge := range g.edges[node2] {
+				if edge.node == node1 {
+					// node1 depends on node2 - they can be in the same goroutine
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// analyzeContextRequirements checks for existing context.Context and determines context needs
+func (g *Graph) analyzeContextRequirements(injector *Injector) {
+	// Check if any async providers need parallel execution
+	hasAsyncProviders := false
+	for _, n := range g.allNodes {
+		if n.providerSpec != nil && n.providerSpec.IsAsync && n.parallelGroup > 0 {
+			hasAsyncProviders = true
+			break
+		}
+	}
+
+	if !hasAsyncProviders {
+		return
+	}
+
+	// Check if context.Context already exists in arguments
+	existingContextArg := ""
+	for _, n := range g.allNodes {
+		if n.arg != nil && isContextType(n.arg.Type) {
+			existingContextArg = n.arg.Name
+			break
+		}
+	}
+
+	// Check if context.Context is provided by any provider
+	existingContextProvider := ""
+	for _, n := range g.allNodes {
+		if n.providerSpec != nil {
+			for _, providedType := range n.providerSpec.Provides {
+				if isContextType(providedType) {
+					// Find the corresponding return parameter name
+					for _, stmt := range injector.Stmts {
+						if stmt.Provider == n.providerSpec {
+							for i, ret := range stmt.Returns {
+								if i < len(n.providerSpec.Provides) && isContextType(n.providerSpec.Provides[i]) {
+									existingContextProvider = ret.Name()
+									break
+								}
+							}
+							break
+						}
+					}
+					break
+				}
+			}
+			if existingContextProvider != "" {
+				break
+			}
+		}
+	}
+
+	if existingContextArg != "" {
+		injector.HasExistingContext = true
+		injector.ContextParamName = existingContextArg
+		injector.IsReturnError = true
+	} else if existingContextProvider != "" {
+		injector.HasExistingContext = true
+		injector.ContextParamName = existingContextProvider
+		injector.IsReturnError = true
+	} else {
+		// No existing context found, need to add context parameter
+		injector.HasExistingContext = false
+		injector.ContextParamName = "ctx"
+		injector.IsReturnError = true
+	}
+}
+
+// analyzeExecutionPlans creates optimized execution plans for parallel groups
+func (g *Graph) analyzeExecutionPlans(injector *Injector) {
+	// Group statements by parallel group
+	parallelGroups := make(map[int][]*InjectorStmt)
+	for _, stmt := range injector.Stmts {
+		if stmt.ParallelGroup > 0 {
+			parallelGroups[stmt.ParallelGroup] = append(parallelGroups[stmt.ParallelGroup], stmt)
+		}
+	}
+
+	// Build execution plans for each parallel group
+	for groupID, statements := range parallelGroups {
+		if len(statements) > 1 {
+			plan := g.buildExecutionPlan(groupID, statements)
+			injector.ExecutionPlans[groupID] = plan
+		}
+	}
+}
+
+// buildExecutionPlan creates a detailed execution plan for a parallel group
+func (g *Graph) buildExecutionPlan(groupID int, statements []*InjectorStmt) *ParallelExecutionPlan {
+	// Build dependency chains within the parallel group
+	chains := g.buildDependencyChains(statements)
+	
+	// Identify channel communication needs between chains
+	channels := g.identifyChannelCommunication(chains)
+	
+	return &ParallelExecutionPlan{
+		GroupID:  groupID,
+		Chains:   chains,
+		Channels: channels,
+	}
+}
+
+// buildDependencyChains analyzes statements to build dependency chains
+func (g *Graph) buildDependencyChains(statements []*InjectorStmt) []*DependencyChain {
+	// Create a map of parameter dependencies
+	paramProviders := make(map[*InjectorParam]*InjectorStmt)
+	paramConsumers := make(map[*InjectorParam][]*InjectorStmt)
+	
+	// Build dependency mapping
+	for _, stmt := range statements {
+		// Map each return parameter to its provider
+		for _, ret := range stmt.Returns {
+			paramProviders[ret] = stmt
+		}
+		
+		// Map each argument parameter to its consumers
+		for _, arg := range stmt.Arguments {
+			paramConsumers[arg] = append(paramConsumers[arg], stmt)
+		}
+	}
+	
+	// Find statements with no dependencies within this parallel group
+	independentStmts := make([]*InjectorStmt, 0)
+	for _, stmt := range statements {
+		hasInternalDependency := false
+		for _, arg := range stmt.Arguments {
+			if provider, exists := paramProviders[arg]; exists {
+				// This statement depends on another statement in the same parallel group
+				_ = provider
+				hasInternalDependency = true
+				break
+			}
+		}
+		if !hasInternalDependency {
+			independentStmts = append(independentStmts, stmt)
+		}
+	}
+	
+	// Build chains starting from independent statements
+	chains := make([]*DependencyChain, 0)
+	visited := make(map[*InjectorStmt]bool)
+	chainIDCounter := 1
+	
+	for _, stmt := range independentStmts {
+		if !visited[stmt] {
+			chain := g.buildChainFromStatement(stmt, paramConsumers, visited, chainIDCounter)
+			chains = append(chains, chain)
+			chainIDCounter++
+		}
+	}
+	
+	// Handle any remaining unvisited statements (shouldn't happen in well-formed DAG)
+	for _, stmt := range statements {
+		if !visited[stmt] {
+			chain := &DependencyChain{
+				ID:         chainIDCounter,
+				Statements: []*InjectorStmt{stmt},
+				Inputs:     make([]*ChannelInput, 0),
+				Outputs:    make([]*ChannelOutput, 0),
+			}
+			chains = append(chains, chain)
+			chainIDCounter++
+			visited[stmt] = true
+		}
+	}
+	
+	return chains
+}
+
+// buildChainFromStatement builds a dependency chain starting from a given statement
+func (g *Graph) buildChainFromStatement(stmt *InjectorStmt, paramConsumers map[*InjectorParam][]*InjectorStmt, visited map[*InjectorStmt]bool, chainID int) *DependencyChain {
+	chain := &DependencyChain{
+		ID:         chainID,
+		Statements: make([]*InjectorStmt, 0),
+		Inputs:     make([]*ChannelInput, 0),
+		Outputs:    make([]*ChannelOutput, 0),
+	}
+	
+	// DFS to build the chain
+	var buildChain func(*InjectorStmt)
+	buildChain = func(current *InjectorStmt) {
+		if visited[current] {
+			return
+		}
+		visited[current] = true
+		chain.Statements = append(chain.Statements, current)
+		
+		// Find direct consumers within the same parallel group
+		for _, ret := range current.Returns {
+			if consumers, exists := paramConsumers[ret]; exists {
+				for _, consumer := range consumers {
+					if !visited[consumer] {
+						// Check if this consumer only depends on the current statement
+						// within this parallel group (no other internal dependencies)
+						hasOtherDependencies := false
+						for _, arg := range consumer.Arguments {
+							if arg != ret {
+								// Check if this argument is provided by another statement in the group
+								for _, otherStmt := range chain.Statements {
+									for _, otherRet := range otherStmt.Returns {
+										if arg == otherRet && otherStmt != current {
+											hasOtherDependencies = true
+											break
+										}
+									}
+									if hasOtherDependencies {
+										break
+									}
+								}
+							}
+						}
+						
+						if !hasOtherDependencies {
+							buildChain(consumer)
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	buildChain(stmt)
+	return chain
+}
+
+// identifyChannelCommunication identifies necessary channel communication between chains
+func (g *Graph) identifyChannelCommunication(chains []*DependencyChain) map[string]string {
+	channels := make(map[string]string)
+	channelCounter := 1
+	
+	// Build parameter to chain mapping
+	paramToChain := make(map[*InjectorParam]*DependencyChain)
+	for _, chain := range chains {
+		for _, stmt := range chain.Statements {
+			for _, ret := range stmt.Returns {
+				paramToChain[ret] = chain
+			}
+		}
+	}
+	
+	// Identify cross-chain dependencies
+	for _, chain := range chains {
+		for _, stmt := range chain.Statements {
+			for _, arg := range stmt.Arguments {
+				if sourceChain, exists := paramToChain[arg]; exists && sourceChain != chain {
+					// This is a cross-chain dependency
+					channelName := fmt.Sprintf("ch%d", channelCounter)
+					channelCounter++
+					
+					// Add output to source chain
+					sourceChain.Outputs = append(sourceChain.Outputs, &ChannelOutput{
+						ToChainID:   chain.ID,
+						ParamName:   arg.Name(),
+						ParamType:   arg,
+						ChannelName: channelName,
+					})
+					
+					// Add input to target chain
+					chain.Inputs = append(chain.Inputs, &ChannelInput{
+						FromChainID: sourceChain.ID,
+						ParamName:   arg.Name(),
+						ParamType:   arg,
+						ChannelName: channelName,
+					})
+					
+					channels[arg.Name()] = channelName
+				}
+			}
+		}
+	}
+	
+	return channels
+}
+
+// topologicalSortNodes sorts nodes in dependency order for proper code generation
+func (g *Graph) topologicalSortNodes(nodeParams map[*node][]*InjectorParam) []*node {
+	// Build a set of all provider nodes
+	providerNodes := make([]*node, 0)
+	for n := range nodeParams {
+		if n.providerSpec != nil {
+			providerNodes = append(providerNodes, n)
+		}
+	}
+	
+	// Build dependency graph between nodes based on parameter dependencies
+	nodeDeps := make(map[*node]map[*node]bool) // nodeDeps[a][b] = true means node a depends on node b
+	paramToNode := make(map[*InjectorParam]*node)
+	
+	// Map parameters to their provider nodes
+	for n, params := range nodeParams {
+		if n.providerSpec != nil {
+			for _, param := range params {
+				paramToNode[param] = n
+			}
+		}
+	}
+	
+	// Initialize dependencies
+	for _, n := range providerNodes {
+		nodeDeps[n] = make(map[*node]bool)
+	}
+	
+	// Analyze dependencies between nodes
+	for _, n := range providerNodes {
+		for _, arg := range n.providerArgs {
+			if arg != nil {
+				if providerNode, exists := paramToNode[arg]; exists && providerNode != n {
+					// This node depends on the provider node
+					nodeDeps[n][providerNode] = true
+				}
+			}
+		}
+	}
+	
+	// Perform topological sort using Kahn's algorithm
+	inDegree := make(map[*node]int)
+	for _, n := range providerNodes {
+		inDegree[n] = 0
+	}
+	
+	// Calculate in-degrees
+	for _, n := range providerNodes {
+		for range nodeDeps[n] {
+			inDegree[n]++
+		}
+	}
+	
+	// Find nodes with no dependencies
+	queue := make([]*node, 0)
+	for _, n := range providerNodes {
+		if inDegree[n] == 0 {
+			queue = append(queue, n)
+		}
+	}
+	
+	// Process queue
+	result := make([]*node, 0)
+	for len(queue) > 0 {
+		// Sort queue for deterministic output
+		sort.Slice(queue, func(i, j int) bool {
+			// Process non-async nodes first, then by parallel group, then by parameter name
+			if queue[i].providerSpec.IsAsync != queue[j].providerSpec.IsAsync {
+				return !queue[i].providerSpec.IsAsync // non-async first
+			}
+			if queue[i].parallelGroup != queue[j].parallelGroup {
+				return queue[i].parallelGroup < queue[j].parallelGroup
+			}
+			// Compare by first return parameter name for deterministic ordering
+			params_i := nodeParams[queue[i]]
+			params_j := nodeParams[queue[j]]
+			if len(params_i) > 0 && len(params_j) > 0 {
+				return params_i[0].Name() < params_j[0].Name()
+			}
+			return false
+		})
+		
+		currentNode := queue[0]
+		queue = queue[1:]
+		result = append(result, currentNode)
+		
+		// Update in-degrees for dependent nodes
+		for _, n := range providerNodes {
+			if nodeDeps[n][currentNode] {
+				inDegree[n]--
+				if inDegree[n] == 0 {
+					queue = append(queue, n)
+				}
+			}
+		}
+	}
+	
+	// Handle any remaining nodes (shouldn't happen in a valid DAG)
+	for _, n := range providerNodes {
+		found := false
+		for _, resultNode := range result {
+			if resultNode == n {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, n)
+		}
+	}
+	
+	return result
 }
