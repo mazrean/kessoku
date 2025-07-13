@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -14,7 +13,8 @@ func main() {
 
 	app, err := InitializeComplexApp(ctx)
 	if err != nil {
-		log.Fatal("Failed to initialize app:", err)
+		fmt.Println("Failed to initialize complex app:", err)
+		return
 	}
 
 	fmt.Println("Complex app initialized successfully!")
