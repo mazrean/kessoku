@@ -61,7 +61,10 @@ func (p *Parser) ParseFile(filename string) (*MetaData, []*BuildDirective, error
 	}
 
 	metaData := &MetaData{
-		Package: pkg.Name,
+		Package: Package{
+			Name: pkg.Name,
+			Path: pkg.PkgPath,
+		},
 		Imports: make(map[string]*ast.ImportSpec),
 	}
 
