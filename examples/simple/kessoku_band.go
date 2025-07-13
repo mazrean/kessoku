@@ -6,11 +6,11 @@ import "github.com/mazrean/kessoku"
 
 func InitializeService() *Service {
 	config := kessoku.Provide(NewConfig).Fn()()
-	for range [] struct {
-	}{config} {
+	for _, ch := range []chan<- struct {
+	}{configCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{configCh} {
 		select {
 		case <-ch:

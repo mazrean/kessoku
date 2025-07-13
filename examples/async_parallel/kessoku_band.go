@@ -12,11 +12,11 @@ func InitializeApp() *App {
 	eg.Go(func() error {
 		var err error
 		databaseService := kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
-		for range [] struct {
-		}{databaseService} {
+		for _, ch := range []chan<- struct {
+		}{databaseServiceCh} {
 			close(ch)
 		}
-		for range []<-chan struct {
+		for _, ch := range []<-chan struct {
 		}{databaseServiceCh, cacheServiceCh} {
 			select {
 			case <-ch:
@@ -25,11 +25,11 @@ func InitializeApp() *App {
 			}
 		}
 		userService := kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
-		for range [] struct {
-		}{userService} {
+		for _, ch := range []chan<- struct {
+		}{userServiceCh} {
 			close(ch)
 		}
-		for range []<-chan struct {
+		for _, ch := range []<-chan struct {
 		}{userServiceCh, notificationServiceCh} {
 			select {
 			case <-ch:
@@ -38,15 +38,16 @@ func InitializeApp() *App {
 			}
 		}
 		app := kessoku.Provide(NewApp).Fn()(userService, notificationService)
+		return nil
 	})
 	eg.Go(func() error {
 		var err error
 		cacheService := kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
-		for range [] struct {
-		}{cacheService} {
+		for _, ch := range []chan<- struct {
+		}{cacheServiceCh} {
 			close(ch)
 		}
-		for range []<-chan struct {
+		for _, ch := range []<-chan struct {
 		}{messagingServiceCh} {
 			select {
 			case <-ch:
@@ -55,14 +56,15 @@ func InitializeApp() *App {
 			}
 		}
 		notificationService := kessoku.Provide(NewNotificationService).Fn()(messagingService)
-		for range [] struct {
-		}{notificationService} {
+		for _, ch := range []chan<- struct {
+		}{notificationServiceCh} {
 			close(ch)
 		}
+		return nil
 	})
 	messagingService := kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()()
-	for range [] struct {
-	}{messagingService} {
+	for _, ch := range []chan<- struct {
+	}{messagingServiceCh} {
 		close(ch)
 	}
 	eg.Wait()

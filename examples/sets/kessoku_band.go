@@ -6,11 +6,11 @@ import "github.com/mazrean/kessoku"
 
 func InitializeAppBasic() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()
-	for range [] struct {
-	}{config} {
+	for _, ch := range []chan<- struct {
+	}{configCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{configCh} {
 		select {
 		case <-ch:
@@ -23,11 +23,11 @@ func InitializeAppBasic() (*App, error) {
 		var zero *App
 		return zero, err
 	}
-	for range [] struct {
-	}{database} {
+	for _, ch := range []chan<- struct {
+	}{databaseCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{databaseCh} {
 		select {
 		case <-ch:
@@ -36,11 +36,11 @@ func InitializeAppBasic() (*App, error) {
 		}
 	}
 	userService := kessoku.Provide(NewUserService).Fn()(database)
-	for range [] struct {
-	}{userService} {
+	for _, ch := range []chan<- struct {
+	}{userServiceCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{userServiceCh} {
 		select {
 		case <-ch:
@@ -53,11 +53,11 @@ func InitializeAppBasic() (*App, error) {
 }
 func InitializeAppWithInlineSet() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()
-	for range [] struct {
-	}{config} {
+	for _, ch := range []chan<- struct {
+	}{configCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{configCh} {
 		select {
 		case <-ch:
@@ -70,11 +70,11 @@ func InitializeAppWithInlineSet() (*App, error) {
 		var zero *App
 		return zero, err
 	}
-	for range [] struct {
-	}{database} {
+	for _, ch := range []chan<- struct {
+	}{databaseCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{databaseCh} {
 		select {
 		case <-ch:
@@ -83,11 +83,11 @@ func InitializeAppWithInlineSet() (*App, error) {
 		}
 	}
 	userService := kessoku.Provide(NewUserService).Fn()(database)
-	for range [] struct {
-	}{userService} {
+	for _, ch := range []chan<- struct {
+	}{userServiceCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{userServiceCh} {
 		select {
 		case <-ch:
@@ -100,11 +100,11 @@ func InitializeAppWithInlineSet() (*App, error) {
 }
 func InitializeAppWithSetVariable() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()
-	for range [] struct {
-	}{config} {
+	for _, ch := range []chan<- struct {
+	}{configCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{configCh} {
 		select {
 		case <-ch:
@@ -117,11 +117,11 @@ func InitializeAppWithSetVariable() (*App, error) {
 		var zero *App
 		return zero, err
 	}
-	for range [] struct {
-	}{database} {
+	for _, ch := range []chan<- struct {
+	}{databaseCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{databaseCh} {
 		select {
 		case <-ch:
@@ -130,11 +130,11 @@ func InitializeAppWithSetVariable() (*App, error) {
 		}
 	}
 	userService := kessoku.Provide(NewUserService).Fn()(database)
-	for range [] struct {
-	}{userService} {
+	for _, ch := range []chan<- struct {
+	}{userServiceCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{userServiceCh} {
 		select {
 		case <-ch:
@@ -147,11 +147,11 @@ func InitializeAppWithSetVariable() (*App, error) {
 }
 func InitializeAppWithNestedSets() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()
-	for range [] struct {
-	}{config} {
+	for _, ch := range []chan<- struct {
+	}{configCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{configCh} {
 		select {
 		case <-ch:
@@ -164,11 +164,11 @@ func InitializeAppWithNestedSets() (*App, error) {
 		var zero *App
 		return zero, err
 	}
-	for range [] struct {
-	}{database} {
+	for _, ch := range []chan<- struct {
+	}{databaseCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{databaseCh} {
 		select {
 		case <-ch:
@@ -177,11 +177,11 @@ func InitializeAppWithNestedSets() (*App, error) {
 		}
 	}
 	userService := kessoku.Provide(NewUserService).Fn()(database)
-	for range [] struct {
-	}{userService} {
+	for _, ch := range []chan<- struct {
+	}{userServiceCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{userServiceCh} {
 		select {
 		case <-ch:

@@ -11,7 +11,7 @@ func InitializeComplexApp() *App {
 	eg := &errgroup.Group{}
 	eg.Go(func() error {
 		var err error
-		for range []<-chan struct {
+		for _, ch := range []<-chan struct {
 		}{configCh} {
 			select {
 			case <-ch:
@@ -20,11 +20,11 @@ func InitializeComplexApp() *App {
 			}
 		}
 		databaseService := kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()(config)
-		for range [] struct {
-		}{databaseService} {
+		for _, ch := range []chan<- struct {
+		}{databaseServiceCh} {
 			close(ch)
 		}
-		for range []<-chan struct {
+		for _, ch := range []<-chan struct {
 		}{databaseServiceCh} {
 			select {
 			case <-ch:
@@ -33,15 +33,16 @@ func InitializeComplexApp() *App {
 			}
 		}
 		userService := kessoku.Async(kessoku.Provide(NewUserService)).Fn()(databaseService)
-		for range [] struct {
-		}{userService} {
+		for _, ch := range []chan<- struct {
+		}{userServiceCh} {
 			close(ch)
 		}
+		return nil
 	})
 	eg.Go(func() error {
 		var err error
-		for range []<-chan struct {
-		}{configCh0} {
+		for _, ch := range []<-chan struct {
+		}{configCh} {
 			select {
 			case <-ch:
 			case <-ctx.Done:
@@ -49,11 +50,11 @@ func InitializeComplexApp() *App {
 			}
 		}
 		cacheService := kessoku.Async(kessoku.Provide(NewCacheService)).Fn()(config)
-		for range [] struct {
-		}{cacheService} {
+		for _, ch := range []chan<- struct {
+		}{cacheServiceCh} {
 			close(ch)
 		}
-		for range []<-chan struct {
+		for _, ch := range []<-chan struct {
 		}{cacheServiceCh} {
 			select {
 			case <-ch:
@@ -62,18 +63,19 @@ func InitializeComplexApp() *App {
 			}
 		}
 		sessionService := kessoku.Async(kessoku.Provide(NewSessionService)).Fn()(cacheService)
-		for range [] struct {
-		}{sessionService} {
+		for _, ch := range []chan<- struct {
+		}{sessionServiceCh} {
 			close(ch)
 		}
+		return nil
 	})
 	config := kessoku.Provide(NewConfig).Fn()()
-	for range [] struct {
-	}{config} {
+	for _, ch := range []chan<- struct {
+	}{configCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
-	}{configCh1} {
+	for _, ch := range []<-chan struct {
+	}{configCh} {
 		select {
 		case <-ch:
 		case <-ctx.Done:
@@ -81,11 +83,11 @@ func InitializeComplexApp() *App {
 		}
 	}
 	messagingService := kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(config)
-	for range [] struct {
-	}{messagingService} {
+	for _, ch := range []chan<- struct {
+	}{messagingServiceCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{userServiceCh, sessionServiceCh, messagingServiceCh} {
 		select {
 		case <-ch:
@@ -94,11 +96,11 @@ func InitializeComplexApp() *App {
 		}
 	}
 	notificationService := kessoku.Async(kessoku.Provide(NewNotificationService)).Fn()(userService, sessionService, messagingService)
-	for range [] struct {
-	}{notificationService} {
+	for _, ch := range []chan<- struct {
+	}{notificationServiceCh} {
 		close(ch)
 	}
-	for range []<-chan struct {
+	for _, ch := range []<-chan struct {
 	}{notificationServiceCh} {
 		select {
 		case <-ch:

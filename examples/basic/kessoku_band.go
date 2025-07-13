@@ -8,11 +8,11 @@ func InitializeApp() (*App, error) {
 	eg.Go(func() error {
 		var err error
 		config := kessoku.Provide(NewConfig).Fn()()
-		for range [] struct {
-		}{config} {
+		for _, ch := range []chan<- struct {
+		}{configCh} {
 			close(ch)
 		}
-		for range []<-chan struct {
+		for _, ch := range []<-chan struct {
 		}{configCh} {
 			select {
 			case <-ch:
@@ -24,11 +24,11 @@ func InitializeApp() (*App, error) {
 		if err != nil {
 			return err
 		}
-		for range [] struct {
-		}{database} {
+		for _, ch := range []chan<- struct {
+		}{databaseCh} {
 			close(ch)
 		}
-		for range []<-chan struct {
+		for _, ch := range []<-chan struct {
 		}{databaseCh, loggerCh} {
 			select {
 			case <-ch:
@@ -37,12 +37,12 @@ func InitializeApp() (*App, error) {
 			}
 		}
 		userService := kessoku.Provide(NewUserService).Fn()(database, logger)
-		for range [] struct {
-		}{userService} {
+		for _, ch := range []chan<- struct {
+		}{userServiceCh} {
 			close(ch)
 		}
-		for range []<-chan struct {
-		}{configCh0, userServiceCh, loggerCh0} {
+		for _, ch := range []<-chan struct {
+		}{configCh, userServiceCh, loggerCh} {
 			select {
 			case <-ch:
 			case <-ctx.Done:
@@ -50,10 +50,11 @@ func InitializeApp() (*App, error) {
 			}
 		}
 		app := kessoku.Provide(NewApp).Fn()(config, userService, logger)
+		return nil
 	})
 	logger := kessoku.Provide(NewLogger).Fn()()
-	for range [] struct {
-	}{logger} {
+	for _, ch := range []chan<- struct {
+	}{loggerCh} {
 		close(ch)
 	}
 	return app, nil
