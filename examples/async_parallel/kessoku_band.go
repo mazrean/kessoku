@@ -3,16 +3,68 @@
 package main
 
 import (
-	"context"
 	"github.com/mazrean/kessoku"
+	"golang.org/x/sync/errgroup"
 )
 
-func InitializeApp(ctx context.Context) *App {
-	v0 := kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
-	v1 := kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
-	v2 := kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()()
-	v4 := kessoku.Provide(NewNotificationService).Fn()(v2)
-	v3 := kessoku.Provide(NewUserService).Fn()(v0, v1)
-	v5 := kessoku.Provide(NewApp).Fn()(v3, v4)
-	return v5
+func InitializeApp() *App {
+	eg := &errgroup.Group{}
+	eg.Go(func() error {
+		var err error
+		databaseService := kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
+		for range [] struct {
+		}{databaseService} {
+			close(ch)
+		}
+		for range []<-chan struct {
+		}{databaseServiceCh, cacheServiceCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done:
+				return ctx.Err()
+			}
+		}
+		userService := kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
+		for range [] struct {
+		}{userService} {
+			close(ch)
+		}
+		for range []<-chan struct {
+		}{userServiceCh, notificationServiceCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done:
+				return ctx.Err()
+			}
+		}
+		app := kessoku.Provide(NewApp).Fn()(userService, notificationService)
+	})
+	eg.Go(func() error {
+		var err error
+		cacheService := kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
+		for range [] struct {
+		}{cacheService} {
+			close(ch)
+		}
+		for range []<-chan struct {
+		}{messagingServiceCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done:
+				return ctx.Err()
+			}
+		}
+		notificationService := kessoku.Provide(NewNotificationService).Fn()(messagingService)
+		for range [] struct {
+		}{notificationService} {
+			close(ch)
+		}
+	})
+	messagingService := kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()()
+	for range [] struct {
+	}{messagingService} {
+		close(ch)
+	}
+	eg.Wait()
+	return app
 }

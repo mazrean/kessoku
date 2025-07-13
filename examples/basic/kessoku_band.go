@@ -5,14 +5,56 @@ package main
 import "github.com/mazrean/kessoku"
 
 func InitializeApp() (*App, error) {
-	v0 := kessoku.Provide(NewConfig).Fn()()
-	v2, err := kessoku.Provide(NewDatabase).Fn()(v0)
-	if err != nil {
-		var zero *App
-		return zero, err
+	eg.Go(func() error {
+		var err error
+		config := kessoku.Provide(NewConfig).Fn()()
+		for range [] struct {
+		}{config} {
+			close(ch)
+		}
+		for range []<-chan struct {
+		}{configCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done:
+				return ctx.Err()
+			}
+		}
+		database, err := kessoku.Provide(NewDatabase).Fn()(config)
+		if err != nil {
+			return err
+		}
+		for range [] struct {
+		}{database} {
+			close(ch)
+		}
+		for range []<-chan struct {
+		}{databaseCh, loggerCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done:
+				return ctx.Err()
+			}
+		}
+		userService := kessoku.Provide(NewUserService).Fn()(database, logger)
+		for range [] struct {
+		}{userService} {
+			close(ch)
+		}
+		for range []<-chan struct {
+		}{configCh0, userServiceCh, loggerCh0} {
+			select {
+			case <-ch:
+			case <-ctx.Done:
+				return ctx.Err()
+			}
+		}
+		app := kessoku.Provide(NewApp).Fn()(config, userService, logger)
+	})
+	logger := kessoku.Provide(NewLogger).Fn()()
+	for range [] struct {
+	}{logger} {
+		close(ch)
 	}
-	v1 := kessoku.Provide(NewLogger).Fn()()
-	v3 := kessoku.Provide(NewUserService).Fn()(v2, v1)
-	v4 := kessoku.Provide(NewApp).Fn()(v0, v3, v1)
-	return v4, nil
+	return app, nil
 }

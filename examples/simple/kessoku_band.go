@@ -5,7 +5,19 @@ package main
 import "github.com/mazrean/kessoku"
 
 func InitializeService() *Service {
-	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1 := kessoku.Provide(NewService).Fn()(v0)
-	return v1
+	config := kessoku.Provide(NewConfig).Fn()()
+	for range [] struct {
+	}{config} {
+		close(ch)
+	}
+	for range []<-chan struct {
+	}{configCh} {
+		select {
+		case <-ch:
+		case <-ctx.Done:
+			return ctx.Err()
+		}
+	}
+	service := kessoku.Provide(NewService).Fn()(config)
+	return service
 }

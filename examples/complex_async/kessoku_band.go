@@ -3,19 +3,110 @@
 package main
 
 import (
-	"context"
 	"github.com/mazrean/kessoku"
 	"golang.org/x/sync/errgroup"
 )
 
-func InitializeComplexApp(ctx context.Context) *App {
-	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1 := kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(v0)
-	v2 := kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()(v0)
-	v4 := kessoku.Async(kessoku.Provide(NewUserService)).Fn()(v2)
-	v3 := kessoku.Async(kessoku.Provide(NewCacheService)).Fn()(v0)
-	v5 := kessoku.Async(kessoku.Provide(NewSessionService)).Fn()(v3)
-	v6 := kessoku.Async(kessoku.Provide(NewNotificationService)).Fn()(v4, v5, v1)
-	v7 := kessoku.Provide(NewComplexApp).Fn()(v6)
-	return v7
+func InitializeComplexApp() *App {
+	eg := &errgroup.Group{}
+	eg.Go(func() error {
+		var err error
+		for range []<-chan struct {
+		}{configCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done:
+				return ctx.Err()
+			}
+		}
+		databaseService := kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()(config)
+		for range [] struct {
+		}{databaseService} {
+			close(ch)
+		}
+		for range []<-chan struct {
+		}{databaseServiceCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done:
+				return ctx.Err()
+			}
+		}
+		userService := kessoku.Async(kessoku.Provide(NewUserService)).Fn()(databaseService)
+		for range [] struct {
+		}{userService} {
+			close(ch)
+		}
+	})
+	eg.Go(func() error {
+		var err error
+		for range []<-chan struct {
+		}{configCh0} {
+			select {
+			case <-ch:
+			case <-ctx.Done:
+				return ctx.Err()
+			}
+		}
+		cacheService := kessoku.Async(kessoku.Provide(NewCacheService)).Fn()(config)
+		for range [] struct {
+		}{cacheService} {
+			close(ch)
+		}
+		for range []<-chan struct {
+		}{cacheServiceCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done:
+				return ctx.Err()
+			}
+		}
+		sessionService := kessoku.Async(kessoku.Provide(NewSessionService)).Fn()(cacheService)
+		for range [] struct {
+		}{sessionService} {
+			close(ch)
+		}
+	})
+	config := kessoku.Provide(NewConfig).Fn()()
+	for range [] struct {
+	}{config} {
+		close(ch)
+	}
+	for range []<-chan struct {
+	}{configCh1} {
+		select {
+		case <-ch:
+		case <-ctx.Done:
+			return ctx.Err()
+		}
+	}
+	messagingService := kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(config)
+	for range [] struct {
+	}{messagingService} {
+		close(ch)
+	}
+	for range []<-chan struct {
+	}{userServiceCh, sessionServiceCh, messagingServiceCh} {
+		select {
+		case <-ch:
+		case <-ctx.Done:
+			return ctx.Err()
+		}
+	}
+	notificationService := kessoku.Async(kessoku.Provide(NewNotificationService)).Fn()(userService, sessionService, messagingService)
+	for range [] struct {
+	}{notificationService} {
+		close(ch)
+	}
+	for range []<-chan struct {
+	}{notificationServiceCh} {
+		select {
+		case <-ch:
+		case <-ctx.Done:
+			return ctx.Err()
+		}
+	}
+	app := kessoku.Provide(NewComplexApp).Fn()(notificationService)
+	eg.Wait()
+	return app
 }
