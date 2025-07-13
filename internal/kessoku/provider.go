@@ -51,6 +51,7 @@ type InjectorParam struct {
 	refCounter  int
 	withChannel bool
 	name        string
+	channelName string
 }
 
 func NewInjectorParam(t types.Type) *InjectorParam {
@@ -79,7 +80,16 @@ func (p *InjectorParam) Name(varPool *VarPool) string {
 }
 
 func (p *InjectorParam) ChannelName(varPool *VarPool) string {
-	return varPool.GetChannel(p.t)
+	if p.channelName != "" {
+		return p.channelName
+	}
+
+	if p.refCounter == 0 {
+		return "_"
+	}
+	p.channelName = varPool.GetChannel(p.t)
+
+	return p.channelName
 }
 
 func (p *InjectorParam) WithChannel() bool {

@@ -419,7 +419,7 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 	resultChannels := make([]ast.Expr, 0, len(stmt.Returns))
 	for _, ret := range stmt.Returns {
 		if ret != nil && ret.withChannel {
-			resultChannels = append(resultChannels, ast.NewIdent(ret.Name(varPool)))
+			resultChannels = append(resultChannels, ast.NewIdent(ret.ChannelName(varPool)))
 		}
 	}
 
@@ -442,11 +442,13 @@ func (stmt *InjectorProviderCallStmt) channelsWait(channels []ast.Expr) ast.Stmt
 		}
 	*/
 	return &ast.RangeStmt{
+		Tok:   token.DEFINE,
+		Key:   ast.NewIdent("_"),
 		Value: ast.NewIdent("ch"),
 		X: &ast.CompositeLit{
 			Type: &ast.ArrayType{
 				Elt: &ast.ChanType{
-					Dir:   ast.RECV,
+					Dir: ast.RECV,
 					Value: &ast.StructType{
 						Fields: &ast.FieldList{List: []*ast.Field{}},
 					},
@@ -507,10 +509,13 @@ func (stmt *InjectorProviderCallStmt) channelsClose(channels []ast.Expr) ast.Stm
 		}
 	*/
 	return &ast.RangeStmt{
+		Tok:   token.DEFINE,
+		Key:   ast.NewIdent("_"),
 		Value: ast.NewIdent("ch"),
 		X: &ast.CompositeLit{
 			Type: &ast.ArrayType{
 				Elt: &ast.ChanType{
+					Dir: ast.SEND,
 					Value: &ast.StructType{
 						Fields: &ast.FieldList{List: []*ast.Field{}},
 					},
@@ -562,6 +567,10 @@ func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ []as
 		stmts = append(stmts, chainStmts...)
 		imports = append(imports, chainImports...)
 	}
+
+	stmts = append(stmts, &ast.ReturnStmt{
+		Results: []ast.Expr{ast.NewIdent("nil")},
+	})
 
 	return []ast.Stmt{
 		&ast.ExprStmt{
