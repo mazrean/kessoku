@@ -1,10 +1,8 @@
 package kessoku
 
 import (
-	"go/types"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -448,7 +446,7 @@ var _ = kessoku.Inject[*Service](
 	kessoku.Provide(NewService),
 )
 `,
-			expectedBuilds:  0, // Should skip this injector due to parse error
+			expectedBuilds:  0,     // Should skip this injector due to parse error
 			shouldHaveError: false, // Parser should not fail completely, just skip the injector
 		},
 	}
@@ -547,9 +545,8 @@ var _ = kessoku.Inject[*Service](
 				t.Errorf("Expected %d providers, got %d", tt.expectedProviders, len(build.Providers))
 			}
 
-			if len(build.Arguments) != tt.expectedArgs {
-				t.Errorf("Expected %d arguments, got %d", tt.expectedArgs, len(build.Arguments))
-			}
+			// Arguments field no longer exists in BuildDirective
+			_ = tt.expectedArgs // Suppress unused variable warning
 
 			if build.Return == nil {
 				t.Fatal("Expected return type to be set")
@@ -570,23 +567,6 @@ var _ = kessoku.Inject[*Service](
 
 				if foundProvider == nil {
 					t.Errorf("Expected to find provider for type %q", tt.expectedProviderType)
-				}
-			}
-
-			// Check argument type for auto-detected argument test
-			if tt.expectedArgs > 0 {
-				arg := build.Arguments[0]
-				// Auto-detected arguments have names like "arg0", "arg1", etc.
-				if !strings.HasPrefix(arg.Name, "arg") {
-					t.Errorf("Expected auto-detected argument name to start with 'arg', got %q", arg.Name)
-				}
-
-				if arg.Type == nil {
-					t.Fatal("Expected argument type to be set")
-				}
-
-				if !types.Identical(arg.Type, types.Typ[types.Int]) {
-					t.Errorf("Expected argument type to be int, got %v", arg.Type)
 				}
 			}
 		})
@@ -768,7 +748,7 @@ var _ = kessoku.Inject[*Service](
 			build := builds[0]
 			if len(build.Providers) != tt.expectedProviders {
 				t.Errorf("Expected %d providers, got %d", tt.expectedProviders, len(build.Providers))
-				
+
 				// Log provider details for debugging
 				t.Logf("Found providers:")
 				for i, provider := range build.Providers {
