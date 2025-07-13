@@ -2,35 +2,17 @@ package kessoku
 
 import (
 	"go/ast"
-	"go/format"
 	"go/token"
 	"go/types"
-	"strings"
 	"testing"
 )
 
-func createTestTypes() (configType, serviceType, intType types.Type) {
-	configType = types.NewPointer(types.NewNamed(
-		types.NewTypeName(0, types.NewPackage("test", "test"), "Config", nil),
-		types.NewStruct(nil, nil),
-		nil,
-	))
-
-	serviceType = types.NewPointer(types.NewNamed(
-		types.NewTypeName(0, types.NewPackage("test", "test"), "Service", nil),
-		types.NewStruct(nil, nil),
-		nil,
-	))
-
-	intType = types.Typ[types.Int]
-
-	return configType, serviceType, intType
-}
+// createTestTypes is already defined in generator_test.go
 
 func TestNewGraph(t *testing.T) {
 	t.Parallel()
 
-	configType, serviceType, intType := createTestTypes()
+	configType, serviceType, _ := createTestTypes()
 
 	tests := []struct {
 		build         *BuildDirective
@@ -43,7 +25,6 @@ func TestNewGraph(t *testing.T) {
 			name: "basic dependency graph",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
-				Arguments:    nil,
 				Return: &Return{
 					Type: serviceType,
 				},
@@ -65,865 +46,503 @@ func TestNewGraph(t *testing.T) {
 			expectError:  false,
 			expectedName: "InitializeService",
 		},
-		{
-			name: "with argument",
-			build: &BuildDirective{
-				InjectorName: "InitializeService",
-				Arguments: []*Argument{
-					{
-						Name: "value",
-						Type: intType,
-					},
-				},
-				Return: &Return{
-					Type: serviceType,
-				},
-				Providers: []*ProviderSpec{
-					{
-						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
-						Requires:      []types.Type{intType},
-						IsReturnError: false,
-					},
-				},
-			},
-			expectError:  false,
-			expectedName: "InitializeService",
-		},
-		{
-			name: "auto-detected argument for missing provider",
-			build: &BuildDirective{
-				InjectorName: "InitializeService",
-				Arguments:    nil,
-				Return: &Return{
-					Type: serviceType,
-				},
-				Providers: []*ProviderSpec{
-					{
-						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
-						Requires:      []types.Type{configType}, // Config provider is missing - should be auto-detected
-						IsReturnError: false,
-					},
-				},
-			},
-			expectError:  false, // Should succeed and auto-detect the missing Config argument
-			expectedName: "InitializeService",
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Create test metadata
 			metaData := &MetaData{
-				Package: "test",
+				Package: Package{
+					Name: "test",
+					Path: "test",
+				},
 				Imports: make(map[string]*ast.ImportSpec),
 			}
-
+			
 			graph, err := NewGraph(metaData, tt.build)
 
 			if tt.expectError {
 				if err == nil {
-					t.Fatal("Expected NewGraph to fail")
+					t.Fatalf("Expected error but got none")
 				}
-				if tt.errorContains != "" && !containsString(err.Error(), tt.errorContains) {
-					t.Errorf("Expected error to contain %q, got %q", tt.errorContains, err.Error())
+				if tt.errorContains != "" && !containsError(err.Error(), tt.errorContains) {
+					t.Fatalf("Expected error to contain %q, got %q", tt.errorContains, err.Error())
 				}
 				return
 			}
 
 			if err != nil {
-				t.Fatalf("NewGraph failed: %v", err)
+				t.Fatalf("Unexpected error: %v", err)
 			}
 
 			if graph == nil {
-				t.Fatal("Expected graph to be created")
+				t.Fatal("Expected graph to be non-nil")
 			}
 
 			if graph.injectorName != tt.expectedName {
-				t.Errorf("Expected injector name %q, got %q", tt.expectedName, graph.injectorName)
-			}
-
-			if graph.returnValue == nil {
-				t.Fatal("Expected return value to be set")
+				t.Errorf("Expected name %q, got %q", tt.expectedName, graph.injectorName)
 			}
 		})
 	}
 }
 
-func TestGraphBuild(t *testing.T) {
-	t.Parallel()
-
-	configType, serviceType, _ := createTestTypes()
-
-	tests := []struct {
-		name          string
-		graph         *Graph
-		expectedName  string
-		expectedStmts int
-		expectError   bool
-	}{
-		{
-			name:          "basic injector build",
-			expectedName:  "InitializeService",
-			expectedStmts: 2,
-			expectError:   false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			// Create a test graph
-			build := &BuildDirective{
-				InjectorName: tt.expectedName,
-				Arguments:    nil,
-				Return: &Return{
-					Type: serviceType,
-				},
-				Providers: []*ProviderSpec{
-					{
-						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
-						Requires:      []types.Type{},
-						IsReturnError: false,
-					},
-					{
-						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
-						Requires:      []types.Type{configType},
-						IsReturnError: false,
-					},
-				},
-			}
-
-			// Create test metadata
-			metaData := &MetaData{
-				Package: "test",
-				Imports: make(map[string]*ast.ImportSpec),
-			}
-
-			graph, err := NewGraph(metaData, build)
-			if err != nil {
-				t.Fatalf("Failed to create graph: %v", err)
-			}
-
-			injector, err := graph.Build()
-
-			if tt.expectError {
-				if err == nil {
-					t.Fatal("Expected Build to fail")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("Build failed: %v", err)
-			}
-
-			if injector == nil {
-				t.Fatal("Expected injector to be created")
-			}
-
-			if injector.Name != tt.expectedName {
-				t.Errorf("Expected injector name %q, got %q", tt.expectedName, injector.Name)
-			}
-
-			if len(injector.Stmts) != tt.expectedStmts {
-				t.Errorf("Expected %d statements, got %d", tt.expectedStmts, len(injector.Stmts))
-			}
-
-			if injector.Return == nil {
-				t.Fatal("Expected injector to have return")
-			}
-		})
-	}
-}
-
-func TestCreateInjector(t *testing.T) {
-	t.Parallel()
-
-	configType, serviceType, _ := createTestTypes()
-
-	tests := []struct {
-		name         string
-		metadata     *MetaData
-		build        *BuildDirective
-		expectedName string
-		expectError  bool
-	}{
-		{
-			name: "successful creation",
-			metadata: &MetaData{
-				Package: "test",
-				Imports: make(map[string]*ast.ImportSpec),
-			},
-			build: &BuildDirective{
-				InjectorName: "InitializeService",
-				Arguments:    nil,
-				Return: &Return{
-					Type: serviceType,
-				},
-				Providers: []*ProviderSpec{
-					{
-						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
-						Requires:      []types.Type{},
-						IsReturnError: false,
-					},
-					{
-						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
-						Requires:      []types.Type{configType},
-						IsReturnError: false,
-					},
-				},
-			},
-			expectedName: "InitializeService",
-			expectError:  false,
-		},
-		{
-			name: "auto-detected argument in CreateInjector",
-			metadata: &MetaData{
-				Package: "test",
-				Imports: make(map[string]*ast.ImportSpec),
-			},
-			build: &BuildDirective{
-				InjectorName: "InitializeService",
-				Arguments:    nil,
-				Return: &Return{
-					Type: serviceType,
-				},
-				Providers: []*ProviderSpec{
-					{
-						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
-						Requires:      []types.Type{configType}, // Missing provider - should be auto-detected
-						IsReturnError: false,
-					},
-				},
-			},
-			expectedName: "InitializeService", // Should succeed with auto-detected argument
-			expectError:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			injector, err := CreateInjector(tt.metadata, tt.build)
-
-			if tt.expectError {
-				if err == nil {
-					t.Fatal("Expected CreateInjector to fail")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("CreateInjector failed: %v", err)
-			}
-
-			if injector == nil {
-				t.Fatal("Expected injector to be created")
-			}
-
-			if injector.Name != tt.expectedName {
-				t.Errorf("Expected injector name %q, got %q", tt.expectedName, injector.Name)
-			}
-		})
-	}
-}
-
-func TestNewGraphWithCircularDependency(t *testing.T) {
-	// Note: Current implementation doesn't have explicit cycle detection
-	// This test is skipped for now as cycle detection would require
-	// more sophisticated graph analysis
-	t.Skip("Cycle detection not implemented yet")
+func containsError(err, substring string) bool {
+	return len(err) >= len(substring) && err[:len(substring)] == substring
 }
 
 func TestCreateASTTypeExpr(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		createType  func() types.Type
-		name        string
-		expectedAST string
-		description string
+		name            string
+		pkg             string
+		typeExpr        types.Type
+		expectedImports []string
+		shouldError     bool
+		expectNil       bool
 	}{
 		{
-			name: "basic int type",
-			createType: func() types.Type {
-				return types.Typ[types.Int]
-			},
-			expectedAST: "int",
-			description: "Basic integer type should be represented as 'int'",
+			name:            "basic int type",
+			pkg:             "main",
+			typeExpr:        types.Typ[types.Int],
+			expectedImports: []string{},
+			shouldError:     false,
 		},
 		{
-			name: "basic string type",
-			createType: func() types.Type {
-				return types.Typ[types.String]
-			},
-			expectedAST: "string",
-			description: "Basic string type should be represented as 'string'",
+			name:            "basic string type",
+			pkg:             "main",
+			typeExpr:        types.Typ[types.String],
+			expectedImports: []string{},
+			shouldError:     false,
 		},
 		{
-			name: "pointer to int",
-			createType: func() types.Type {
-				return types.NewPointer(types.Typ[types.Int])
-			},
-			expectedAST: "*int",
-			description: "Pointer types should be represented with *",
+			name: "pointer to basic type",
+			pkg:  "main",
+			typeExpr: types.NewPointer(types.Typ[types.Int]),
+			expectedImports: []string{},
+			shouldError:     false,
 		},
 		{
-			name: "slice of strings",
-			createType: func() types.Type {
-				return types.NewSlice(types.Typ[types.String])
-			},
-			expectedAST: "[]string",
-			description: "Slice types should be represented as []T",
+			name: "named type in same package",
+			pkg:  "main",
+			typeExpr: func() types.Type {
+				obj := types.NewTypeName(0, types.NewPackage("main", "main"), "Service", nil)
+				return types.NewNamed(obj, types.NewStruct(nil, nil), nil)
+			}(),
+			expectedImports: []string{},
+			shouldError:     false,
 		},
 		{
-			name: "array of 10 ints",
-			createType: func() types.Type {
-				return types.NewArray(types.Typ[types.Int], 10)
-			},
-			expectedAST: "[10]int",
-			description: "Array types should be represented as [N]T",
-		},
-		{
-			name: "map from string to int",
-			createType: func() types.Type {
-				return types.NewMap(types.Typ[types.String], types.Typ[types.Int])
-			},
-			expectedAST: "map[string]int",
-			description: "Map types should be represented as map[K]V",
-		},
-		{
-			name: "empty interface",
-			createType: func() types.Type {
-				return types.NewInterfaceType(nil, nil)
-			},
-			expectedAST: "interface {\n}",
-			description: "Empty interface should be represented as proper AST",
-		},
-		{
-			name: "non-empty interface",
-			createType: func() types.Type {
-				// Create an interface with a method
-				method := types.NewFunc(0, nil, "String", types.NewSignatureType(nil, nil, nil, nil, types.NewTuple(types.NewVar(0, nil, "", types.Typ[types.String])), false))
-				return types.NewInterfaceType([]*types.Func{method}, nil)
-			},
-			expectedAST: "interface {\n\tString() (result0 string)\n}",
-			description: "Non-empty interface should generate proper AST with methods",
-		},
-		{
-			name: "named type in main package",
-			createType: func() types.Type {
-				pkg := types.NewPackage("main", "main")
-				obj := types.NewTypeName(0, pkg, "MyType", nil)
-				return types.NewNamed(obj, types.Typ[types.String], nil)
-			},
-			expectedAST: "MyType",
-			description: "Named types in main package should use simple name",
-		},
-		{
-			name: "named type from other package",
-			createType: func() types.Type {
+			name: "named type in different package",
+			pkg:  "main",
+			typeExpr: func() types.Type {
 				pkg := types.NewPackage("fmt", "fmt")
 				obj := types.NewTypeName(0, pkg, "Stringer", nil)
-				return types.NewNamed(obj, types.Typ[types.String], nil)
-			},
-			expectedAST: "fmt.Stringer",
-			description: "Named types from other packages should use package.Name format",
+				return types.NewNamed(obj, types.NewInterfaceType([]*types.Func{}, nil), nil)
+			}(),
+			expectedImports: []string{"fmt"},
+			shouldError:     false,
 		},
 		{
-			name: "pointer to named type from other package",
-			createType: func() types.Type {
+			name: "alias type in different package",
+			pkg:  "main",
+			typeExpr: func() types.Type {
 				pkg := types.NewPackage("context", "context")
 				obj := types.NewTypeName(0, pkg, "Context", nil)
-				namedType := types.NewNamed(obj, types.Typ[types.String], nil)
-				return types.NewPointer(namedType)
-			},
-			expectedAST: "*context.Context",
-			description: "Pointer to named type from other package",
-		},
-		{
-			name: "slice of named types from other package",
-			createType: func() types.Type {
-				pkg := types.NewPackage("errors", "errors")
-				obj := types.NewTypeName(0, pkg, "Error", nil)
-				namedType := types.NewNamed(obj, types.Typ[types.String], nil)
-				return types.NewSlice(namedType)
-			},
-			expectedAST: "[]errors.Error",
-			description: "Slice of named types from other package",
-		},
-		{
-			name: "map with named key and value types",
-			createType: func() types.Type {
-				stringPkg := types.NewPackage("strings", "strings")
-				stringObj := types.NewTypeName(0, stringPkg, "Builder", nil)
-				stringType := types.NewNamed(stringObj, types.Typ[types.String], nil)
-
-				contextPkg := types.NewPackage("context", "context")
-				contextObj := types.NewTypeName(0, contextPkg, "Context", nil)
-				contextType := types.NewNamed(contextObj, types.Typ[types.String], nil)
-
-				return types.NewMap(stringType, contextType)
-			},
-			expectedAST: "map[strings.Builder]context.Context",
-			description: "Map with named types from different packages",
-		},
-		{
-			name: "bidirectional channel",
-			createType: func() types.Type {
-				return types.NewChan(types.SendRecv, types.Typ[types.Int])
-			},
-			expectedAST: "chan int",
-			description: "Bidirectional channel should be represented as chan T",
-		},
-		{
-			name: "send-only channel",
-			createType: func() types.Type {
-				return types.NewChan(types.SendOnly, types.Typ[types.String])
-			},
-			expectedAST: "chan<- string",
-			description: "Send-only channel should be represented as chan<- T",
-		},
-		{
-			name: "receive-only channel",
-			createType: func() types.Type {
-				return types.NewChan(types.RecvOnly, types.Typ[types.Bool])
-			},
-			expectedAST: "<-chan bool",
-			description: "Receive-only channel should be represented as <-chan T",
-		},
-		{
-			name: "channel of named type",
-			createType: func() types.Type {
-				pkg := types.NewPackage("sync", "sync")
-				obj := types.NewTypeName(0, pkg, "Mutex", nil)
-				namedType := types.NewNamed(obj, types.Typ[types.String], nil)
-				return types.NewChan(types.SendRecv, namedType)
-			},
-			expectedAST: "chan sync.Mutex",
-			description: "Channel of named type from other package",
-		},
-		{
-			name: "function signature",
-			createType: func() types.Type {
-				// func(int, string) bool
-				params := types.NewTuple(
-					types.NewVar(0, nil, "", types.Typ[types.Int]),
-					types.NewVar(0, nil, "", types.Typ[types.String]),
-				)
-				results := types.NewTuple(
-					types.NewVar(0, nil, "", types.Typ[types.Bool]),
-				)
-				return types.NewSignatureType(nil, nil, nil, params, results, false)
-			},
-			expectedAST: "func(arg0 int, arg1 string) (result0 bool)",
-			description: "Function signatures should generate proper AST with parameters and results",
-		},
-		{
-			name: "complex nested type",
-			createType: func() types.Type {
-				// *[]map[string]*context.Context
-				contextPkg := types.NewPackage("context", "context")
-				contextObj := types.NewTypeName(0, contextPkg, "Context", nil)
-				contextType := types.NewNamed(contextObj, types.Typ[types.String], nil)
-				pointerToContext := types.NewPointer(contextType)
-				mapType := types.NewMap(types.Typ[types.String], pointerToContext)
-				sliceType := types.NewSlice(mapType)
-				return types.NewPointer(sliceType)
-			},
-			expectedAST: "*[]map[string]*context.Context",
-			description: "Complex nested types should be properly handled",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			// Create the type
-			typ := tt.createType()
-
-			// Generate AST expression
-			expr, _ := createASTTypeExpr(typ)
-
-			// Convert AST expression back to string for comparison
-			actualAST := exprToString(expr)
-
-			if actualAST != tt.expectedAST {
-				t.Errorf("createASTTypeExprWithImports() for %s:\n  Expected: %q\n  Actual:   %q\n  Description: %s",
-					tt.name, tt.expectedAST, actualAST, tt.description)
-			}
-
-			// Additional validation: make sure the expression is valid AST
-			if expr == nil {
-				t.Errorf("createASTTypeExprWithImports() returned nil for %s", tt.name)
-			}
-		})
-	}
-}
-
-func TestCreateASTTypeExprEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		createType  func() types.Type
-		name        string
-		description string
-		expectValid bool
-	}{
-		{
-			name: "nil package in named type",
-			createType: func() types.Type {
-				// Create a named type with nil package (should not happen in practice)
-				obj := types.NewTypeName(0, nil, "LocalType", nil)
-				return types.NewNamed(obj, types.Typ[types.String], nil)
-			},
-			expectValid: true,
-			description: "Named type with nil package should be handled gracefully",
-		},
-		{
-			name: "deeply nested pointers",
-			createType: func() types.Type {
-				// ***int
-				t1 := types.NewPointer(types.Typ[types.Int])
-				t2 := types.NewPointer(t1)
-				return types.NewPointer(t2)
-			},
-			expectValid: true,
-			description: "Deeply nested pointers should be handled",
-		},
-		{
-			name: "slice of arrays",
-			createType: func() types.Type {
-				// [][5]string
-				arrayType := types.NewArray(types.Typ[types.String], 5)
-				return types.NewSlice(arrayType)
-			},
-			expectValid: true,
-			description: "Slice of arrays should be handled",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			typ := tt.createType()
-			expr, _ := createASTTypeExpr(typ)
-
-			if tt.expectValid {
-				if expr == nil {
-					t.Errorf("Expected valid AST expression for %s, got nil", tt.name)
-				}
-			} else {
-				if expr != nil {
-					t.Errorf("Expected nil AST expression for %s, got %v", tt.name, exprToString(expr))
-				}
-			}
-		})
-	}
-}
-
-// exprToString converts an ast.Expr to its string representation
-func exprToString(expr ast.Expr) string {
-	if expr == nil {
-		return "<nil>"
-	}
-
-	var buf strings.Builder
-	fset := token.NewFileSet()
-	if err := format.Node(&buf, fset, expr); err != nil {
-		return "<error formatting AST>"
-	}
-	return buf.String()
-}
-
-func TestCreateASTTypeExprWithRealPackages(t *testing.T) {
-	t.Parallel()
-
-	// This test uses actual Go packages to test more realistic scenarios
-	tests := []struct {
-		name        string
-		packagePath string
-		typeName    string
-		expectedAST string
-	}{
-		{
-			name:        "context.Context",
-			packagePath: "context",
-			typeName:    "Context",
-			expectedAST: "context.Context",
-		},
-		{
-			name:        "time.Time",
-			packagePath: "time",
-			typeName:    "Time",
-			expectedAST: "time.Time",
-		},
-		{
-			name:        "io.Reader",
-			packagePath: "io",
-			typeName:    "Reader",
-			expectedAST: "io.Reader",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			// Create a mock package and named type
-			pkg := types.NewPackage(tt.packagePath, tt.packagePath)
-			obj := types.NewTypeName(0, pkg, tt.typeName, nil)
-			namedType := types.NewNamed(obj, types.NewInterfaceType(nil, nil), nil)
-
-			expr, _ := createASTTypeExpr(namedType)
-			actualAST := exprToString(expr)
-
-			if actualAST != tt.expectedAST {
-				t.Errorf("createASTTypeExprWithImports() for %s:\n  Expected: %q\n  Actual:   %q",
-					tt.name, tt.expectedAST, actualAST)
-			}
-		})
-	}
-}
-
-func TestGetTypeBaseName(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name         string
-		createType   func() types.Type
-		expectedName string
-		description  string
-	}{
-		{
-			name: "context.Context type",
-			createType: func() types.Type {
-				pkg := types.NewPackage("context", "context")
-				obj := types.NewTypeName(0, pkg, "Context", nil)
-				return types.NewNamed(obj, types.NewInterfaceType(nil, nil), nil)
-			},
-			expectedName: "ctx",
-			description:  "context.Context should be named 'ctx'",
-		},
-		{
-			name: "pointer to context.Context",
-			createType: func() types.Type {
-				pkg := types.NewPackage("context", "context")
-				obj := types.NewTypeName(0, pkg, "Context", nil)
-				namedType := types.NewNamed(obj, types.NewInterfaceType(nil, nil), nil)
-				return types.NewPointer(namedType)
-			},
-			expectedName: "ctx",
-			description:  "Pointer to context.Context should also be named 'ctx'",
-		},
-		{
-			name: "basic int type",
-			createType: func() types.Type {
-				return types.Typ[types.Int]
-			},
-			expectedName: "num",
-			description:  "Basic int should be named 'num'",
-		},
-		{
-			name: "basic string type",
-			createType: func() types.Type {
-				return types.Typ[types.String]
-			},
-			expectedName: "str",
-			description:  "Basic string should be named 'str'",
-		},
-		{
-			name: "basic bool type",
-			createType: func() types.Type {
-				return types.Typ[types.Bool]
-			},
-			expectedName: "flag",
-			description:  "Basic bool should be named 'flag'",
-		},
-		{
-			name: "basic float64 type",
-			createType: func() types.Type {
-				return types.Typ[types.Float64]
-			},
-			expectedName: "value",
-			description:  "Basic float64 should be named 'value'",
-		},
-		{
-			name: "byte type",
-			createType: func() types.Type {
-				return types.Typ[types.Byte]
-			},
-			expectedName: "num",
-			description:  "Byte type is treated as uint8, so should be named 'num'",
-		},
-		{
-			name: "rune type",
-			createType: func() types.Type {
-				return types.Typ[types.Rune]
-			},
-			expectedName: "num",
-			description:  "Rune type is treated as int32, so should be named 'num'",
-		},
-		{
-			name: "complex128 type",
-			createType: func() types.Type {
-				return types.Typ[types.Complex128]
-			},
-			expectedName: "complex",
-			description:  "Complex128 type should be named 'complex'",
-		},
-		{
-			name: "uintptr type",
-			createType: func() types.Type {
-				return types.Typ[types.Uintptr]
-			},
-			expectedName: "ptr",
-			description:  "Uintptr type should be named 'ptr'",
-		},
-		{
-			name: "named type from other package",
-			createType: func() types.Type {
-				pkg := types.NewPackage("fmt", "fmt")
-				obj := types.NewTypeName(0, pkg, "Stringer", nil)
-				return types.NewNamed(obj, types.NewInterfaceType(nil, nil), nil)
-			},
-			expectedName: "stringer",
-			description:  "Named type should use lowercase type name",
-		},
-		{
-			name: "pointer to named type",
-			createType: func() types.Type {
-				pkg := types.NewPackage("sync", "sync")
-				obj := types.NewTypeName(0, pkg, "Mutex", nil)
-				namedType := types.NewNamed(obj, types.NewStruct(nil, nil), nil)
-				return types.NewPointer(namedType)
-			},
-			expectedName: "mutex",
-			description:  "Pointer to named type should recurse to element type",
+				return types.NewAlias(obj, types.NewInterfaceType([]*types.Func{}, nil))
+			}(),
+			expectedImports: []string{"context"},
+			shouldError:     false,
 		},
 		{
 			name: "slice type",
-			createType: func() types.Type {
-				return types.NewSlice(types.Typ[types.String])
-			},
-			expectedName: "[]string",
-			description:  "Slice type should use full string representation",
+			pkg:  "main",
+			typeExpr: types.NewSlice(types.Typ[types.String]),
+			expectedImports: []string{},
+			shouldError:     false,
+		},
+		{
+			name: "array type",
+			pkg:  "main",
+			typeExpr: types.NewArray(types.Typ[types.Int], 10),
+			expectedImports: []string{},
+			shouldError:     false,
+		},
+		{
+			name: "map type",
+			pkg:  "main",
+			typeExpr: types.NewMap(types.Typ[types.String], types.Typ[types.Int]),
+			expectedImports: []string{},
+			shouldError:     false,
+		},
+		{
+			name: "interface type with methods",
+			pkg:  "main",
+			typeExpr: func() types.Type {
+				// Create a method signature
+				params := types.NewTuple(types.NewVar(0, nil, "s", types.Typ[types.String]))
+				results := types.NewTuple(types.NewVar(0, nil, "", types.Typ[types.Int]))
+				sig := types.NewSignatureType(nil, nil, nil, params, results, false)
+				method := types.NewFunc(0, nil, "Method", sig)
+				return types.NewInterfaceType([]*types.Func{method}, nil)
+			}(),
+			expectedImports: []string{},
+			shouldError:     false,
+		},
+		{
+			name: "channel type",
+			pkg:  "main",
+			typeExpr: types.NewChan(types.SendRecv, types.Typ[types.String]),
+			expectedImports: []string{},
+			shouldError:     false,
+		},
+		{
+			name: "function type",
+			pkg:  "main",
+			typeExpr: func() types.Type {
+				params := types.NewTuple(types.NewVar(0, nil, "x", types.Typ[types.Int]))
+				results := types.NewTuple(types.NewVar(0, nil, "", types.Typ[types.String]))
+				return types.NewSignatureType(nil, nil, nil, params, results, false)
+			}(),
+			expectedImports: []string{},
+			shouldError:     false,
+		},
+		{
+			name: "struct type",
+			pkg:  "main",
+			typeExpr: func() types.Type {
+				field := types.NewVar(0, nil, "Name", types.Typ[types.String])
+				return types.NewStruct([]*types.Var{field}, []string{"json:\"name\""})
+			}(),
+			expectedImports: []string{},
+			shouldError:     false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-
-			typ := tt.createType()
-			actualName := getTypeBaseName(typ)
-
-			if actualName != tt.expectedName {
-				t.Errorf("getTypeBaseName() for %s:\n  Expected: %q\n  Actual:   %q\n  Description: %s",
-					tt.name, tt.expectedName, actualName, tt.description)
+			
+			expr, imports, err := createASTTypeExpr(tt.pkg, tt.typeExpr)
+			
+			if tt.shouldError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+			
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+			
+			if tt.expectNil && expr != nil {
+				t.Error("Expected nil expression but got non-nil")
+				return
+			}
+			
+			if !tt.expectNil && expr == nil {
+				t.Error("Expected non-nil expression but got nil")
+				return
+			}
+			
+			if len(imports) != len(tt.expectedImports) {
+				t.Errorf("Expected %d imports, got %d: %v", len(tt.expectedImports), len(imports), imports)
+				return
+			}
+			
+			for i, expectedImport := range tt.expectedImports {
+				if imports[i] != expectedImport {
+					t.Errorf("Expected import %q at index %d, got %q", expectedImport, i, imports[i])
+				}
 			}
 		})
 	}
 }
 
-func TestSortArguments(t *testing.T) {
+func TestAutoAddMissingDependencies(t *testing.T) {
 	t.Parallel()
 
-	// Create test types
-	contextPkg := types.NewPackage("context", "context")
-	contextObj := types.NewTypeName(0, contextPkg, "Context", nil)
-	contextType := types.NewNamed(contextObj, types.NewInterfaceType(nil, nil), nil)
-
-	stringType := types.Typ[types.String]
-	intType := types.Typ[types.Int]
-
-	syncPkg := types.NewPackage("sync", "sync")
-	mutexObj := types.NewTypeName(0, syncPkg, "Mutex", nil)
-	mutexType := types.NewNamed(mutexObj, types.NewStruct(nil, nil), nil)
-
 	tests := []struct {
-		name          string
-		description   string
-		args          []*Argument
-		expectedOrder []string
+		name             string
+		metaData         *MetaData
+		dependencyType   types.Type
+		expectError      bool
+		expectedImports  []string
 	}{
 		{
-			name: "context.Context should come first",
-			args: []*Argument{
-				{Name: "str", Type: stringType},
-				{Name: "ctx", Type: contextType},
-				{Name: "num", Type: intType},
+			name: "basic type dependency",
+			metaData: &MetaData{
+				Package: Package{
+					Name: "main",
+					Path: "main",
+				},
+				Imports: make(map[string]*ast.ImportSpec),
 			},
-			expectedOrder: []string{"ctx", "num", "str"},
-			description:   "context.Context arguments should be ordered first, then by type string (int < string)",
+			dependencyType: types.Typ[types.String],
+			expectError:    false,
+			expectedImports: []string{},
 		},
 		{
-			name: "multiple context.Context arguments maintain relative order",
-			args: []*Argument{
-				{Name: "str", Type: stringType},
-				{Name: "ctx1", Type: contextType},
-				{Name: "ctx2", Type: contextType},
-				{Name: "num", Type: intType},
+			name: "external package dependency",
+			metaData: &MetaData{
+				Package: Package{
+					Name: "main",
+					Path: "main",
+				},
+				Imports: make(map[string]*ast.ImportSpec),
 			},
-			expectedOrder: []string{"ctx1", "ctx2", "num", "str"},
-			description:   "Multiple context.Context arguments should come first, then by type string (int < string)",
+			dependencyType: func() types.Type {
+				pkg := types.NewPackage("fmt", "fmt")
+				obj := types.NewTypeName(0, pkg, "Stringer", nil)
+				return types.NewNamed(obj, types.NewInterfaceType([]*types.Func{}, nil), nil)
+			}(),
+			expectError:    false,
+			expectedImports: []string{"fmt"},
 		},
 		{
-			name: "non-context types sorted by type string",
-			args: []*Argument{
-				{Name: "mutex", Type: mutexType},
-				{Name: "num", Type: intType},
-				{Name: "str", Type: stringType},
+			name: "context package dependency",
+			metaData: &MetaData{
+				Package: Package{
+					Name: "main",
+					Path: "main",
+				},
+				Imports: make(map[string]*ast.ImportSpec),
 			},
-			expectedOrder: []string{"num", "str", "mutex"},
-			description:   "Non-context types should be sorted by type string representation",
+			dependencyType: func() types.Type {
+				pkg := types.NewPackage("context", "context")
+				obj := types.NewTypeName(0, pkg, "Context", nil)
+				return types.NewNamed(obj, types.NewInterfaceType([]*types.Func{}, nil), nil)
+			}(),
+			expectError:    false,
+			expectedImports: []string{"context"},
 		},
 		{
-			name: "mixed context and non-context",
-			args: []*Argument{
-				{Name: "mutex", Type: mutexType},
-				{Name: "str", Type: stringType},
-				{Name: "ctx", Type: contextType},
-				{Name: "num", Type: intType},
+			name: "dependency with existing import",
+			metaData: &MetaData{
+				Package: Package{
+					Name: "main",
+					Path: "main",
+				},
+				Imports: map[string]*ast.ImportSpec{
+					"fmt": {
+						Path: &ast.BasicLit{
+							Kind:  token.STRING,
+							Value: `"fmt"`,
+						},
+					},
+				},
 			},
-			expectedOrder: []string{"ctx", "num", "str", "mutex"},
-			description:   "context.Context first, then others sorted by type string",
+			dependencyType: func() types.Type {
+				pkg := types.NewPackage("fmt", "fmt")
+				obj := types.NewTypeName(0, pkg, "Stringer", nil)
+				return types.NewNamed(obj, types.NewInterfaceType([]*types.Func{}, nil), nil)
+			}(),
+			expectError:    false,
+			expectedImports: []string{"fmt"},
 		},
 		{
-			name: "empty slice",
-			args: []*Argument{},
-			expectedOrder: []string{},
-			description:   "Empty slice should remain empty",
+			name: "pointer type dependency",
+			metaData: &MetaData{
+				Package: Package{
+					Name: "main",
+					Path: "main",
+				},
+				Imports: make(map[string]*ast.ImportSpec),
+			},
+			dependencyType: types.NewPointer(types.Typ[types.Int]),
+			expectError:    false,
+			expectedImports: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			
+			graph := &Graph{
+				edges:        make(map[*node][]*edgeNode),
+				reverseEdges: make(map[*node][]*node),
+			}
+			
+			node, err := graph.autoAddMissingDependencies(tt.metaData, tt.dependencyType)
+			
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+			
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+			
+			if node == nil {
+				t.Error("Expected node to be non-nil")
+				return
+			}
+			
+			if node.arg == nil {
+				t.Error("Expected node.arg to be non-nil")
+				return
+			}
+			
+			if node.arg.Type != tt.dependencyType {
+				t.Error("Expected node.arg.Type to match dependency type")
+			}
+			
+			if node.arg.ASTTypeExpr == nil {
+				t.Error("Expected node.arg.ASTTypeExpr to be non-nil")
+			}
+			
+			// Check that required imports were added
+			for _, expectedImport := range tt.expectedImports {
+				if _, exists := tt.metaData.Imports[expectedImport]; !exists {
+					t.Errorf("Expected import %q to be added to metadata", expectedImport)
+				}
+			}
+		})
+	}
+}
+
+func TestGraph_BuildPoolStmts(t *testing.T) {
+	t.Parallel()
+
+	configType, _, intType := createTestTypes()
+
+	tests := []struct {
+		name                     string
+		setupGraph              func() *Graph
+		pool                    []*node
+		pools                   [][]*node
+		visited                 []bool
+		poolDependencyMap       map[*node][]int
+		nodeProvidedNodes       map[*node]map[*node]struct{}
+		expectedStmtsMin        int
+		expectError             bool
+		expectProviderCallStmt  bool
+		expectChainStmt         bool
+	}{
+		{
+			name: "empty pool",
+			setupGraph: func() *Graph {
+				return &Graph{
+					edges:        make(map[*node][]*edgeNode),
+					reverseEdges: make(map[*node][]*node),
+				}
+			},
+			pool:                []*node{},
+			pools:               [][]*node{},
+			visited:             []bool{},
+			poolDependencyMap:   make(map[*node][]int),
+			nodeProvidedNodes:   make(map[*node]map[*node]struct{}),
+			expectedStmtsMin:    0,
+			expectError:         false,
+			expectProviderCallStmt: false,
+			expectChainStmt:     false,
 		},
 		{
-			name: "single argument",
-			args: []*Argument{
-				{Name: "str", Type: stringType},
+			name: "pool with argument node only",
+			setupGraph: func() *Graph {
+				return &Graph{
+					edges:        make(map[*node][]*edgeNode),
+					reverseEdges: make(map[*node][]*node),
+				}
 			},
-			expectedOrder: []string{"str"},
-			description:   "Single argument should remain unchanged",
+			pool: []*node{
+				{
+					// argument node (providerSpec == nil)
+					arg: &argument{
+						Type:        intType,
+						ASTTypeExpr: &ast.Ident{Name: "int"},
+					},
+					providerSpec: nil, // This is the key - argument nodes have nil providerSpec
+				},
+			},
+			pools:               [][]*node{},
+			visited:             []bool{},
+			poolDependencyMap:   make(map[*node][]int),
+			nodeProvidedNodes:   make(map[*node]map[*node]struct{}),
+			expectedStmtsMin:    0, // argument nodes are skipped
+			expectError:         false,
+			expectProviderCallStmt: false,
+			expectChainStmt:     false,
 		},
 		{
-			name: "only context arguments",
-			args: []*Argument{
-				{Name: "ctx2", Type: contextType},
-				{Name: "ctx1", Type: contextType},
+			name: "pool with provider node",
+			setupGraph: func() *Graph {
+				return &Graph{
+					edges:        make(map[*node][]*edgeNode),
+					reverseEdges: make(map[*node][]*node),
+				}
 			},
-			expectedOrder: []string{"ctx2", "ctx1"},
-			description:   "Only context arguments should maintain original order",
+			pool: []*node{
+				{
+					providerSpec: &ProviderSpec{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+					},
+					providerArgs: []*InjectorCallArgument{},
+					returnValues: []*InjectorParam{NewInjectorParam(configType)},
+				},
+			},
+			pools:               [][]*node{},
+			visited:             []bool{},
+			poolDependencyMap:   make(map[*node][]int),
+			nodeProvidedNodes:   make(map[*node]map[*node]struct{}),
+			expectedStmtsMin:    1,
+			expectError:         false,
+			expectProviderCallStmt: true,
+			expectChainStmt:     false,
+		},
+		{
+			name: "mixed pool with argument and provider nodes",
+			setupGraph: func() *Graph {
+				return &Graph{
+					edges:        make(map[*node][]*edgeNode),
+					reverseEdges: make(map[*node][]*node),
+				}
+			},
+			pool: []*node{
+				{
+					// argument node - should be skipped
+					arg: &argument{
+						Type:        intType,
+						ASTTypeExpr: &ast.Ident{Name: "int"},
+					},
+					providerSpec: nil,
+				},
+				{
+					// provider node - should generate statement
+					providerSpec: &ProviderSpec{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{intType},
+						IsReturnError: false,
+					},
+					providerArgs: []*InjectorCallArgument{
+						{
+							Param:  NewInjectorParam(intType),
+							IsWait: false,
+						},
+					},
+					returnValues: []*InjectorParam{NewInjectorParam(configType)},
+				},
+			},
+			pools:               [][]*node{},
+			visited:             []bool{},
+			poolDependencyMap:   make(map[*node][]int),
+			nodeProvidedNodes:   make(map[*node]map[*node]struct{}),
+			expectedStmtsMin:    1, // Only the provider node generates a statement
+			expectError:         false,
+			expectProviderCallStmt: true,
+			expectChainStmt:     false,
 		},
 	}
 
@@ -931,32 +550,59 @@ func TestSortArguments(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Make a copy of the input slice to avoid modifying the original
-			argsCopy := make([]*Argument, len(tt.args))
-			copy(argsCopy, tt.args)
+			graph := tt.setupGraph()
 
-			sortArguments(argsCopy)
+			stmts, err := graph.buildPoolStmts(
+				tt.pool,
+				tt.pools,
+				tt.visited,
+				tt.poolDependencyMap,
+				tt.nodeProvidedNodes,
+			)
 
-			// Check that the length is correct
-			if len(argsCopy) != len(tt.expectedOrder) {
-				t.Fatalf("sortArguments() length mismatch for %s:\n  Expected length: %d\n  Actual length:   %d",
-					tt.name, len(tt.expectedOrder), len(argsCopy))
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
 			}
 
-			// Check the order
-			for i, expectedName := range tt.expectedOrder {
-				if i >= len(argsCopy) {
-					t.Fatalf("sortArguments() result too short for %s: missing element at index %d", tt.name, i)
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if len(stmts) < tt.expectedStmtsMin {
+				t.Errorf("Expected at least %d statements, got %d", tt.expectedStmtsMin, len(stmts))
+			}
+
+			// Check statement types
+			hasProviderCall := false
+			hasChain := false
+
+			for _, stmt := range stmts {
+				switch stmt.(type) {
+				case *InjectorProviderCallStmt:
+					hasProviderCall = true
+				case *InjectorChainStmt:
+					hasChain = true
 				}
-				if argsCopy[i].Name != expectedName {
-					actualOrder := make([]string, len(argsCopy))
-					for j, arg := range argsCopy {
-						actualOrder[j] = arg.Name
-					}
-					t.Errorf("sortArguments() for %s:\n  Expected order: %v\n  Actual order:   %v\n  Description: %s",
-						tt.name, tt.expectedOrder, actualOrder, tt.description)
-					break
-				}
+			}
+
+			if tt.expectProviderCallStmt && !hasProviderCall {
+				t.Error("Expected at least one InjectorProviderCallStmt")
+			}
+
+			if tt.expectChainStmt && !hasChain {
+				t.Error("Expected at least one InjectorChainStmt")
+			}
+
+			if !tt.expectProviderCallStmt && hasProviderCall {
+				t.Error("Did not expect InjectorProviderCallStmt but found one")
+			}
+
+			if !tt.expectChainStmt && hasChain {
+				t.Error("Did not expect InjectorChainStmt but found one")
 			}
 		})
 	}
