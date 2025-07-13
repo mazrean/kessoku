@@ -3,13 +3,17 @@ package kessoku
 
 import (
 	"go/ast"
-	"go/token"
 	"go/types"
 )
 
+type Package struct {
+	Name string
+	Path string
+}
+
 type MetaData struct {
 	Imports map[string]*ast.ImportSpec // Map from package path to import spec
-	Package string
+	Package Package
 }
 
 // ProviderType represents the type of provider.
@@ -19,13 +23,6 @@ const (
 	ProviderTypeFunction ProviderType = "function"
 	ProviderTypeArg      ProviderType = "arg"
 )
-
-// Argument represents a function argument.
-type Argument struct {
-	Type        types.Type
-	ASTTypeExpr ast.Expr
-	Name        string
-}
 
 // ProviderSpec represents a provider specification from annotations.
 type ProviderSpec struct {
@@ -45,51 +42,54 @@ type Return struct {
 // BuildDirective represents a kessoku.Inject call.
 type BuildDirective struct {
 	InjectorName string
-	Arguments    []*Argument
 	Return       *Return
 	Providers    []*ProviderSpec
 }
 
 type InjectorParam struct {
-	name       string
-	refCounter int
+	t           types.Type
+	refCounter  int
+	withChannel bool
+	name        string
 }
 
-func NewInjectorParam(name string) *InjectorParam {
+func NewInjectorParam(t types.Type) *InjectorParam {
 	return &InjectorParam{
-		name: name,
+		t: t,
 	}
 }
 
-func (p *InjectorParam) Ref() {
+func (p *InjectorParam) Ref(isWait bool) {
 	p.refCounter++
+	p.withChannel = p.withChannel || isWait
 }
 
-func (p *InjectorParam) Name() string {
+func (p *InjectorParam) Name(varPool *VarPool) string {
+	if p.name != "" {
+		return p.name
+	}
+
 	if p.refCounter == 0 {
 		return "_"
 	}
 
+	p.name = varPool.Get(p.t)
+
 	return p.name
 }
 
-type InjectorChannel struct {
-	name string
+func (p *InjectorParam) ChannelName(varPool *VarPool) string {
+	return varPool.GetChannel(p.t)
 }
 
-func NewInjectorChannel(name string) *InjectorChannel {
-	return &InjectorChannel{
-		name: name,
-	}
-}
-
-func (c *InjectorChannel) Name() string {
-	return c.name
+func (p *InjectorParam) WithChannel() bool {
+	return p.withChannel
 }
 
 type InjectorArgument struct {
-	Param *InjectorParam
-	Arg   *Argument
+	Param       *InjectorParam
+	Type        types.Type
+	ASTTypeExpr ast.Expr
 }
 
 type InjectorReturn struct {
@@ -98,87 +98,19 @@ type InjectorReturn struct {
 }
 
 type InjectorStmt interface {
-	Stmt(injector *Injector) []ast.Stmt
+	Stmt(varPool *VarPool, injector *Injector, returnErrStmts []ast.Stmt) ([]ast.Stmt, []string)
 	HasAsync() bool
+}
+
+type InjectorCallArgument struct {
+	Param  *InjectorParam
+	IsWait bool
 }
 
 type InjectorProviderCallStmt struct {
 	Provider  *ProviderSpec
-	Arguments []*InjectorParam
+	Arguments []*InjectorCallArgument
 	Returns   []*InjectorParam
-	Channel   *InjectorChannel
-}
-
-func (stmt *InjectorProviderCallStmt) Stmt(injector *Injector) []ast.Stmt {
-	var stmts []ast.Stmt
-
-	lhs := make([]ast.Expr, 0, len(stmt.Returns)+1)
-	for _, ret := range stmt.Returns {
-		lhs = append(lhs, &ast.Ident{
-			Name: ret.Name(),
-		})
-	}
-	if stmt.Provider.IsReturnError {
-		lhs = append(lhs, &ast.Ident{
-			Name: "err",
-		})
-	}
-
-	args := make([]ast.Expr, 0, len(stmt.Arguments))
-	for _, arg := range stmt.Arguments {
-		args = append(args, ast.NewIdent(arg.Name()))
-	}
-
-	// Generate call to provider.Fn()() - call the Fn method, then call the returned function
-	rhs := &ast.CallExpr{
-		Fun: &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X:   stmt.Provider.ASTExpr,
-				Sel: ast.NewIdent("Fn"),
-			},
-			Args: []ast.Expr{},
-		},
-		Args: args,
-	}
-
-	stmts = append(stmts, &ast.AssignStmt{
-		Tok: token.DEFINE,
-		Lhs: lhs,
-		Rhs: []ast.Expr{rhs},
-	})
-
-	if stmt.Provider.IsReturnError {
-		stmts = append(stmts, &ast.IfStmt{
-			Cond: &ast.BinaryExpr{
-				X:  ast.NewIdent("err"),
-				Op: token.NEQ,
-				Y:  ast.NewIdent("nil"),
-			},
-			Body: &ast.BlockStmt{
-				List: []ast.Stmt{
-					&ast.DeclStmt{
-						Decl: &ast.GenDecl{
-							Tok: token.VAR,
-							Specs: []ast.Spec{
-								&ast.ValueSpec{
-									Names: []*ast.Ident{ast.NewIdent("zero")},
-									Type:  injector.Return.Return.ASTTypeExpr,
-								},
-							},
-						},
-					},
-					&ast.ReturnStmt{
-						Results: []ast.Expr{
-							ast.NewIdent("zero"),
-							ast.NewIdent("err"),
-						},
-					},
-				},
-			},
-		})
-	}
-
-	return stmts
 }
 
 func (stmt *InjectorProviderCallStmt) HasAsync() bool {
@@ -187,54 +119,6 @@ func (stmt *InjectorProviderCallStmt) HasAsync() bool {
 
 type InjectorChainStmt struct {
 	Statements []InjectorStmt
-	Inputs     []*InjectorChannel
-}
-
-func (stmt *InjectorChainStmt) Stmt(injector *Injector) []ast.Stmt {
-	var stmts []ast.Stmt
-
-	hasAsync := stmt.HasAsync()
-	hasInputChannels := len(stmt.Inputs) > 0
-
-	// If we have input channels, wait for them first
-	if hasInputChannels {
-		for _, input := range stmt.Inputs {
-			// Generate: <-inputChannelName
-			stmts = append(stmts, &ast.ExprStmt{
-				X: &ast.UnaryExpr{
-					Op: token.ARROW,
-					X:  ast.NewIdent(input.Name()),
-				},
-			})
-		}
-	}
-
-	if hasAsync {
-		// Generate async execution with goroutine and synchronization
-		stmts = append(stmts, stmt.generateAsyncChainExecution(injector)...)
-	} else {
-		// Generate sequential execution for sync chains
-		for _, chainStmt := range stmt.Statements {
-			stmts = append(stmts, chainStmt.Stmt(injector)...)
-		}
-	}
-
-	return stmts
-}
-
-func (stmt *InjectorChainStmt) generateAsyncChainExecution(injector *Injector) []ast.Stmt {
-	var stmts []ast.Stmt
-
-	// For async chains, we'll generate the code without errgroup for now
-	// Just execute the chain statements sequentially but mark them as async
-	// This is a simplified implementation of the async execution
-	
-	// Execute all statements in the chain sequentially
-	for _, chainStmt := range stmt.Statements {
-		stmts = append(stmts, chainStmt.Stmt(injector)...)
-	}
-
-	return stmts
 }
 
 func (stmt *InjectorChainStmt) HasAsync() bool {

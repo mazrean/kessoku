@@ -51,12 +51,3 @@ func (q *Queue[T]) Iter(yield func(T) bool) {
 		}
 	}
 }
-
-// ToSlice returns all elements in the queue as a slice without modifying the queue
-func (q *Queue[T]) ToSlice() []T {
-	result := make([]T, 0, q.data.Len())
-	for e := q.data.Front(); e != nil; e = e.Next() {
-		result = append(result, e.Value.(T))
-	}
-	return result
-}
