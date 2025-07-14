@@ -457,9 +457,7 @@ func (g *Graph) Build() (*Injector, error) {
 			returnValues[edge.provideArgSrc].Ref(!isProvided)
 
 			if !isProvided {
-				for k, v := range nodeProvidedNodes[edge.node] {
-					providedNodes[k] = v
-				}
+				maps.Copy(providedNodes, nodeProvidedNodes[edge.node])
 			}
 		}
 

@@ -12,7 +12,7 @@ import (
 func TestNewGraph(t *testing.T) {
 	t.Parallel()
 
-	configType, serviceType, _ := createTestTypes()
+	configType, serviceType, intType := createTestTypes()
 
 	tests := []struct {
 		build         *BuildDirective
@@ -20,6 +20,7 @@ func TestNewGraph(t *testing.T) {
 		expectedName  string
 		errorContains string
 		expectError   bool
+		expectedNodes int
 	}{
 		{
 			name: "basic dependency graph",
@@ -43,8 +44,158 @@ func TestNewGraph(t *testing.T) {
 					},
 				},
 			},
-			expectError:  false,
-			expectedName: "InitializeService",
+			expectError:   false,
+			expectedName:  "InitializeService",
+			expectedNodes: 2,
+		},
+		{
+			name: "multiple providers for same type - error case",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: configType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType}, // Duplicate!
+						Requires:      []types.Type{},
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError:   true,
+			errorContains: "multiple providers provide",
+		},
+		{
+			name: "missing return provider - auto add dependency",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: intType, // No provider for int type
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError:   false,
+			expectedName:  "InitializeService",
+			expectedNodes: 1, // Only the auto-added argument node
+		},
+		{
+			name: "complex dependency chain",
+			build: &BuildDirective{
+				InjectorName: "ComplexService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{intType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{intType},
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{serviceType},
+						Requires:      []types.Type{configType},
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError:   false,
+			expectedName:  "ComplexService",
+			expectedNodes: 3,
+		},
+		{
+			name: "provider with missing dependency - auto add argument",
+			build: &BuildDirective{
+				InjectorName: "ServiceWithMissingDep",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{serviceType},
+						Requires:      []types.Type{intType}, // Missing provider for int
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError:   false,
+			expectedName:  "ServiceWithMissingDep",
+			expectedNodes: 2, // service provider + auto-added int argument
+		},
+		{
+			name: "multiple return values from single provider",
+			build: &BuildDirective{
+				InjectorName: "MultiReturnService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType, serviceType}, // Multiple returns
+						Requires:      []types.Type{},
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError:   false,
+			expectedName:  "MultiReturnService",
+			expectedNodes: 1,
+		},
+		{
+			name: "reuse existing provider node",
+			build: &BuildDirective{
+				InjectorName: "ReuseProvider",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{intType},
+						Requires:      []types.Type{configType}, // Reuses config provider
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{serviceType},
+						Requires:      []types.Type{configType, intType}, // Reuses both providers
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError:   false,
+			expectedName:  "ReuseProvider",
+			expectedNodes: 3,
 		},
 	}
 
@@ -82,6 +233,20 @@ func TestNewGraph(t *testing.T) {
 
 			if graph.injectorName != tt.expectedName {
 				t.Errorf("Expected name %q, got %q", tt.expectedName, graph.injectorName)
+			}
+
+			if len(graph.nodes) != tt.expectedNodes {
+				t.Errorf("Expected %d nodes, got %d", tt.expectedNodes, len(graph.nodes))
+			}
+
+			// Verify return value is set
+			if graph.returnValue == nil {
+				t.Error("Expected returnValue to be set")
+			}
+
+			// Verify return type matches
+			if graph.returnType != tt.build.Return {
+				t.Error("Expected returnType to match build.Return")
 			}
 		})
 	}
@@ -603,6 +768,371 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 
 			if !tt.expectChainStmt && hasChain {
 				t.Error("Did not expect InjectorChainStmt but found one")
+			}
+		})
+	}
+}
+
+func TestGraph_BuildStmts(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, intType := createTestTypes()
+
+	tests := []struct {
+		name                     string
+		setupGraph              func() *Graph
+		pools                   [][]*node
+		nodeProvidedNodes       map[*node]map[*node]struct{}
+		initialProvidedNodes    map[*node]struct{}
+		expectedStmtsMin        int
+		expectError             bool
+		expectProviderCallStmt  bool
+		expectChainStmt         bool
+	}{
+		{
+			name: "empty pools",
+			setupGraph: func() *Graph {
+				return &Graph{
+					edges:        make(map[*node][]*edgeNode),
+					reverseEdges: make(map[*node][]*node),
+				}
+			},
+			pools:                [][]*node{{}},
+			nodeProvidedNodes:    make(map[*node]map[*node]struct{}),
+			initialProvidedNodes: make(map[*node]struct{}),
+			expectedStmtsMin:     0,
+			expectError:          true, // Empty pools should cause "no initial pools found" error
+			expectProviderCallStmt: false,
+			expectChainStmt:      false,
+		},
+		{
+			name: "single pool with provider",
+			setupGraph: func() *Graph {
+				return &Graph{
+					edges:        make(map[*node][]*edgeNode),
+					reverseEdges: make(map[*node][]*node),
+				}
+			},
+			pools: [][]*node{
+				{
+					{
+						providerSpec: &ProviderSpec{
+							Type:          ProviderTypeFunction,
+							Provides:      []types.Type{configType},
+							Requires:      []types.Type{},
+							IsReturnError: false,
+							IsAsync:       false,
+						},
+						providerArgs: []*InjectorCallArgument{},
+						returnValues: []*InjectorParam{NewInjectorParam(configType)},
+					},
+				},
+			},
+			nodeProvidedNodes:    make(map[*node]map[*node]struct{}),
+			initialProvidedNodes: make(map[*node]struct{}),
+			expectedStmtsMin:     1,
+			expectError:          false,
+			expectProviderCallStmt: true,
+			expectChainStmt:      false,
+		},
+		{
+			name: "mixed pools with empty pools",
+			setupGraph: func() *Graph {
+				return &Graph{
+					edges:        make(map[*node][]*edgeNode),
+					reverseEdges: make(map[*node][]*node),
+				}
+			},
+			pools: [][]*node{
+				{}, // empty pool - should trigger line 650 (continue)
+				{
+					{
+						providerSpec: &ProviderSpec{
+							Type:          ProviderTypeFunction,
+							Provides:      []types.Type{intType},
+							Requires:      []types.Type{},
+							IsReturnError: false,
+							IsAsync:       false,
+						},
+						providerArgs: []*InjectorCallArgument{},
+						returnValues: []*InjectorParam{NewInjectorParam(intType)},
+					},
+				},
+			},
+			nodeProvidedNodes:    make(map[*node]map[*node]struct{}),
+			initialProvidedNodes: make(map[*node]struct{}),
+			expectedStmtsMin:     1,
+			expectError:          false,
+			expectProviderCallStmt: true,
+			expectChainStmt:      false,
+		},
+		{
+			name: "async pools",
+			setupGraph: func() *Graph {
+				return &Graph{
+					edges:        make(map[*node][]*edgeNode),
+					reverseEdges: make(map[*node][]*node),
+				}
+			},
+			pools: [][]*node{
+				{
+					{
+						providerSpec: &ProviderSpec{
+							Type:          ProviderTypeFunction,
+							Provides:      []types.Type{configType},
+							Requires:      []types.Type{},
+							IsReturnError: false,
+							IsAsync:       true, // Async provider
+						},
+						providerArgs: []*InjectorCallArgument{},
+						returnValues: []*InjectorParam{NewInjectorParam(configType)},
+					},
+				},
+				{
+					{
+						providerSpec: &ProviderSpec{
+							Type:          ProviderTypeFunction,
+							Provides:      []types.Type{serviceType},
+							Requires:      []types.Type{},
+							IsReturnError: false,
+							IsAsync:       false, // Sync provider
+						},
+						providerArgs: []*InjectorCallArgument{},
+						returnValues: []*InjectorParam{NewInjectorParam(serviceType)},
+					},
+				},
+			},
+			nodeProvidedNodes:    make(map[*node]map[*node]struct{}),
+			initialProvidedNodes: make(map[*node]struct{}),
+			expectedStmtsMin:     2,
+			expectError:          false,
+			expectProviderCallStmt: true,
+			expectChainStmt:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			graph := tt.setupGraph()
+
+			stmts, err := graph.buildStmts(tt.pools, tt.nodeProvidedNodes, tt.initialProvidedNodes)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if len(stmts) < tt.expectedStmtsMin {
+				t.Errorf("Expected at least %d statements, got %d", tt.expectedStmtsMin, len(stmts))
+			}
+
+			// Check statement types
+			hasProviderCall := false
+			hasChain := false
+
+			for _, stmt := range stmts {
+				switch stmt.(type) {
+				case *InjectorProviderCallStmt:
+					hasProviderCall = true
+				case *InjectorChainStmt:
+					hasChain = true
+				}
+			}
+
+			if tt.expectProviderCallStmt && !hasProviderCall {
+				t.Error("Expected at least one InjectorProviderCallStmt")
+			}
+
+			if tt.expectChainStmt && !hasChain {
+				t.Error("Expected at least one InjectorChainStmt")
+			}
+
+			if !tt.expectProviderCallStmt && hasProviderCall {
+				t.Error("Did not expect InjectorProviderCallStmt but found one")
+			}
+
+			if !tt.expectChainStmt && hasChain {
+				t.Error("Did not expect InjectorChainStmt but found one")
+			}
+		})
+	}
+}
+
+func TestGraph_FindInitialPools(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, intType := createTestTypes()
+
+	tests := []struct {
+		name                 string
+		setupGraph          func() *Graph
+		pools               [][]*node
+		visited             []bool
+		initialProvidedNodes map[*node]struct{}
+		expectError         bool
+		expectedParentIdx   int
+		expectedAsyncCount  int
+	}{
+		{
+			name: "no initial pools - error case",
+			setupGraph: func() *Graph {
+				return &Graph{
+					edges:        make(map[*node][]*edgeNode),
+					reverseEdges: make(map[*node][]*node),
+				}
+			},
+			pools:               [][]*node{{}},
+			visited:             []bool{true}, // All pools visited - should cause "no initial pools found" error
+			initialProvidedNodes: make(map[*node]struct{}),
+			expectError:          true,
+		},
+		{
+			name: "single sync pool",
+			setupGraph: func() *Graph {
+				node1 := &node{
+					providerSpec: &ProviderSpec{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+						IsAsync:       false,
+					},
+					providerArgs: []*InjectorCallArgument{},
+					returnValues: []*InjectorParam{NewInjectorParam(configType)},
+				}
+
+				return &Graph{
+					edges:        make(map[*node][]*edgeNode),
+					reverseEdges: map[*node][]*node{
+						node1: {}, // No dependencies
+					},
+				}
+			},
+			pools: func() [][]*node {
+				node1 := &node{
+					providerSpec: &ProviderSpec{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+						IsAsync:       false,
+					},
+					providerArgs: []*InjectorCallArgument{},
+					returnValues: []*InjectorParam{NewInjectorParam(configType)},
+				}
+				return [][]*node{{node1}}
+			}(),
+			visited:              []bool{false},
+			initialProvidedNodes: make(map[*node]struct{}),
+			expectError:          false,
+			expectedParentIdx:    0,
+			expectedAsyncCount:   0,
+		},
+		{
+			name: "mixed sync and async pools",
+			setupGraph: func() *Graph {
+				asyncNode := &node{
+					providerSpec: &ProviderSpec{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{serviceType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+						IsAsync:       true,
+					},
+					providerArgs: []*InjectorCallArgument{},
+					returnValues: []*InjectorParam{NewInjectorParam(serviceType)},
+				}
+
+				syncNode := &node{
+					providerSpec: &ProviderSpec{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{intType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+						IsAsync:       false,
+					},
+					providerArgs: []*InjectorCallArgument{},
+					returnValues: []*InjectorParam{NewInjectorParam(intType)},
+				}
+
+				return &Graph{
+					edges:        make(map[*node][]*edgeNode),
+					reverseEdges: map[*node][]*node{
+						asyncNode: {}, // No dependencies
+						syncNode:  {}, // No dependencies
+					},
+				}
+			},
+			pools: func() [][]*node {
+				asyncNode := &node{
+					providerSpec: &ProviderSpec{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{serviceType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+						IsAsync:       true,
+					},
+					providerArgs: []*InjectorCallArgument{},
+					returnValues: []*InjectorParam{NewInjectorParam(serviceType)},
+				}
+
+				syncNode := &node{
+					providerSpec: &ProviderSpec{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{intType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+						IsAsync:       false,
+					},
+					providerArgs: []*InjectorCallArgument{},
+					returnValues: []*InjectorParam{NewInjectorParam(intType)},
+				}
+
+				return [][]*node{{asyncNode}, {syncNode}}
+			}(),
+			visited:              []bool{false, false},
+			initialProvidedNodes: make(map[*node]struct{}),
+			expectError:          false,
+			expectedParentIdx:    1, // Sync pool should be parent
+			expectedAsyncCount:   1, // One async pool
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			graph := tt.setupGraph()
+
+			parentIdx, asyncIdxs, err := graph.findInitialPools(tt.pools, tt.visited, tt.initialProvidedNodes)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if parentIdx != tt.expectedParentIdx {
+				t.Errorf("Expected parent pool index %d, got %d", tt.expectedParentIdx, parentIdx)
+			}
+
+			if len(asyncIdxs) != tt.expectedAsyncCount {
+				t.Errorf("Expected %d async pools, got %d", tt.expectedAsyncCount, len(asyncIdxs))
 			}
 		})
 	}
