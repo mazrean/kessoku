@@ -706,6 +706,7 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 	}
 
 	stmts := make([]InjectorStmt, 0, len(pools[parentPoolIdx])+len(asyncPoolIdxs))
+	
 	for _, poolIdx := range asyncPoolIdxs {
 		pool := pools[poolIdx]
 
@@ -723,23 +724,7 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 	if err != nil {
 		return nil, fmt.Errorf("build parent pool statements: %w", err)
 	}
-	
-	// If parent pool has async providers, wrap it in InjectorChainStmt
-	hasAsyncProviders := false
-	for _, n := range pools[parentPoolIdx] {
-		if n.providerSpec != nil && n.providerSpec.IsAsync {
-			hasAsyncProviders = true
-			break
-		}
-	}
-	
-	if hasAsyncProviders {
-		stmts = append(stmts, &InjectorChainStmt{
-			Statements: parentStmts,
-		})
-	} else {
-		stmts = append(stmts, parentStmts...)
-	}
+	stmts = append(stmts, parentStmts...)
 
 	return stmts, nil
 }
@@ -800,7 +785,6 @@ POOL_LOOP:
 func (g *Graph) buildPoolStmts(pool []*node, pools [][]*node, visited []bool, poolDependencyMap map[*node][]int, nodeProvidedNodes map[*node]map[*node]struct{}) ([]InjectorStmt, error) {
 	stmts := make([]InjectorStmt, 0, len(pool))
 
-	// First, add all provider statements for this pool
 	for _, n := range pool {
 		if n.providerSpec == nil {
 			// This is an argument node, skip it
@@ -812,18 +796,10 @@ func (g *Graph) buildPoolStmts(pool []*node, pools [][]*node, visited []bool, po
 			Arguments: n.providerArgs,
 			Returns:   n.returnValues,
 		})
-	}
-
-	// Then, add dependency pool statements after all providers in this pool are processed
-	processedPools := make(map[int]bool)
-	for _, n := range pool {
-		if n.providerSpec == nil {
-			continue
-		}
 
 	DEPENDENCY_LOOP:
 		for _, poolIdx := range poolDependencyMap[n] {
-			if visited[poolIdx] || processedPools[poolIdx] {
+			if visited[poolIdx] {
 				continue
 			}
 
@@ -835,7 +811,6 @@ func (g *Graph) buildPoolStmts(pool []*node, pools [][]*node, visited []bool, po
 			}
 
 			visited[poolIdx] = true
-			processedPools[poolIdx] = true
 			subStmts, err := g.buildPoolStmts(pools[poolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
 			if err != nil {
 				return nil, fmt.Errorf("build pool statements: %w", err)

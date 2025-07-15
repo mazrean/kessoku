@@ -20,6 +20,8 @@ func InitializeApp() *App {
 		app                   *App
 	)
 	eg := &errgroup.Group{}
+	messagingService = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()()
+	close(messagingServiceCh)
 	eg.Go(func() error {
 		databaseService = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
 		<-cacheServiceCh
@@ -36,8 +38,6 @@ func InitializeApp() *App {
 		close(notificationServiceCh)
 		return nil
 	})
-	messagingService = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()()
-	close(messagingServiceCh)
 	eg.Wait()
 	return app
 }
