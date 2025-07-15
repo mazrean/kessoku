@@ -9,28 +9,22 @@ import (
 
 func InitializeComplexApp() *App {
 	var (
-		config                *Config
-		configCh              = make(chan struct{})
-		messagingService      *MessagingService
-		messagingServiceCh    = make(chan struct{})
-		databaseService       *DatabaseService
-		databaseServiceCh     = make(chan struct{})
-		cacheService          *CacheService
-		cacheServiceCh        = make(chan struct{})
-		userService           *UserService
-		userServiceCh         = make(chan struct{})
-		sessionService        *SessionService
-		sessionServiceCh      = make(chan struct{})
-		notificationService   *NotificationService
-		notificationServiceCh = make(chan struct{})
-		app                   *App
+		config              *Config
+		configCh            = make(chan struct{})
+		messagingService    *MessagingService
+		databaseService     *DatabaseService
+		cacheService        *CacheService
+		userService         *UserService
+		userServiceCh       = make(chan struct{})
+		sessionService      *SessionService
+		sessionServiceCh    = make(chan struct{})
+		notificationService *NotificationService
+		app                 *App
 	)
 	eg := &errgroup.Group{}
 	eg.Go(func() error {
 		<-configCh
 		databaseService = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()(config)
-		close(databaseServiceCh)
-		<-databaseServiceCh
 		userService = kessoku.Async(kessoku.Provide(NewUserService)).Fn()(databaseService)
 		close(userServiceCh)
 		return nil
@@ -38,23 +32,17 @@ func InitializeComplexApp() *App {
 	eg.Go(func() error {
 		<-configCh
 		cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()(config)
-		close(cacheServiceCh)
-		<-cacheServiceCh
 		sessionService = kessoku.Async(kessoku.Provide(NewSessionService)).Fn()(cacheService)
 		close(sessionServiceCh)
 		return nil
 	})
 	config = kessoku.Provide(NewConfig).Fn()()
 	close(configCh)
-	<-configCh
 	messagingService = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(config)
-	close(messagingServiceCh)
-	for _, ch := range []<-chan struct{}{userServiceCh, sessionServiceCh, messagingServiceCh} {
+	for _, ch := range []<-chan struct{}{userServiceCh, sessionServiceCh} {
 		<-ch
 	}
 	notificationService = kessoku.Async(kessoku.Provide(NewNotificationService)).Fn()(userService, sessionService, messagingService)
-	close(notificationServiceCh)
-	<-notificationServiceCh
 	app = kessoku.Provide(NewComplexApp).Fn()(notificationService)
 	eg.Wait()
 	return app

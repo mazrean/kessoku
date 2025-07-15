@@ -210,7 +210,7 @@ func TestNewGraph(t *testing.T) {
 				},
 				Imports: make(map[string]*ast.ImportSpec),
 			}
-			
+
 			graph, err := NewGraph(metaData, tt.build)
 
 			if tt.expectError {
@@ -282,9 +282,9 @@ func TestCreateASTTypeExpr(t *testing.T) {
 			shouldError:     false,
 		},
 		{
-			name: "pointer to basic type",
-			pkg:  "main",
-			typeExpr: types.NewPointer(types.Typ[types.Int]),
+			name:            "pointer to basic type",
+			pkg:             "main",
+			typeExpr:        types.NewPointer(types.Typ[types.Int]),
 			expectedImports: []string{},
 			shouldError:     false,
 		},
@@ -321,23 +321,23 @@ func TestCreateASTTypeExpr(t *testing.T) {
 			shouldError:     false,
 		},
 		{
-			name: "slice type",
-			pkg:  "main",
-			typeExpr: types.NewSlice(types.Typ[types.String]),
+			name:            "slice type",
+			pkg:             "main",
+			typeExpr:        types.NewSlice(types.Typ[types.String]),
 			expectedImports: []string{},
 			shouldError:     false,
 		},
 		{
-			name: "array type",
-			pkg:  "main",
-			typeExpr: types.NewArray(types.Typ[types.Int], 10),
+			name:            "array type",
+			pkg:             "main",
+			typeExpr:        types.NewArray(types.Typ[types.Int], 10),
 			expectedImports: []string{},
 			shouldError:     false,
 		},
 		{
-			name: "map type",
-			pkg:  "main",
-			typeExpr: types.NewMap(types.Typ[types.String], types.Typ[types.Int]),
+			name:            "map type",
+			pkg:             "main",
+			typeExpr:        types.NewMap(types.Typ[types.String], types.Typ[types.Int]),
 			expectedImports: []string{},
 			shouldError:     false,
 		},
@@ -356,9 +356,9 @@ func TestCreateASTTypeExpr(t *testing.T) {
 			shouldError:     false,
 		},
 		{
-			name: "channel type",
-			pkg:  "main",
-			typeExpr: types.NewChan(types.SendRecv, types.Typ[types.String]),
+			name:            "channel type",
+			pkg:             "main",
+			typeExpr:        types.NewChan(types.SendRecv, types.Typ[types.String]),
 			expectedImports: []string{},
 			shouldError:     false,
 		},
@@ -388,36 +388,36 @@ func TestCreateASTTypeExpr(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			expr, imports, err := createASTTypeExpr(tt.pkg, tt.typeExpr)
-			
+
 			if tt.shouldError {
 				if err == nil {
 					t.Error("Expected error but got none")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
 				return
 			}
-			
+
 			if tt.expectNil && expr != nil {
 				t.Error("Expected nil expression but got non-nil")
 				return
 			}
-			
+
 			if !tt.expectNil && expr == nil {
 				t.Error("Expected non-nil expression but got nil")
 				return
 			}
-			
+
 			if len(imports) != len(tt.expectedImports) {
 				t.Errorf("Expected %d imports, got %d: %v", len(tt.expectedImports), len(imports), imports)
 				return
 			}
-			
+
 			for i, expectedImport := range tt.expectedImports {
 				if imports[i] != expectedImport {
 					t.Errorf("Expected import %q at index %d, got %q", expectedImport, i, imports[i])
@@ -431,11 +431,11 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name             string
-		metaData         *MetaData
-		dependencyType   types.Type
-		expectError      bool
-		expectedImports  []string
+		name            string
+		metaData        *MetaData
+		dependencyType  types.Type
+		expectError     bool
+		expectedImports []string
 	}{
 		{
 			name: "basic type dependency",
@@ -446,8 +446,8 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 				},
 				Imports: make(map[string]*ast.ImportSpec),
 			},
-			dependencyType: types.Typ[types.String],
-			expectError:    false,
+			dependencyType:  types.Typ[types.String],
+			expectError:     false,
 			expectedImports: []string{},
 		},
 		{
@@ -464,7 +464,7 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 				obj := types.NewTypeName(0, pkg, "Stringer", nil)
 				return types.NewNamed(obj, types.NewInterfaceType([]*types.Func{}, nil), nil)
 			}(),
-			expectError:    false,
+			expectError:     false,
 			expectedImports: []string{"fmt"},
 		},
 		{
@@ -481,7 +481,7 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 				obj := types.NewTypeName(0, pkg, "Context", nil)
 				return types.NewNamed(obj, types.NewInterfaceType([]*types.Func{}, nil), nil)
 			}(),
-			expectError:    false,
+			expectError:     false,
 			expectedImports: []string{"context"},
 		},
 		{
@@ -505,7 +505,7 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 				obj := types.NewTypeName(0, pkg, "Stringer", nil)
 				return types.NewNamed(obj, types.NewInterfaceType([]*types.Func{}, nil), nil)
 			}(),
-			expectError:    false,
+			expectError:     false,
 			expectedImports: []string{"fmt"},
 		},
 		{
@@ -517,8 +517,8 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 				},
 				Imports: make(map[string]*ast.ImportSpec),
 			},
-			dependencyType: types.NewPointer(types.Typ[types.Int]),
-			expectError:    false,
+			dependencyType:  types.NewPointer(types.Typ[types.Int]),
+			expectError:     false,
 			expectedImports: []string{},
 		},
 	}
@@ -526,44 +526,44 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			graph := &Graph{
 				edges:        make(map[*node][]*edgeNode),
 				reverseEdges: make(map[*node][]*node),
 			}
-			
+
 			node, err := graph.autoAddMissingDependencies(tt.metaData, tt.dependencyType)
-			
+
 			if tt.expectError {
 				if err == nil {
 					t.Error("Expected error but got none")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
 				return
 			}
-			
+
 			if node == nil {
 				t.Error("Expected node to be non-nil")
 				return
 			}
-			
+
 			if node.arg == nil {
 				t.Error("Expected node.arg to be non-nil")
 				return
 			}
-			
+
 			if node.arg.Type != tt.dependencyType {
 				t.Error("Expected node.arg.Type to match dependency type")
 			}
-			
+
 			if node.arg.ASTTypeExpr == nil {
 				t.Error("Expected node.arg.ASTTypeExpr to be non-nil")
 			}
-			
+
 			// Check that required imports were added
 			for _, expectedImport := range tt.expectedImports {
 				if _, exists := tt.metaData.Imports[expectedImport]; !exists {
@@ -580,17 +580,17 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 	configType, _, intType := createTestTypes()
 
 	tests := []struct {
-		name                     string
-		setupGraph              func() *Graph
-		pool                    []*node
-		pools                   [][]*node
-		visited                 []bool
-		poolDependencyMap       map[*node][]int
-		nodeProvidedNodes       map[*node]map[*node]struct{}
-		expectedStmtsMin        int
-		expectError             bool
-		expectProviderCallStmt  bool
-		expectChainStmt         bool
+		name                   string
+		setupGraph             func() *Graph
+		pool                   []*node
+		pools                  [][]*node
+		visited                []bool
+		poolDependencyMap      map[*node][]int
+		nodeProvidedNodes      map[*node]map[*node]struct{}
+		expectedStmtsMin       int
+		expectError            bool
+		expectProviderCallStmt bool
+		expectChainStmt        bool
 	}{
 		{
 			name: "empty pool",
@@ -600,15 +600,15 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 					reverseEdges: make(map[*node][]*node),
 				}
 			},
-			pool:                []*node{},
-			pools:               [][]*node{},
-			visited:             []bool{},
-			poolDependencyMap:   make(map[*node][]int),
-			nodeProvidedNodes:   make(map[*node]map[*node]struct{}),
-			expectedStmtsMin:    0,
-			expectError:         false,
+			pool:                   []*node{},
+			pools:                  [][]*node{},
+			visited:                []bool{},
+			poolDependencyMap:      make(map[*node][]int),
+			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
+			expectedStmtsMin:       0,
+			expectError:            false,
 			expectProviderCallStmt: false,
-			expectChainStmt:     false,
+			expectChainStmt:        false,
 		},
 		{
 			name: "pool with argument node only",
@@ -628,14 +628,14 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 					providerSpec: nil, // This is the key - argument nodes have nil providerSpec
 				},
 			},
-			pools:               [][]*node{},
-			visited:             []bool{},
-			poolDependencyMap:   make(map[*node][]int),
-			nodeProvidedNodes:   make(map[*node]map[*node]struct{}),
-			expectedStmtsMin:    0, // argument nodes are skipped
-			expectError:         false,
+			pools:                  [][]*node{},
+			visited:                []bool{},
+			poolDependencyMap:      make(map[*node][]int),
+			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
+			expectedStmtsMin:       0, // argument nodes are skipped
+			expectError:            false,
 			expectProviderCallStmt: false,
-			expectChainStmt:     false,
+			expectChainStmt:        false,
 		},
 		{
 			name: "pool with provider node",
@@ -657,14 +657,14 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 					returnValues: []*InjectorParam{NewInjectorParam(configType)},
 				},
 			},
-			pools:               [][]*node{},
-			visited:             []bool{},
-			poolDependencyMap:   make(map[*node][]int),
-			nodeProvidedNodes:   make(map[*node]map[*node]struct{}),
-			expectedStmtsMin:    1,
-			expectError:         false,
+			pools:                  [][]*node{},
+			visited:                []bool{},
+			poolDependencyMap:      make(map[*node][]int),
+			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
+			expectedStmtsMin:       1,
+			expectError:            false,
 			expectProviderCallStmt: true,
-			expectChainStmt:     false,
+			expectChainStmt:        false,
 		},
 		{
 			name: "mixed pool with argument and provider nodes",
@@ -700,14 +700,14 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 					returnValues: []*InjectorParam{NewInjectorParam(configType)},
 				},
 			},
-			pools:               [][]*node{},
-			visited:             []bool{},
-			poolDependencyMap:   make(map[*node][]int),
-			nodeProvidedNodes:   make(map[*node]map[*node]struct{}),
-			expectedStmtsMin:    1, // Only the provider node generates a statement
-			expectError:         false,
+			pools:                  [][]*node{},
+			visited:                []bool{},
+			poolDependencyMap:      make(map[*node][]int),
+			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
+			expectedStmtsMin:       1, // Only the provider node generates a statement
+			expectError:            false,
 			expectProviderCallStmt: true,
-			expectChainStmt:     false,
+			expectChainStmt:        false,
 		},
 	}
 
@@ -779,15 +779,15 @@ func TestGraph_BuildStmts(t *testing.T) {
 	configType, serviceType, intType := createTestTypes()
 
 	tests := []struct {
-		name                     string
-		setupGraph              func() *Graph
-		pools                   [][]*node
-		nodeProvidedNodes       map[*node]map[*node]struct{}
-		initialProvidedNodes    map[*node]struct{}
-		expectedStmtsMin        int
-		expectError             bool
-		expectProviderCallStmt  bool
-		expectChainStmt         bool
+		name                   string
+		setupGraph             func() *Graph
+		pools                  [][]*node
+		nodeProvidedNodes      map[*node]map[*node]struct{}
+		initialProvidedNodes   map[*node]struct{}
+		expectedStmtsMin       int
+		expectError            bool
+		expectProviderCallStmt bool
+		expectChainStmt        bool
 	}{
 		{
 			name: "empty pools",
@@ -797,13 +797,13 @@ func TestGraph_BuildStmts(t *testing.T) {
 					reverseEdges: make(map[*node][]*node),
 				}
 			},
-			pools:                [][]*node{{}},
-			nodeProvidedNodes:    make(map[*node]map[*node]struct{}),
-			initialProvidedNodes: make(map[*node]struct{}),
-			expectedStmtsMin:     0,
-			expectError:          true, // Empty pools should cause "no initial pools found" error
+			pools:                  [][]*node{{}},
+			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
+			initialProvidedNodes:   make(map[*node]struct{}),
+			expectedStmtsMin:       0,
+			expectError:            true, // Empty pools should cause "no initial pools found" error
 			expectProviderCallStmt: false,
-			expectChainStmt:      false,
+			expectChainStmt:        false,
 		},
 		{
 			name: "single pool with provider",
@@ -828,12 +828,12 @@ func TestGraph_BuildStmts(t *testing.T) {
 					},
 				},
 			},
-			nodeProvidedNodes:    make(map[*node]map[*node]struct{}),
-			initialProvidedNodes: make(map[*node]struct{}),
-			expectedStmtsMin:     1,
-			expectError:          false,
+			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
+			initialProvidedNodes:   make(map[*node]struct{}),
+			expectedStmtsMin:       1,
+			expectError:            false,
 			expectProviderCallStmt: true,
-			expectChainStmt:      false,
+			expectChainStmt:        false,
 		},
 		{
 			name: "mixed pools with empty pools",
@@ -859,12 +859,12 @@ func TestGraph_BuildStmts(t *testing.T) {
 					},
 				},
 			},
-			nodeProvidedNodes:    make(map[*node]map[*node]struct{}),
-			initialProvidedNodes: make(map[*node]struct{}),
-			expectedStmtsMin:     1,
-			expectError:          false,
+			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
+			initialProvidedNodes:   make(map[*node]struct{}),
+			expectedStmtsMin:       1,
+			expectError:            false,
 			expectProviderCallStmt: true,
-			expectChainStmt:      false,
+			expectChainStmt:        false,
 		},
 		{
 			name: "async pools",
@@ -902,12 +902,12 @@ func TestGraph_BuildStmts(t *testing.T) {
 					},
 				},
 			},
-			nodeProvidedNodes:    make(map[*node]map[*node]struct{}),
-			initialProvidedNodes: make(map[*node]struct{}),
-			expectedStmtsMin:     2,
-			expectError:          false,
+			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
+			initialProvidedNodes:   make(map[*node]struct{}),
+			expectedStmtsMin:       2,
+			expectError:            false,
 			expectProviderCallStmt: true,
-			expectChainStmt:      true,
+			expectChainStmt:        true,
 		},
 	}
 
@@ -974,13 +974,13 @@ func TestGraph_FindInitialPools(t *testing.T) {
 
 	tests := []struct {
 		name                 string
-		setupGraph          func() *Graph
-		pools               [][]*node
-		visited             []bool
+		setupGraph           func() *Graph
+		pools                [][]*node
+		visited              []bool
 		initialProvidedNodes map[*node]struct{}
-		expectError         bool
-		expectedParentIdx   int
-		expectedAsyncCount  int
+		expectError          bool
+		expectedParentIdx    int
+		expectedAsyncCount   int
 	}{
 		{
 			name: "no initial pools - error case",
@@ -990,8 +990,8 @@ func TestGraph_FindInitialPools(t *testing.T) {
 					reverseEdges: make(map[*node][]*node),
 				}
 			},
-			pools:               [][]*node{{}},
-			visited:             []bool{true}, // All pools visited - should cause "no initial pools found" error
+			pools:                [][]*node{{}},
+			visited:              []bool{true}, // All pools visited - should cause "no initial pools found" error
 			initialProvidedNodes: make(map[*node]struct{}),
 			expectError:          true,
 		},
@@ -1011,7 +1011,7 @@ func TestGraph_FindInitialPools(t *testing.T) {
 				}
 
 				return &Graph{
-					edges:        make(map[*node][]*edgeNode),
+					edges: make(map[*node][]*edgeNode),
 					reverseEdges: map[*node][]*node{
 						node1: {}, // No dependencies
 					},
@@ -1065,7 +1065,7 @@ func TestGraph_FindInitialPools(t *testing.T) {
 				}
 
 				return &Graph{
-					edges:        make(map[*node][]*edgeNode),
+					edges: make(map[*node][]*edgeNode),
 					reverseEdges: map[*node][]*node{
 						asyncNode: {}, // No dependencies
 						syncNode:  {}, // No dependencies

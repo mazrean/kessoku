@@ -10,13 +10,11 @@ import (
 func InitializeApp() *App {
 	var (
 		databaseService       *DatabaseService
-		databaseServiceCh     = make(chan struct{})
 		cacheService          *CacheService
 		cacheServiceCh        = make(chan struct{})
 		messagingService      *MessagingService
 		messagingServiceCh    = make(chan struct{})
 		userService           *UserService
-		userServiceCh         = make(chan struct{})
 		notificationService   *NotificationService
 		notificationServiceCh = make(chan struct{})
 		app                   *App
@@ -24,15 +22,9 @@ func InitializeApp() *App {
 	eg := &errgroup.Group{}
 	eg.Go(func() error {
 		databaseService = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
-		close(databaseServiceCh)
-		for _, ch := range []<-chan struct{}{databaseServiceCh, cacheServiceCh} {
-			<-ch
-		}
+		<-cacheServiceCh
 		userService = kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
-		close(userServiceCh)
-		for _, ch := range []<-chan struct{}{userServiceCh, notificationServiceCh} {
-			<-ch
-		}
+		<-notificationServiceCh
 		app = kessoku.Provide(NewApp).Fn()(userService, notificationService)
 		return nil
 	})

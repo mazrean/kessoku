@@ -402,18 +402,21 @@ func (g *Graph) Build() (*Injector, error) {
 	}
 
 	nodeProvidedNodes := make(map[*node]map[*node]struct{}, len(g.nodes))
+	nodeToPoolIdx := make(map[*node]int, len(g.nodes))
 
-	// Traverse nodes in dependency order to collect parameters
+	// First pass: assign nodes to pools and collect return values
 	for n := range g.topologicalSortIter() {
 		slog.Debug("Processing node", "node", n)
 
 		var (
 			returnValues  []*InjectorParam
 			providedNodes map[*node]struct{}
+			poolIdx       int
 		)
 		switch {
 		case n.arg != nil:
 			providedNodes = initialProvidedNodes
+			poolIdx = -1 // Arguments are not in any pool
 
 			param := NewInjectorParam(n.arg.Type)
 			injector.Params = append(injector.Params, param)
@@ -425,7 +428,7 @@ func (g *Graph) Build() (*Injector, error) {
 				ASTTypeExpr: n.arg.ASTTypeExpr,
 			})
 		case n.providerSpec != nil:
-			poolIdx := g.findOptimalPool(n, pools, poolProvidedNodes)
+			poolIdx = g.findOptimalPool(n, pools, poolProvidedNodes)
 			pools[poolIdx] = append(pools[poolIdx], n)
 
 			providedNodes = poolProvidedNodes[poolIdx]
@@ -445,23 +448,16 @@ func (g *Graph) Build() (*Injector, error) {
 		}
 
 		n.returnValues = returnValues
+		nodeToPoolIdx[n] = poolIdx
 
-		for _, edge := range g.edges[n] {
-			_, isProvided := providedNodes[edge.node]
+		// Mark current node as provided before processing edges
+		providedNodes[n] = struct{}{}
 
-			param := returnValues[edge.provideArgSrc]
-			edge.node.providerArgs[edge.provideArgDst] = &InjectorCallArgument{
-				Param:  param,
-				IsWait: !isProvided,
-			}
-			returnValues[edge.provideArgSrc].Ref(!isProvided)
-
-			if !isProvided {
-				maps.Copy(providedNodes, nodeProvidedNodes[edge.node])
-			}
+		// Update pool's provided nodes if this is a provider node
+		if n.providerSpec != nil {
+			poolProvidedNodes[poolIdx][n] = struct{}{}
 		}
 
-		providedNodes[n] = struct{}{}
 		nodeProvidedNodes[n] = maps.Clone(providedNodes)
 
 		if n == g.returnValue.node {
@@ -470,6 +466,32 @@ func (g *Graph) Build() (*Injector, error) {
 				Param:  returnValues[g.returnValue.returnIndex],
 				Return: g.returnType,
 			}
+		}
+	}
+
+	// Second pass: set up dependencies with correct IsWait flags
+	for n := range g.topologicalSortIter() {
+		providedNodes := nodeProvidedNodes[n]
+
+		for _, edge := range g.edges[n] {
+			_, isProvided := providedNodes[edge.node]
+
+			param := n.returnValues[edge.provideArgSrc]
+
+			// Check if the dependency and dependent are in the same pool
+			// If they are in the same pool, no need to wait for channels
+			dependencyPoolIdx := nodeToPoolIdx[n]
+			dependentPoolIdx := nodeToPoolIdx[edge.node]
+			inSamePool := dependencyPoolIdx != -1 && dependentPoolIdx != -1 && dependencyPoolIdx == dependentPoolIdx
+
+			// Only wait if not provided and not in the same pool
+			shouldWait := !isProvided && !inSamePool
+
+			edge.node.providerArgs[edge.provideArgDst] = &InjectorCallArgument{
+				Param:  param,
+				IsWait: shouldWait,
+			}
+			param.Ref(shouldWait)
 		}
 	}
 
@@ -583,7 +605,7 @@ func (g *Graph) findOptimalPool(n *node, pools [][]*node, poolProvidedNodes []ma
 	if n.providerSpec == nil {
 		return 0
 	}
-	
+
 	// For sync-only cases, use a single pool (pool 0) to maintain dependency order
 	if !n.providerSpec.IsAsync {
 		// Check if there are any async providers in the whole graph
@@ -594,7 +616,7 @@ func (g *Graph) findOptimalPool(n *node, pools [][]*node, poolProvidedNodes []ma
 				break
 			}
 		}
-		
+
 		// If no async providers exist, use pool 0 for all sync providers
 		if !hasAsyncProviders {
 			return 0

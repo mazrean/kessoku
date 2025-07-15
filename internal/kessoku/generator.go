@@ -829,9 +829,7 @@ func (stmt *InjectorProviderCallStmt) buildLhsExpressions(varPool *VarPool) []as
 	// Add output parameters
 	for _, param := range stmt.Returns {
 		paramName := param.Name(varPool)
-		if paramName != "_" {
-			lhs = append(lhs, ast.NewIdent(paramName))
-		}
+		lhs = append(lhs, ast.NewIdent(paramName))
 	}
 
 	// Add error parameter if provider returns error
