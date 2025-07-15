@@ -6,189 +6,45 @@ import "github.com/mazrean/kessoku"
 
 func InitializeAppBasic() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()
-	for _, ch := range []chan<- struct {
-	}{configCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{configCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *App
 		return zero, err
 	}
-	for _, ch := range []chan<- struct {
-	}{databaseCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{databaseCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	userService := kessoku.Provide(NewUserService).Fn()(database)
-	for _, ch := range []chan<- struct {
-	}{userServiceCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{userServiceCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	app := kessoku.Provide(NewApp).Fn()(userService)
 	return app, nil
 }
 func InitializeAppWithInlineSet() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()
-	for _, ch := range []chan<- struct {
-	}{configCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{configCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *App
 		return zero, err
 	}
-	for _, ch := range []chan<- struct {
-	}{databaseCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{databaseCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	userService := kessoku.Provide(NewUserService).Fn()(database)
-	for _, ch := range []chan<- struct {
-	}{userServiceCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{userServiceCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	app := kessoku.Provide(NewApp).Fn()(userService)
 	return app, nil
 }
 func InitializeAppWithSetVariable() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()
-	for _, ch := range []chan<- struct {
-	}{configCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{configCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *App
 		return zero, err
 	}
-	for _, ch := range []chan<- struct {
-	}{databaseCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{databaseCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	userService := kessoku.Provide(NewUserService).Fn()(database)
-	for _, ch := range []chan<- struct {
-	}{userServiceCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{userServiceCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	app := kessoku.Provide(NewApp).Fn()(userService)
 	return app, nil
 }
 func InitializeAppWithNestedSets() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()
-	for _, ch := range []chan<- struct {
-	}{configCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{configCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *App
 		return zero, err
 	}
-	for _, ch := range []chan<- struct {
-	}{databaseCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{databaseCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	userService := kessoku.Provide(NewUserService).Fn()(database)
-	for _, ch := range []chan<- struct {
-	}{userServiceCh} {
-		close(ch)
-	}
-	for _, ch := range []<-chan struct {
-	}{userServiceCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done:
-			return ctx.Err()
-		}
-	}
 	app := kessoku.Provide(NewApp).Fn()(userService)
 	return app, nil
 }

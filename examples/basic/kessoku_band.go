@@ -5,57 +5,14 @@ package main
 import "github.com/mazrean/kessoku"
 
 func InitializeApp() (*App, error) {
-	eg.Go(func() error {
-		var err error
-		config := kessoku.Provide(NewConfig).Fn()()
-		for _, ch := range []chan<- struct {
-		}{configCh} {
-			close(ch)
-		}
-		for _, ch := range []<-chan struct {
-		}{configCh} {
-			select {
-			case <-ch:
-			case <-ctx.Done:
-				return ctx.Err()
-			}
-		}
-		database, err := kessoku.Provide(NewDatabase).Fn()(config)
-		if err != nil {
-			return err
-		}
-		for _, ch := range []chan<- struct {
-		}{databaseCh} {
-			close(ch)
-		}
-		for _, ch := range []<-chan struct {
-		}{databaseCh, loggerCh} {
-			select {
-			case <-ch:
-			case <-ctx.Done:
-				return ctx.Err()
-			}
-		}
-		userService := kessoku.Provide(NewUserService).Fn()(database, logger)
-		for _, ch := range []chan<- struct {
-		}{userServiceCh} {
-			close(ch)
-		}
-		for _, ch := range []<-chan struct {
-		}{configCh, userServiceCh, loggerCh} {
-			select {
-			case <-ch:
-			case <-ctx.Done:
-				return ctx.Err()
-			}
-		}
-		app := kessoku.Provide(NewApp).Fn()(config, userService, logger)
-		return nil
-	})
+	config := kessoku.Provide(NewConfig).Fn()()
 	logger := kessoku.Provide(NewLogger).Fn()()
-	for _, ch := range []chan<- struct {
-	}{loggerCh} {
-		close(ch)
+	database, err := kessoku.Provide(NewDatabase).Fn()(config)
+	if err != nil {
+		var zero *App
+		return zero, err
 	}
+	userService := kessoku.Provide(NewUserService).Fn()(database, logger)
+	app := kessoku.Provide(NewApp).Fn()(config, userService, logger)
 	return app, nil
 }

@@ -8,65 +8,44 @@ import (
 )
 
 func InitializeApp() *App {
+	var (
+		databaseService       *DatabaseService
+		databaseServiceCh     = make(chan struct{})
+		cacheService          *CacheService
+		cacheServiceCh        = make(chan struct{})
+		messagingService      *MessagingService
+		messagingServiceCh    = make(chan struct{})
+		userService           *UserService
+		userServiceCh         = make(chan struct{})
+		notificationService   *NotificationService
+		notificationServiceCh = make(chan struct{})
+		app                   *App
+	)
 	eg := &errgroup.Group{}
 	eg.Go(func() error {
-		var err error
-		databaseService := kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
-		for _, ch := range []chan<- struct {
-		}{databaseServiceCh} {
-			close(ch)
+		databaseService = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
+		close(databaseServiceCh)
+		for _, ch := range []<-chan struct{}{databaseServiceCh, cacheServiceCh} {
+			<-ch
 		}
-		for _, ch := range []<-chan struct {
-		}{databaseServiceCh, cacheServiceCh} {
-			select {
-			case <-ch:
-			case <-ctx.Done:
-				return ctx.Err()
-			}
+		userService = kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
+		close(userServiceCh)
+		for _, ch := range []<-chan struct{}{userServiceCh, notificationServiceCh} {
+			<-ch
 		}
-		userService := kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
-		for _, ch := range []chan<- struct {
-		}{userServiceCh} {
-			close(ch)
-		}
-		for _, ch := range []<-chan struct {
-		}{userServiceCh, notificationServiceCh} {
-			select {
-			case <-ch:
-			case <-ctx.Done:
-				return ctx.Err()
-			}
-		}
-		app := kessoku.Provide(NewApp).Fn()(userService, notificationService)
+		app = kessoku.Provide(NewApp).Fn()(userService, notificationService)
 		return nil
 	})
 	eg.Go(func() error {
-		var err error
-		cacheService := kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
-		for _, ch := range []chan<- struct {
-		}{cacheServiceCh} {
-			close(ch)
-		}
-		for _, ch := range []<-chan struct {
-		}{messagingServiceCh} {
-			select {
-			case <-ch:
-			case <-ctx.Done:
-				return ctx.Err()
-			}
-		}
-		notificationService := kessoku.Provide(NewNotificationService).Fn()(messagingService)
-		for _, ch := range []chan<- struct {
-		}{notificationServiceCh} {
-			close(ch)
-		}
+		cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
+		close(cacheServiceCh)
+		<-messagingServiceCh
+		notificationService = kessoku.Provide(NewNotificationService).Fn()(messagingService)
+		close(notificationServiceCh)
 		return nil
 	})
-	messagingService := kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()()
-	for _, ch := range []chan<- struct {
-	}{messagingServiceCh} {
-		close(ch)
-	}
+	messagingService = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()()
+	close(messagingServiceCh)
 	eg.Wait()
 	return app
 }
