@@ -1,3 +1,12 @@
 /dist
 /bin
 /.vscode
+
+# Example binaries
+examples/*/async_parallel
+examples/*/basic
+examples/*/complex
+examples/*/complex_async
+examples/*/cross_package
+examples/*/sets
+examples/*/simple
