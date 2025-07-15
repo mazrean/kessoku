@@ -707,7 +707,19 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 
 	stmts := make([]InjectorStmt, 0, len(pools[parentPoolIdx])+len(asyncPoolIdxs))
 	
+	// First, add parent pool statements that may trigger async pools
+	parentStmts, err := g.buildPoolStmts(pools[parentPoolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
+	if err != nil {
+		return nil, fmt.Errorf("build parent pool statements: %w", err)
+	}
+	stmts = append(stmts, parentStmts...)
+
+	// Then, add any remaining async pool statements
 	for _, poolIdx := range asyncPoolIdxs {
+		if visited[poolIdx] {
+			continue  // Already processed in parent pool
+		}
+
 		pool := pools[poolIdx]
 
 		subStmts, err := g.buildPoolStmts(pool, pools, visited, poolDependencyMap, nodeProvidedNodes)
@@ -719,12 +731,6 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 			Statements: subStmts,
 		})
 	}
-
-	parentStmts, err := g.buildPoolStmts(pools[parentPoolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
-	if err != nil {
-		return nil, fmt.Errorf("build parent pool statements: %w", err)
-	}
-	stmts = append(stmts, parentStmts...)
 
 	return stmts, nil
 }
@@ -797,27 +803,32 @@ func (g *Graph) buildPoolStmts(pool []*node, pools [][]*node, visited []bool, po
 			Returns:   n.returnValues,
 		})
 
-	DEPENDENCY_LOOP:
+		// Check if this node's execution enables any dependency pools to start
 		for _, poolIdx := range poolDependencyMap[n] {
 			if visited[poolIdx] {
 				continue
 			}
 
 			firstNode := pools[poolIdx][0]
+			// Check if all dependencies of the pool's first node are now satisfied
+			allDependenciesSatisfied := true
 			for _, dependency := range g.reverseEdges[firstNode] {
 				if _, ok := nodeProvidedNodes[dependency][n]; !ok {
-					continue DEPENDENCY_LOOP
+					allDependenciesSatisfied = false
+					break
 				}
 			}
 
-			visited[poolIdx] = true
-			subStmts, err := g.buildPoolStmts(pools[poolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
-			if err != nil {
-				return nil, fmt.Errorf("build pool statements: %w", err)
+			if allDependenciesSatisfied {
+				visited[poolIdx] = true
+				subStmts, err := g.buildPoolStmts(pools[poolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
+				if err != nil {
+					return nil, fmt.Errorf("build pool statements: %w", err)
+				}
+				stmts = append(stmts, &InjectorChainStmt{
+					Statements: subStmts,
+				})
 			}
-			stmts = append(stmts, &InjectorChainStmt{
-				Statements: subStmts,
-			})
 		}
 	}
 
