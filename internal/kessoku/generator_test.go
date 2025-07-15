@@ -206,7 +206,7 @@ func TestInjectorChainStmt_Stmt(t *testing.T) {
 					t.Errorf("Stmt() panicked: %v", r)
 				}
 			}()
-			
+
 			stmts, imports := tt.chainStmt.Stmt(varPool, injector, []ast.Stmt{})
 
 			// The method should return exactly one statement (the eg.Go call)
@@ -482,7 +482,7 @@ func TestGenerateStmts(t *testing.T) {
 	t.Parallel()
 
 	configType, serviceType, intType := createTestTypes()
-	
+
 	// Create context.Context type for testing
 	contextType := func() types.Type {
 		pkg := types.NewPackage("context", "context")
@@ -491,13 +491,13 @@ func TestGenerateStmts(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name                     string
-		injector                 *Injector
-		expectedStmtsMin         int
-		expectAsyncImport        bool
-		expectErrorHandling      bool
-		expectContextHandling    bool
-		expectReturn            bool
+		name                  string
+		injector              *Injector
+		expectedStmtsMin      int
+		expectAsyncImport     bool
+		expectErrorHandling   bool
+		expectContextHandling bool
+		expectReturn          bool
 	}{
 		{
 			name: "simple sync injector without error",
@@ -530,7 +530,7 @@ func TestGenerateStmts(t *testing.T) {
 			expectAsyncImport:     false,
 			expectErrorHandling:   false,
 			expectContextHandling: false,
-			expectReturn:         true,
+			expectReturn:          true,
 		},
 		{
 			name: "simple sync injector with error",
@@ -563,7 +563,7 @@ func TestGenerateStmts(t *testing.T) {
 			expectAsyncImport:     false,
 			expectErrorHandling:   false,
 			expectContextHandling: false,
-			expectReturn:         true,
+			expectReturn:          true,
 		},
 		{
 			name: "async injector without context",
@@ -600,7 +600,7 @@ func TestGenerateStmts(t *testing.T) {
 			expectAsyncImport:     true,
 			expectErrorHandling:   true,
 			expectContextHandling: false,
-			expectReturn:         true,
+			expectReturn:          true,
 		},
 		{
 			name: "async injector with context",
@@ -651,7 +651,7 @@ func TestGenerateStmts(t *testing.T) {
 			expectAsyncImport:     true,
 			expectErrorHandling:   true,
 			expectContextHandling: true,
-			expectReturn:         true,
+			expectReturn:          true,
 		},
 		{
 			name: "async injector without error return",
@@ -688,7 +688,7 @@ func TestGenerateStmts(t *testing.T) {
 			expectAsyncImport:     true,
 			expectErrorHandling:   false, // No error handling since IsReturnError is false
 			expectContextHandling: false,
-			expectReturn:         true,
+			expectReturn:          true,
 		},
 		{
 			name: "injector with nil return",
@@ -715,7 +715,7 @@ func TestGenerateStmts(t *testing.T) {
 			expectAsyncImport:     false,
 			expectErrorHandling:   false,
 			expectContextHandling: false,
-			expectReturn:         false,
+			expectReturn:          false,
 		},
 	}
 
@@ -724,7 +724,13 @@ func TestGenerateStmts(t *testing.T) {
 			t.Parallel()
 
 			varPool := NewVarPool()
-			stmts, imports := generateStmts(varPool, tt.injector)
+			stmts, imports, err := generateStmts(varPool, "", tt.injector)
+			if err != nil {
+				if !tt.expectErrorHandling {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				return
+			}
 
 			if len(stmts) < tt.expectedStmtsMin {
 				t.Errorf("Expected at least %d statements, got %d", tt.expectedStmtsMin, len(stmts))

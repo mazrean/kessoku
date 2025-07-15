@@ -579,6 +579,23 @@ func (g *Graph) topologicalSortIter() func(yield func(*node) bool) {
 
 // findOptimalPool finds the optimal pool for a job considering async/sync constraints
 func (g *Graph) findOptimalPool(n *node, pools [][]*node, poolProvidedNodes []map[*node]struct{}) int {
+	// For sync-only cases, use a single pool (pool 0) to maintain dependency order
+	if !n.providerSpec.IsAsync {
+		// Check if there are any async providers in the whole graph
+		hasAsyncProviders := false
+		for _, node := range g.nodes {
+			if node.providerSpec != nil && node.providerSpec.IsAsync {
+				hasAsyncProviders = true
+				break
+			}
+		}
+		
+		// If no async providers exist, use pool 0 for all sync providers
+		if !hasAsyncProviders {
+			return 0
+		}
+	}
+
 	emptyPools := make([]int, 0)
 	maxProvidedPools := make([]int, 0)
 	for i, pool := range pools {

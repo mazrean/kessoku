@@ -96,6 +96,10 @@ func (p *InjectorParam) WithChannel() bool {
 	return p.withChannel
 }
 
+func (p *InjectorParam) Type() types.Type {
+	return p.t
+}
+
 type InjectorArgument struct {
 	Param       *InjectorParam
 	Type        types.Type
