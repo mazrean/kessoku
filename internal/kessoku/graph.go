@@ -324,7 +324,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 				}
 
 				srcIndex = provider.returnIndex
-			} else if n2, ok = argNodeMap[key]; !ok {
+			} else if n2, ok = argNodeMap[key]; ok {
 				srcIndex = 0
 			} else {
 				// Auto-detect missing dependency and create an argument for it
@@ -579,6 +579,11 @@ func (g *Graph) topologicalSortIter() func(yield func(*node) bool) {
 
 // findOptimalPool finds the optimal pool for a job considering async/sync constraints
 func (g *Graph) findOptimalPool(n *node, pools [][]*node, poolProvidedNodes []map[*node]struct{}) int {
+	// Skip pool assignment for argument nodes - they don't need pool scheduling
+	if n.providerSpec == nil {
+		return 0
+	}
+	
 	// For sync-only cases, use a single pool (pool 0) to maintain dependency order
 	if !n.providerSpec.IsAsync {
 		// Check if there are any async providers in the whole graph

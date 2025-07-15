@@ -4,11 +4,10 @@ package main
 
 import "github.com/mazrean/kessoku"
 
-func InitializeComplexService() *Service {
+func InitializeComplexService(num int) *Service {
 	config := kessoku.Provide(NewConfig).Fn()()
 	interfaceValue := kessoku.Bind[Interface](kessoku.Provide(NewConcreteImpl)).Fn()()
 	str := kessoku.Value("example value").Fn()()
-	num := kessoku.Provide(NewExampleArg).Fn()()
 	service := kessoku.Provide(NewService).Fn()(config, interfaceValue, str, num)
 	return service
 }
