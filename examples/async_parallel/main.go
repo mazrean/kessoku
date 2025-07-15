@@ -1,17 +1,9 @@
 package main
 
-import (
-	"context"
-	"fmt"
-	"time"
-)
+import "fmt"
 
 func main() {
-	// Create a context with timeout for app initialization
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	app := InitializeApp(ctx)
+	app := InitializeApp()
 
 	fmt.Println("App initialized successfully!")
 	app.Run()
