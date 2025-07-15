@@ -36,14 +36,17 @@ func InitializeComplexApp() *App {
 		close(sessionServiceCh)
 		return nil
 	})
-	config = kessoku.Provide(NewConfig).Fn()()
-	close(configCh)
-	messagingService = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(config)
-	for _, ch := range []<-chan struct{}{userServiceCh, sessionServiceCh} {
-		<-ch
-	}
-	notificationService = kessoku.Async(kessoku.Provide(NewNotificationService)).Fn()(userService, sessionService, messagingService)
-	app = kessoku.Provide(NewComplexApp).Fn()(notificationService)
+	eg.Go(func() error {
+		config = kessoku.Provide(NewConfig).Fn()()
+		close(configCh)
+		messagingService = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(config)
+		for _, ch := range []<-chan struct{}{userServiceCh, sessionServiceCh} {
+			<-ch
+		}
+		notificationService = kessoku.Async(kessoku.Provide(NewNotificationService)).Fn()(userService, sessionService, messagingService)
+		app = kessoku.Provide(NewComplexApp).Fn()(notificationService)
+		return nil
+	})
 	eg.Wait()
 	return app
 }
