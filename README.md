@@ -14,6 +14,8 @@ A dependency injection code generator for Go, similar to [google/wire](https://g
 
 ## Installation
 
+**Recommended: Go Tool**
+
 ```bash
 go get -tool github.com/mazrean/kessoku/cmd/kessoku@latest
 ```
@@ -21,17 +23,22 @@ go get -tool github.com/mazrean/kessoku/cmd/kessoku@latest
 This installs kessoku as a Go tool, making it available via `go tool kessoku`.
 
 <details>
-<summary>Other Installation Options</summary>
+<summary>Direct Install</summary>
 
-### Direct Install
 ```bash
 go install github.com/mazrean/kessoku/cmd/kessoku@latest
 ```
+</details>
 
-### From Releases
+<details>
+<summary>From Releases</summary>
+
 Download the latest binary from the [releases page](https://github.com/mazrean/kessoku/releases).
+</details>
 
-### Via Homebrew
+<details>
+<summary>Via Homebrew</summary>
+
 ```bash
 brew install mazrean/tap/kessoku
 ```
