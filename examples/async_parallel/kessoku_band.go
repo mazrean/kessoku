@@ -3,11 +3,12 @@
 package main
 
 import (
+	"context"
 	"github.com/mazrean/kessoku"
 	"golang.org/x/sync/errgroup"
 )
 
-func InitializeApp() (*App, error) {
+func InitializeApp(ctx context.Context) (*App, error) {
 	var (
 		databaseService       *DatabaseService
 		cacheService          *CacheService
@@ -19,23 +20,35 @@ func InitializeApp() (*App, error) {
 		notificationServiceCh = make(chan struct{})
 		app                   *App
 	)
-	eg := &errgroup.Group{}
+	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
 		var err error
 		databaseService, err = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
 		if err != nil {
 			return err
 		}
-		<-cacheServiceCh
+		select {
+		case <-cacheServiceCh:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		userService = kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
-		<-notificationServiceCh
+		select {
+		case <-notificationServiceCh:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		app = kessoku.Provide(NewApp).Fn()(userService, notificationService)
 		return nil
 	})
 	eg.Go(func() error {
 		cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
 		close(cacheServiceCh)
-		<-messagingServiceCh
+		select {
+		case <-messagingServiceCh:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		notificationService = kessoku.Provide(NewNotificationService).Fn()(messagingService)
 		close(notificationServiceCh)
 		return nil

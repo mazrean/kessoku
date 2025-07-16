@@ -1,9 +1,12 @@
 package main
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 func main() {
-	app, err := InitializeApp()
+	app, err := InitializeApp(context.Background())
 	if err != nil {
 		fmt.Println("Error initializing app:", err)
 		return
