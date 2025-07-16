@@ -628,33 +628,6 @@ var chainReturnErrStmts = []ast.Stmt{
 func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ []ast.Stmt) ([]ast.Stmt, []string) {
 	var imports []string
 
-	// Create proper error return statements for the goroutine
-	var chainReturnErrStmts []ast.Stmt
-	if injector.Return != nil && injector.Return.Return != nil && injector.Return.Return.ASTTypeExpr != nil {
-		chainReturnErrStmts = []ast.Stmt{
-			&ast.DeclStmt{
-				Decl: &ast.GenDecl{
-					Tok: token.VAR,
-					Specs: []ast.Spec{
-						&ast.ValueSpec{
-							Names: []*ast.Ident{ast.NewIdent("zero")},
-							Type:  injector.Return.Return.ASTTypeExpr,
-						},
-					},
-				},
-			},
-			&ast.ReturnStmt{
-				Results: []ast.Expr{ast.NewIdent("zero"), ast.NewIdent("err")},
-			},
-		}
-	} else {
-		chainReturnErrStmts = []ast.Stmt{
-			&ast.ReturnStmt{
-				Results: []ast.Expr{ast.NewIdent("err")},
-			},
-		}
-	}
-
 	// Generate statements for this chain
 	var stmts []ast.Stmt
 	for _, chainStmt := range stmt.Statements {
