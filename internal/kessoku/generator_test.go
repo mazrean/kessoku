@@ -207,7 +207,7 @@ func TestInjectorChainStmt_Stmt(t *testing.T) {
 				}
 			}()
 
-			stmts, imports := tt.chainStmt.Stmt(varPool, injector, []ast.Stmt{})
+			stmts, imports := tt.chainStmt.Stmt(varPool, injector, nil)
 
 			// The method should return exactly one statement (the eg.Go call)
 			if len(stmts) != 1 {
@@ -1136,7 +1136,7 @@ func TestInjectorProviderCallStmt_channelsWait(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := tt.stmt.channelsWait(tt.channels, tt.injector)
+			result := tt.stmt.channelsWait(tt.channels, tt.injector, nil)
 
 			if result == nil {
 				t.Error("Expected statement, got nil")
@@ -1189,7 +1189,7 @@ func TestInjectorProviderCallStmt_buildWaitStatement(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := stmt.buildWaitStatement(tt.hasCtx, channel)
+			result := stmt.buildWaitStatement(tt.hasCtx, channel, nil)
 
 			if result == nil {
 				t.Error("Expected statement, got nil")
