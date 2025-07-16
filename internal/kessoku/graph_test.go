@@ -967,3 +967,226 @@ func TestGraph_BuildStmts(t *testing.T) {
 	}
 }
 
+func TestGraph_Build_ContextInjection(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, _ := createTestTypes()
+
+	tests := []struct {
+		name                    string
+		build                   *BuildDirective
+		expectError             bool
+		expectContextInjection  bool
+		expectedArgsCount       int
+		expectedContextPosition int
+	}{
+		{
+			name: "no async providers - no context injection",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+						IsAsync:       false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{serviceType},
+						Requires:      []types.Type{configType},
+						IsReturnError: false,
+						IsAsync:       false,
+					},
+				},
+			},
+			expectError:            false,
+			expectContextInjection: false,
+			expectedArgsCount:      0,
+		},
+		{
+			name: "async providers - context injection required",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+						IsAsync:       true, // This should trigger context injection
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{serviceType},
+						Requires:      []types.Type{configType},
+						IsReturnError: false,
+						IsAsync:       false,
+					},
+				},
+			},
+			expectError:             false,
+			expectContextInjection:  true,
+			expectedArgsCount:       1,
+			expectedContextPosition: 0,
+		},
+		{
+			name: "mixed async and sync providers - context injection required",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+						IsAsync:       false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{serviceType},
+						Requires:      []types.Type{configType},
+						IsReturnError: false,
+						IsAsync:       true, // This should trigger context injection
+					},
+				},
+			},
+			expectError:             false,
+			expectContextInjection:  true,
+			expectedArgsCount:       1,
+			expectedContextPosition: 0,
+		},
+		{
+			name: "multiple async providers - single context injection",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{configType},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+						IsAsync:       true, // Async
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      []types.Type{serviceType},
+						Requires:      []types.Type{configType},
+						IsReturnError: false,
+						IsAsync:       true, // Also async
+					},
+				},
+			},
+			expectError:             false,
+			expectContextInjection:  true,
+			expectedArgsCount:       1, // Only one context should be injected
+			expectedContextPosition: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			metaData := &MetaData{
+				Package: Package{
+					Name: "main",
+					Path: "main",
+				},
+				Imports: make(map[string]*ast.ImportSpec),
+			}
+
+			graph, err := NewGraph(metaData, tt.build)
+			if err != nil {
+				t.Fatalf("Failed to create graph: %v", err)
+			}
+
+			injector, err := graph.Build(metaData)
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if injector == nil {
+				t.Error("Expected injector but got nil")
+				return
+			}
+
+			// Check arguments count
+			if len(injector.Args) != tt.expectedArgsCount {
+				t.Errorf("Expected %d arguments, got %d", tt.expectedArgsCount, len(injector.Args))
+				return
+			}
+
+			// Check context injection
+			if tt.expectContextInjection {
+				if len(injector.Args) == 0 {
+					t.Error("Expected context injection but no arguments found")
+					return
+				}
+
+				// Check if context.Context is injected at the expected position
+				contextArg := injector.Args[tt.expectedContextPosition]
+				if contextArg == nil {
+					t.Error("Context argument is nil")
+					return
+				}
+
+				// Check that the type is context.Context
+				if contextArg.Type.String() != "context.Context" {
+					t.Errorf("Expected context.Context type, got %s", contextArg.Type.String())
+				}
+
+				// Check that the AST expression is correct
+				if contextArg.ASTTypeExpr == nil {
+					t.Error("Context AST expression is nil")
+					return
+				}
+
+				// Verify it's a selector expression (context.Context)
+				if selectorExpr, ok := contextArg.ASTTypeExpr.(*ast.SelectorExpr); ok {
+					if pkgIdent, ok := selectorExpr.X.(*ast.Ident); ok {
+						if pkgIdent.Name != "context" {
+							t.Errorf("Expected package name 'context', got %s", pkgIdent.Name)
+						}
+					} else {
+						t.Error("Expected package identifier in selector expression")
+					}
+
+					if selectorExpr.Sel.Name != "Context" {
+						t.Errorf("Expected selector name 'Context', got %s", selectorExpr.Sel.Name)
+					}
+				} else {
+					t.Errorf("Expected selector expression for context.Context, got %T", contextArg.ASTTypeExpr)
+				}
+			} else {
+				// Check that no context was injected when not expected
+				for i, arg := range injector.Args {
+					if arg.Type.String() == "context.Context" {
+						t.Errorf("Unexpected context injection at position %d", i)
+					}
+				}
+			}
+		})
+	}
+}
