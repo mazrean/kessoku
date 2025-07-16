@@ -54,100 +54,101 @@ brew install mazrean/tap/kessoku
 
 ## Quick Start
 
-### 1. Create Provider Functions
+Experience Kessoku's **parallel processing power** in 3 simple steps:
+
+### 1. Define Your Services with Async Providers
 
 ```go
-package main
-
-import "github.com/mazrean/kessoku"
-
-type Config struct {
-    DatabaseURL string
-    Port        int
-}
-
-func NewConfig() *Config {
-    return &Config{
-        DatabaseURL: "postgres://localhost/mydb",
-        Port:        8080,
-    }
-}
-
-type Database struct {
-    url string
-}
-
-func NewDatabase(config *Config) (*Database, error) {
-    return &Database{url: config.DatabaseURL}, nil
-}
-
-type UserService struct {
-    db *Database
-}
-
-func NewUserService(db *Database) *UserService {
-    return &UserService{db: db}
-}
-
-type App struct {
-    config  *Config
-    service *UserService
-}
-
-func NewApp(config *Config, service *UserService) *App {
-    return &App{
-        config:  config,
-        service: service,
-    }
-}
-```
-
-### 2. Define Injector Function
-
-Create a file `kessoku.go` with injector declarations:
-
-```go
-package main
-
 //go:generate go tool kessoku $GOFILE
 
-import "github.com/mazrean/kessoku"
+package main
 
-// InitializeApp creates the application with all dependencies.
+import (
+    "context"
+    "time"
+    "github.com/mazrean/kessoku"
+)
+
+// Slow async services that can run in parallel
+func NewDatabaseService() (*DatabaseService, error) {
+    time.Sleep(200 * time.Millisecond) // Simulate slow DB connection
+    return &DatabaseService{}, nil
+}
+
+func NewCacheService() *CacheService {
+    time.Sleep(150 * time.Millisecond) // Simulate slow cache connection
+    return &CacheService{}
+}
+
+// Declare parallel execution with kessoku.Async()
 var _ = kessoku.Inject[*App](
     "InitializeApp",
-    kessoku.Provide(NewConfig),
-    kessoku.Provide(NewDatabase),
-    kessoku.Provide(NewUserService),
-    kessoku.Provide(NewApp),
+    kessoku.Async(kessoku.Provide(NewDatabaseService)), // Runs in parallel
+    kessoku.Async(kessoku.Provide(NewCacheService)),    // Runs in parallel
+    kessoku.Provide(NewApp),                            // Waits for both
 )
 ```
 
-### 3. Generate Dependency Injection Code
+### 2. Generate High-Performance Code
 
 ```bash
-# Using go generate (recommended)
 go generate ./...
-
-# Or run kessoku directly
-go tool kessoku kessoku.go
 ```
 
-This generates `*_band.go` files with the actual dependency injection implementation.
+Kessoku generates **optimized parallel code** with automatic context injection:
 
-### 4. Use the Generated Code
+```go
+// Generated code - context automatically injected for async operations
+func InitializeApp(ctx context.Context) (*App, error) {
+    var (
+        databaseService *DatabaseService
+        cacheService    *CacheService
+    )
+    
+    eg, ctx := errgroup.WithContext(ctx)
+    
+    // Parallel execution - both services start simultaneously
+    eg.Go(func() error {
+        var err error
+        databaseService, err = NewDatabaseService()
+        return err
+    })
+    
+    eg.Go(func() error {
+        cacheService = NewCacheService()
+        return nil
+    })
+    
+    // Wait for all async operations to complete
+    if err := eg.Wait(); err != nil {
+        return nil, err
+    }
+    
+    // Final assembly after all dependencies are ready
+    app := NewApp(databaseService, cacheService)
+    return app, nil
+}
+```
+
+### 3. Use with Context Support
 
 ```go
 func main() {
-    app, err := InitializeApp()
+    // Context for timeout and cancellation
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    
+    // Parallel initialization - much faster than sequential!
+    app, err := InitializeApp(ctx)
     if err != nil {
-        log.Fatal("Failed to initialize app:", err)
+        log.Fatal("Failed to initialize:", err)
     }
     
-    // Use your app
-    fmt.Printf("App running on port %d\n", app.config.Port)
+    app.Run()
 }
 ```
+
+**🚀 Performance Boost**: Sequential execution would take 350ms, but parallel execution takes only ~200ms!
 
 ## Async Provider Support
 
