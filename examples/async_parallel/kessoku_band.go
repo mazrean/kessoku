@@ -7,7 +7,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func InitializeApp() *App {
+func InitializeApp() (*App, error) {
 	var (
 		databaseService       *DatabaseService
 		cacheService          *CacheService
@@ -21,7 +21,10 @@ func InitializeApp() *App {
 	)
 	eg := &errgroup.Group{}
 	eg.Go(func() error {
-		databaseService = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
+		databaseService, err = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
+		if err != nil {
+			return err
+		}
 		<-cacheServiceCh
 		userService = kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
 		<-notificationServiceCh
@@ -41,6 +44,8 @@ func InitializeApp() *App {
 		close(messagingServiceCh)
 		return nil
 	})
-	eg.Wait()
-	return app
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+	return app, nil
 }

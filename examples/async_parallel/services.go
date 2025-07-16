@@ -10,14 +10,14 @@ type DatabaseService struct {
 	connectionString string
 }
 
-func NewDatabaseService() *DatabaseService {
+func NewDatabaseService() (*DatabaseService, error) {
 	// Simulate slow database connection setup
 	fmt.Println("Connecting to database...")
 	time.Sleep(200 * time.Millisecond)
 	fmt.Println("Database connected!")
 	return &DatabaseService{
 		connectionString: "postgres://localhost:5432/mydb",
-	}
+	}, nil
 }
 
 // CacheService simulates a cache service
