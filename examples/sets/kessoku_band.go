@@ -5,46 +5,46 @@ package main
 import "github.com/mazrean/kessoku"
 
 func InitializeAppBasic() (*App, error) {
-	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1, err := kessoku.Provide(NewDatabase).Fn()(v0)
+	config := kessoku.Provide(NewConfig).Fn()()
+	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *App
 		return zero, err
 	}
-	v2 := kessoku.Provide(NewUserService).Fn()(v1)
-	v3 := kessoku.Provide(NewApp).Fn()(v2)
-	return v3, nil
+	userService := kessoku.Provide(NewUserService).Fn()(database)
+	app := kessoku.Provide(NewApp).Fn()(userService)
+	return app, nil
 }
 func InitializeAppWithInlineSet() (*App, error) {
-	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1, err := kessoku.Provide(NewDatabase).Fn()(v0)
+	config := kessoku.Provide(NewConfig).Fn()()
+	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *App
 		return zero, err
 	}
-	v2 := kessoku.Provide(NewUserService).Fn()(v1)
-	v3 := kessoku.Provide(NewApp).Fn()(v2)
-	return v3, nil
+	userService := kessoku.Provide(NewUserService).Fn()(database)
+	app := kessoku.Provide(NewApp).Fn()(userService)
+	return app, nil
 }
 func InitializeAppWithSetVariable() (*App, error) {
-	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1, err := kessoku.Provide(NewDatabase).Fn()(v0)
+	config := kessoku.Provide(NewConfig).Fn()()
+	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *App
 		return zero, err
 	}
-	v2 := kessoku.Provide(NewUserService).Fn()(v1)
-	v3 := kessoku.Provide(NewApp).Fn()(v2)
-	return v3, nil
+	userService := kessoku.Provide(NewUserService).Fn()(database)
+	app := kessoku.Provide(NewApp).Fn()(userService)
+	return app, nil
 }
 func InitializeAppWithNestedSets() (*App, error) {
-	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1, err := kessoku.Provide(NewDatabase).Fn()(v0)
+	config := kessoku.Provide(NewConfig).Fn()()
+	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *App
 		return zero, err
 	}
-	v2 := kessoku.Provide(NewUserService).Fn()(v1)
-	v3 := kessoku.Provide(NewApp).Fn()(v2)
-	return v3, nil
+	userService := kessoku.Provide(NewUserService).Fn()(database)
+	app := kessoku.Provide(NewApp).Fn()(userService)
+	return app, nil
 }

@@ -13,6 +13,11 @@ type provider interface {
 	provide()
 }
 
+type funcProvider[T any] interface {
+	provider
+	Fn() T
+}
+
 // fnProvider wraps a function to be used as a dependency provider.
 // The generic type T should be a function type that returns one or more values,
 // where the returned values become available dependencies.
@@ -41,17 +46,33 @@ func Provide[T any](fn T) fnProvider[T] {
 	return fnProvider[T]{fn: fn}
 }
 
+type asyncProvider[T any, F funcProvider[T]] struct {
+	fn F
+}
+
+func (p asyncProvider[T, F]) provide() {}
+
+func (p asyncProvider[T, F]) Fn() T {
+	return p.fn.Fn()
+}
+
+func Async[T any, F funcProvider[T]](fn F) asyncProvider[T, F] {
+	return asyncProvider[T, F]{fn: fn}
+}
+
 // bindProvider represents a type binding that maps one type to another.
 // S is the source type and T is the target type that the binding maps to.
-type bindProvider[S, T any] fnProvider[T]
+type bindProvider[S, T any, F funcProvider[T]] struct {
+	fn F
+}
 
 // provide implements the provider interface for bindProvider.
-func (p bindProvider[_, _]) provide() {}
+func (p bindProvider[_, _, F]) provide() {}
 
 // Fn returns the wrapped function for the bind provider.
 // This method is used internally by the code generator.
-func (p bindProvider[_, T]) Fn() T {
-	return p.fn
+func (p bindProvider[_, T, _]) Fn() T {
+	return p.fn.Fn()
 }
 
 // Bind creates a type binding that maps type S to type T using the given provider.
@@ -64,8 +85,8 @@ func (p bindProvider[_, T]) Fn() T {
 //
 // This tells kessoku that when a UserRepository is needed, it should use
 // the DatabaseUserRepo implementation provided by NewDatabaseUserRepo.
-func Bind[S, T any](fn fnProvider[T]) bindProvider[S, T] {
-	return bindProvider[S, T](fn)
+func Bind[S, T any, F funcProvider[T]](fn F) bindProvider[S, T, F] {
+	return bindProvider[S, T, F]{fn: fn}
 }
 
 // Value creates a provider for a constant value.
@@ -82,7 +103,6 @@ func Value[T any](v T) fnProvider[func() T] {
 		fn: func() T { return v },
 	}
 }
-
 
 // Inject declares a dependency injection build directive.
 // It generates a function with the specified name that constructs and returns
@@ -103,7 +123,7 @@ func Value[T any](v T) fnProvider[func() T] {
 //		kessoku.Provide(NewApp),
 //	)
 //
-// If NewConfig requires a string parameter that's not provided, 
+// If NewConfig requires a string parameter that's not provided,
 // this generates a function like:
 //
 //	func InitializeApp(arg0 string) (*App, error) {

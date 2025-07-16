@@ -61,7 +61,10 @@ func (p *Parser) ParseFile(filename string) (*MetaData, []*BuildDirective, error
 	}
 
 	metaData := &MetaData{
-		Package: pkg.Name,
+		Package: Package{
+			Name: pkg.Name,
+			Path: pkg.PkgPath,
+		},
 		Imports: make(map[string]*ast.ImportSpec),
 	}
 
@@ -406,7 +409,8 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 				provides = append(provides, providerFnSig.Results().At(i).Type())
 			}
 
-			// Check if this is a bindProvider - it should provide the interface type instead of concrete type
+			// Check if this is a bindProvider or asyncProvider
+			isAsync := false
 			if named, ok := providerType.(*types.Named); ok {
 				typeName := named.Obj().Name()
 				if typeName == "bindProvider" {
@@ -416,6 +420,9 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 						interfaceType := typeArgs.At(0)
 						provides = []types.Type{interfaceType}
 					}
+				} else if typeName == "asyncProvider" {
+					// Mark this provider as async
+					isAsync = true
 				}
 			}
 
@@ -424,6 +431,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 				Requires:      requires,
 				Provides:      provides,
 				IsReturnError: isReturnError,
+				IsAsync:       isAsync,
 				ASTExpr:       arg,
 			})
 

@@ -4,12 +4,16 @@ package kessoku
 import (
 	"go/ast"
 	"go/types"
-	"sync/atomic"
 )
+
+type Package struct {
+	Name string
+	Path string
+}
 
 type MetaData struct {
 	Imports map[string]*ast.ImportSpec // Map from package path to import spec
-	Package string
+	Package Package
 }
 
 // ProviderType represents the type of provider.
@@ -20,13 +24,6 @@ const (
 	ProviderTypeArg      ProviderType = "arg"
 )
 
-// Argument represents a function argument.
-type Argument struct {
-	Type        types.Type
-	ASTTypeExpr ast.Expr
-	Name        string
-}
-
 // ProviderSpec represents a provider specification from annotations.
 type ProviderSpec struct {
 	ASTExpr       ast.Expr
@@ -34,6 +31,7 @@ type ProviderSpec struct {
 	Provides      []types.Type
 	Requires      []types.Type
 	IsReturnError bool
+	IsAsync       bool
 }
 
 type Return struct {
@@ -41,50 +39,71 @@ type Return struct {
 	ASTTypeExpr ast.Expr
 }
 
-// Provider represents a legacy provider function (for backward compatibility).
-type Provider struct {
-	Fn *ast.FuncDecl
-}
-
 // BuildDirective represents a kessoku.Inject call.
 type BuildDirective struct {
 	InjectorName string
-	Arguments    []*Argument
 	Return       *Return
 	Providers    []*ProviderSpec
 }
 
 type InjectorParam struct {
-	name       string
-	ID         uint64
-	refCounter int
+	t           types.Type
+	name        string
+	channelName string
+	refCounter  int
+	withChannel bool
 }
 
-var injectorParamIDCounter uint64
-
-func NewInjectorParam(name string) *InjectorParam {
-	id := atomic.AddUint64(&injectorParamIDCounter, 1) - 1
+func NewInjectorParam(t types.Type) *InjectorParam {
 	return &InjectorParam{
-		ID:   id,
-		name: name,
+		t: t,
 	}
 }
 
-func (p *InjectorParam) Ref() {
+func (p *InjectorParam) Ref(isWait bool) {
 	p.refCounter++
+	p.withChannel = p.withChannel || isWait
 }
 
-func (p *InjectorParam) Name() string {
+func (p *InjectorParam) Name(varPool *VarPool) string {
+	if p.name != "" {
+		return p.name
+	}
+
 	if p.refCounter == 0 {
 		return "_"
 	}
 
+	p.name = varPool.Get(p.t)
+
 	return p.name
 }
 
+func (p *InjectorParam) ChannelName(varPool *VarPool) string {
+	if p.channelName != "" {
+		return p.channelName
+	}
+
+	if p.refCounter == 0 {
+		return "_"
+	}
+	p.channelName = varPool.GetChannel(p.t)
+
+	return p.channelName
+}
+
+func (p *InjectorParam) WithChannel() bool {
+	return p.withChannel
+}
+
+func (p *InjectorParam) Type() types.Type {
+	return p.t
+}
+
 type InjectorArgument struct {
-	Param *InjectorParam
-	Arg   *Argument
+	Param       *InjectorParam
+	Type        types.Type
+	ASTTypeExpr ast.Expr
 }
 
 type InjectorReturn struct {
@@ -92,10 +111,37 @@ type InjectorReturn struct {
 	Return *Return
 }
 
-type InjectorStmt struct {
+type InjectorStmt interface {
+	Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(errExpr ast.Expr) []ast.Stmt) ([]ast.Stmt, []string)
+	HasAsync() bool
+}
+
+type InjectorCallArgument struct {
+	Param  *InjectorParam
+	IsWait bool
+}
+
+type InjectorProviderCallStmt struct {
 	Provider  *ProviderSpec
-	Arguments []*InjectorParam
+	Arguments []*InjectorCallArgument
 	Returns   []*InjectorParam
+}
+
+func (stmt *InjectorProviderCallStmt) HasAsync() bool {
+	return stmt.Provider.IsAsync
+}
+
+type InjectorChainStmt struct {
+	Statements []InjectorStmt
+}
+
+func (stmt *InjectorChainStmt) HasAsync() bool {
+	for _, chainStmt := range stmt.Statements {
+		if chainStmt.HasAsync() {
+			return true
+		}
+	}
+	return false
 }
 
 type Injector struct {
@@ -103,6 +149,7 @@ type Injector struct {
 	Name          string
 	Params        []*InjectorParam
 	Args          []*InjectorArgument
-	Stmts         []*InjectorStmt
+	Vars          []*InjectorParam
+	Stmts         []InjectorStmt
 	IsReturnError bool
 }

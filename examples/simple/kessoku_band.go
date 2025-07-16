@@ -5,7 +5,7 @@ package main
 import "github.com/mazrean/kessoku"
 
 func InitializeService() *Service {
-	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1 := kessoku.Provide(NewService).Fn()(v0)
-	return v1
+	config := kessoku.Provide(NewConfig).Fn()()
+	service := kessoku.Provide(NewService).Fn()(config)
+	return service
 }

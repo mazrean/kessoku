@@ -215,7 +215,6 @@ func TestQueue_Peek(t *testing.T) {
 				q.Push(v)
 			}
 
-
 			originalLen := q.Len()
 			got := q.Peek()
 
@@ -556,4 +555,3 @@ func BenchmarkQueue_Iter(b *testing.B) {
 		// Just iterate
 	}
 }
-

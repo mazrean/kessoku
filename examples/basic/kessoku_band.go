@@ -5,14 +5,14 @@ package main
 import "github.com/mazrean/kessoku"
 
 func InitializeApp() (*App, error) {
-	v0 := kessoku.Provide(NewConfig).Fn()()
-	v1 := kessoku.Provide(NewLogger).Fn()()
-	v2, err := kessoku.Provide(NewDatabase).Fn()(v0)
+	config := kessoku.Provide(NewConfig).Fn()()
+	logger := kessoku.Provide(NewLogger).Fn()()
+	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *App
 		return zero, err
 	}
-	v3 := kessoku.Provide(NewUserService).Fn()(v2, v1)
-	v4 := kessoku.Provide(NewApp).Fn()(v0, v3, v1)
-	return v4, nil
+	userService := kessoku.Provide(NewUserService).Fn()(database, logger)
+	app := kessoku.Provide(NewApp).Fn()(config, userService, logger)
+	return app, nil
 }
