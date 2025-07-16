@@ -6,29 +6,13 @@ A dependency injection code generator for Go, similar to [google/wire](https://g
 
 ## Features
 
-Kessoku extends the concept of compile-time dependency injection with advanced features that set it apart from google/wire:
+**🚀 Parallel Processing** - Execute independent providers concurrently with `kessoku.Async()` while maintaining dependency order and automatic context injection
 
-### 🚀 **Advanced Parallel Processing**
-- **Async Provider Support**: Execute independent providers concurrently using `kessoku.Async()`
-- **Intelligent Dependency Ordering**: Maintains correct execution order while maximizing parallelism
-- **Channel-based Synchronization**: Advanced coordination between dependent async providers
-- **Context Integration**: Automatic `context.Context` injection for timeout and cancellation support
+**⚡ Compile-time Optimization** - Zero runtime overhead with static code generation, full type safety, and optimal performance
 
-### ⚡ **Compile-time Optimization**
-- **Zero Runtime Overhead**: All dependency resolution happens at compile time
-- **Static Code Generation**: Generates optimized Go code with no reflection
-- **Type Safety**: Full compile-time type checking and validation
-- **Performance**: Minimal memory allocations and optimal execution paths
-
-### 🔧 **Enhanced Developer Experience**
-- **Automatic Context Injection**: No manual context passing for async operations
-- **Comprehensive Error Handling**: Proper error propagation across async boundaries
-- **Go Generate Integration**: Seamless workflow with `go generate`
-- **Cycle Detection**: Prevents circular dependencies at compile time
+**🔧 Enhanced Developer Experience** - Automatic error handling, cycle detection, and seamless Go generate integration
 
 ## Installation
-
-### Recommended: Go Tool
 
 ```bash
 go get -tool github.com/mazrean/kessoku/cmd/kessoku@latest
@@ -36,21 +20,22 @@ go get -tool github.com/mazrean/kessoku/cmd/kessoku@latest
 
 This installs kessoku as a Go tool, making it available via `go tool kessoku`.
 
-### Alternative: Direct Install
+<details>
+<summary>Other Installation Options</summary>
 
+### Direct Install
 ```bash
 go install github.com/mazrean/kessoku/cmd/kessoku@latest
 ```
 
 ### From Releases
-
 Download the latest binary from the [releases page](https://github.com/mazrean/kessoku/releases).
 
 ### Via Homebrew
-
 ```bash
 brew install mazrean/tap/kessoku
 ```
+</details>
 
 ## Quick Start
 
@@ -256,8 +241,6 @@ For detailed API documentation, see the [Go Reference](https://pkg.go.dev/github
 - **`kessoku.Bind[I](provider)`** - Binds an interface to its implementation
 - **`kessoku.Value(val)`** - Provides a constant value
 - **`kessoku.Arg[T](name)`** - Declares a runtime argument
-
-For complete documentation, examples, and detailed function signatures, visit the [Go Reference](https://pkg.go.dev/github.com/mazrean/kessoku).
 
 ## Examples
 
