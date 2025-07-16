@@ -248,6 +248,9 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 	fnProviderMap := make(map[string]*fnProvider)
 	for _, provider := range build.Providers {
 		for i, t := range provider.Provides {
+			if t == nil {
+				return nil, fmt.Errorf("provider has nil type at index %d", i)
+			}
 			key := t.String()
 
 			if _, ok := fnProviderMap[key]; ok {
@@ -261,6 +264,9 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 		}
 	}
 
+	if build.Return.Type == nil {
+		return nil, fmt.Errorf("return type is nil")
+	}
 	returnTypeKey := build.Return.Type.String()
 
 	returnProvider, ok := fnProviderMap[returnTypeKey]
@@ -306,6 +312,9 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 		}
 
 		for i, t := range n1.providerSpec.Requires {
+			if t == nil {
+				return nil, fmt.Errorf("provider has nil required type at index %d", i)
+			}
 			key := t.String()
 			var (
 				n2       *node
