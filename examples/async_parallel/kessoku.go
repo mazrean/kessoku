@@ -1,20 +1,16 @@
-//go:generate go tool kessoku $GOFILE
-
 package main
+
+//go:generate go tool kessoku $GOFILE
 
 import "github.com/mazrean/kessoku"
 
-// Declare async providers for services that can be initialized in parallel
+// Demonstrate parallel execution with kessoku.Async()
+// Independent services run in parallel: 200ms + 150ms + 100ms = 200ms (max)
+// Sequential would be: 200ms + 150ms + 100ms = 450ms (sum)
 var _ = kessoku.Inject[*App](
 	"InitializeApp",
-	// These three services can be initialized in parallel since they have no dependencies
-	kessoku.Async(kessoku.Provide(NewDatabaseService)),
-	kessoku.Async(kessoku.Provide(NewCacheService)),
-	kessoku.Async(kessoku.Provide(NewMessagingService)),
-	// UserService depends on database and cache, so it runs after the first group
-	kessoku.Provide(NewUserService),
-	// NotificationService depends on messaging, so it runs after the first group
-	kessoku.Provide(NewNotificationService),
-	// App depends on both services, so it runs last
-	kessoku.Provide(NewApp),
+	kessoku.Async(kessoku.Provide(NewDatabaseService)), // 200ms - runs in parallel
+	kessoku.Async(kessoku.Provide(NewCacheService)),    // 150ms - runs in parallel
+	kessoku.Async(kessoku.Provide(NewMessagingService)), // 100ms - runs in parallel
+	kessoku.Provide(NewApp),                             // Waits for all async providers
 )

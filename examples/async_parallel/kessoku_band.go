@@ -10,15 +10,12 @@ import (
 
 func InitializeApp(ctx context.Context) (*App, error) {
 	var (
-		databaseService       *DatabaseService
-		cacheService          *CacheService
-		cacheServiceCh        = make(chan struct{})
-		messagingService      *MessagingService
-		messagingServiceCh    = make(chan struct{})
-		userService           *UserService
-		notificationService   *NotificationService
-		notificationServiceCh = make(chan struct{})
-		app                   *App
+		databaseService    *DatabaseService
+		cacheService       *CacheService
+		cacheServiceCh     = make(chan struct{})
+		messagingService   *MessagingService
+		messagingServiceCh = make(chan struct{})
+		app                *App
 	)
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
@@ -27,30 +24,19 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		if err != nil {
 			return err
 		}
-		select {
-		case <-cacheServiceCh:
-		case <-ctx.Done():
-			return ctx.Err()
+		for _, ch := range []<-chan struct{}{cacheServiceCh, messagingServiceCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
-		userService = kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
-		select {
-		case <-notificationServiceCh:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		app = kessoku.Provide(NewApp).Fn()(userService, notificationService)
+		app = kessoku.Provide(NewApp).Fn()(databaseService, cacheService, messagingService)
 		return nil
 	})
 	eg.Go(func() error {
 		cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
 		close(cacheServiceCh)
-		select {
-		case <-messagingServiceCh:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		notificationService = kessoku.Provide(NewNotificationService).Fn()(messagingService)
-		close(notificationServiceCh)
 		return nil
 	})
 	eg.Go(func() error {
