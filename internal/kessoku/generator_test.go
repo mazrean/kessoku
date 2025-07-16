@@ -1206,9 +1206,9 @@ func TestInjectorProviderCallStmt_buildWaitStatement(t *testing.T) {
 					t.Errorf("Expected ExprStmt, got %T", result)
 				}
 			} else {
-				// Should be a select statement
-				if _, ok := result.(*ast.SelectStmt); !ok {
-					t.Errorf("Expected SelectStmt for context handling, got %T", result)
+				// Should be a simple expression statement when returnErrStmts is nil
+				if _, ok := result.(*ast.ExprStmt); !ok {
+					t.Errorf("Expected ExprStmt for context handling without error callback, got %T", result)
 				}
 			}
 		})
@@ -1312,6 +1312,7 @@ func TestGenerateVariableSpecs(t *testing.T) {
 			name: "no parameters",
 			injector: &Injector{
 				Params: []*InjectorParam{},
+				Vars:   []*InjectorParam{},
 			},
 			expectedSpecs:   0,
 			expectedImports: 0,
@@ -1327,6 +1328,13 @@ func TestGenerateVariableSpecs(t *testing.T) {
 						return p
 					}(),
 				},
+				Vars: []*InjectorParam{
+					func() *InjectorParam {
+						p := NewInjectorParam(configType)
+						p.Ref(false) // Reference so it gets a name
+						return p
+					}(),
+				},
 			},
 			expectedSpecs:   1,
 			expectedImports: 0,
@@ -1336,6 +1344,13 @@ func TestGenerateVariableSpecs(t *testing.T) {
 			name: "single parameter with channel",
 			injector: &Injector{
 				Params: []*InjectorParam{
+					func() *InjectorParam {
+						p := NewInjectorParam(serviceType)
+						p.Ref(true) // Reference with channel
+						return p
+					}(),
+				},
+				Vars: []*InjectorParam{
 					func() *InjectorParam {
 						p := NewInjectorParam(serviceType)
 						p.Ref(true) // Reference with channel
@@ -1363,6 +1378,19 @@ func TestGenerateVariableSpecs(t *testing.T) {
 					}(),
 					NewInjectorParam(intType), // Unreferenced (should be skipped)
 				},
+				Vars: []*InjectorParam{
+					func() *InjectorParam {
+						p := NewInjectorParam(configType)
+						p.Ref(false) // No channel
+						return p
+					}(),
+					func() *InjectorParam {
+						p := NewInjectorParam(serviceType)
+						p.Ref(true) // With channel
+						return p
+					}(),
+					NewInjectorParam(intType), // Unreferenced (should be skipped)
+				},
 			},
 			expectedSpecs:   3, // config + service + serviceChannel
 			expectedImports: 0,
@@ -1372,6 +1400,11 @@ func TestGenerateVariableSpecs(t *testing.T) {
 			name: "all unreferenced parameters",
 			injector: &Injector{
 				Params: []*InjectorParam{
+					NewInjectorParam(configType),
+					NewInjectorParam(serviceType),
+					NewInjectorParam(intType),
+				},
+				Vars: []*InjectorParam{
 					NewInjectorParam(configType),
 					NewInjectorParam(serviceType),
 					NewInjectorParam(intType),
