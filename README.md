@@ -4,16 +4,37 @@ A dependency injection code generator for Go, similar to [google/wire](https://g
 
 ## Features
 
-- ✅ **Compile-time dependency injection** - No runtime reflection
-- ✅ **Automatic dependency resolution** - Topological sorting of dependencies  
-- ✅ **Error handling** - Proper error propagation in generated code
-- ✅ **Cycle detection** - Prevents circular dependencies
-- ✅ **Go generate integration** - Works seamlessly with `go generate`
-- ✅ **Cross-platform support** (Linux, Windows, macOS)
+Kessoku extends the concept of compile-time dependency injection with advanced features that set it apart from google/wire:
+
+### 🚀 **Advanced Parallel Processing**
+- **Async Provider Support**: Execute independent providers concurrently using `kessoku.Async()`
+- **Intelligent Dependency Ordering**: Maintains correct execution order while maximizing parallelism
+- **Channel-based Synchronization**: Advanced coordination between dependent async providers
+- **Context Integration**: Automatic `context.Context` injection for timeout and cancellation support
+
+### ⚡ **Compile-time Optimization**
+- **Zero Runtime Overhead**: All dependency resolution happens at compile time
+- **Static Code Generation**: Generates optimized Go code with no reflection
+- **Type Safety**: Full compile-time type checking and validation
+- **Performance**: Minimal memory allocations and optimal execution paths
+
+### 🔧 **Enhanced Developer Experience**
+- **Automatic Context Injection**: No manual context passing for async operations
+- **Comprehensive Error Handling**: Proper error propagation across async boundaries
+- **Go Generate Integration**: Seamless workflow with `go generate`
+- **Cycle Detection**: Prevents circular dependencies at compile time
 
 ## Installation
 
-### From Source
+### Recommended: Go Tool
+
+```bash
+go get -tool github.com/mazrean/kessoku/cmd/kessoku@latest
+```
+
+This installs kessoku as a Go tool, making it available via `go tool kessoku`.
+
+### Alternative: Direct Install
 
 ```bash
 go install github.com/mazrean/kessoku/cmd/kessoku@latest
@@ -126,6 +147,103 @@ func main() {
 }
 ```
 
+## Async Provider Support
+
+Kessoku's key differentiator is its support for async providers that execute in parallel while maintaining dependency order:
+
+### Async Provider Example
+
+```go
+// Async providers for slow operations
+func NewDatabaseService() (*DatabaseService, error) {
+    // Simulate slow database connection
+    time.Sleep(200 * time.Millisecond)
+    return &DatabaseService{}, nil
+}
+
+func NewCacheService() *CacheService {
+    // Simulate slow cache connection
+    time.Sleep(150 * time.Millisecond) 
+    return &CacheService{}
+}
+
+func NewMessagingService() *MessagingService {
+    // Simulate slow messaging setup
+    time.Sleep(180 * time.Millisecond)
+    return &MessagingService{}
+}
+```
+
+### Async Injector Declaration
+
+```go
+//go:generate go tool kessoku $GOFILE
+
+import "github.com/mazrean/kessoku"
+
+// Async providers execute in parallel
+var _ = kessoku.Inject[*App](
+    "InitializeApp",
+    kessoku.Async(kessoku.Provide(NewDatabaseService)),  // Parallel execution
+    kessoku.Async(kessoku.Provide(NewCacheService)),     // Parallel execution
+    kessoku.Async(kessoku.Provide(NewMessagingService)), // Parallel execution
+    kessoku.Provide(NewUserService),                     // Depends on database/cache
+    kessoku.Provide(NewApp),                             // Final assembly
+)
+```
+
+### Generated Code with Context Injection
+
+```go
+// Context automatically injected for async operations
+func InitializeApp(ctx context.Context) (*App, error) {
+    var (
+        databaseService   *DatabaseService
+        cacheService      *CacheService
+        messagingService  *MessagingService
+        // ... other variables
+    )
+    
+    eg, ctx := errgroup.WithContext(ctx)
+    
+    // Parallel execution with context cancellation
+    eg.Go(func() error {
+        var err error
+        databaseService, err = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
+        return err
+    })
+    
+    eg.Go(func() error {
+        cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
+        return nil
+    })
+    
+    // Wait for completion with error handling
+    if err := eg.Wait(); err != nil {
+        return nil, err
+    }
+    
+    return app, nil
+}
+```
+
+### Usage with Context
+
+```go
+func main() {
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    
+    // Context passed automatically to async providers
+    app, err := InitializeApp(ctx)
+    if err != nil {
+        log.Fatal("Failed to initialize app:", err)
+    }
+    
+    app.Run()
+}
+```
+
 ## CLI Usage
 
 ```bash
@@ -172,6 +290,21 @@ kessoku.Provide(NewConfig)     // Provides *Config
 kessoku.Provide(NewDatabase)   // Provides *Database, error
 ```
 
+### kessoku.Async
+
+Enables parallel execution of independent providers:
+
+```go
+kessoku.Async(kessoku.Provide(NewDatabaseService))  // Executes in parallel
+kessoku.Async(kessoku.Provide(NewCacheService))     // Executes in parallel
+```
+
+**Key Features:**
+- Executes independent providers concurrently
+- Maintains dependency ordering automatically
+- Automatic context injection for cancellation/timeout
+- Error handling with proper cleanup
+
 ### kessoku.Bind
 
 Binds an interface to its implementation:
@@ -210,53 +343,17 @@ var _ = kessoku.Inject[*App](
 
 ## Examples
 
-See the [examples/](./examples/) directory for complete working examples.
+See the [examples/](./examples/) directory for complete working examples:
+
+- **[basic/](./examples/basic/)** - Simple synchronous dependency injection
+- **[async_parallel/](./examples/async_parallel/)** - Parallel execution of independent async providers
+- **[complex_async/](./examples/complex_async/)** - Complex async dependency chains with coordination
+- **[sets/](./examples/sets/)** - Using value sets for configuration
+- **[cross_package/](./examples/cross_package/)** - Cross-package dependency injection
 
 ## Development
 
-### Prerequisites
-
-- Go 1.24 or later
-- golangci-lint (for linting)
-
-### Building
-
-```bash
-# Build the binary
-go build -o bin/kessoku ./cmd/kessoku
-
-# Run directly
-go run ./cmd/kessoku ./examples/basic/kessoku.go
-```
-
-### Testing
-
-```bash
-# Run tests
-go test -v ./...
-
-# Format code
-go fmt ./...
-
-# Run Go analyzer linter
-go tool tools lint ./...
-
-# Test code generation
-go generate ./examples/...
-```
-
-### Releasing
-
-This project uses GoReleaser for automated releases:
-
-```bash
-# Create a snapshot release (local testing)
-go tool goreleaser release --snapshot --clean
-
-# Create a full release (requires git tag)
-git tag v1.0.0
-go tool goreleaser release --clean
-```
+For development guidelines, building, testing, and contributing instructions, see [DEVELOPMENT.md](./DEVELOPMENT.md).
 
 ## License
 

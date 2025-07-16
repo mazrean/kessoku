@@ -4,7 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Kessoku is a dependency injection CLI tool and library for Go, similar to google/wire. It generates Go code for dependency injection based on provider functions and injector declarations. The tool performs compile-time dependency injection through code generation, eliminating runtime reflection overhead.
+Kessoku is a dependency injection CLI tool and library for Go, similar to google/wire but with advanced async provider support. It generates Go code for dependency injection based on provider functions and injector declarations. The tool performs compile-time dependency injection through code generation, eliminating runtime reflection overhead.
+
+### Key Differentiators from google/wire
+
+- **Async Provider Support**: Parallel execution of independent providers using `kessoku.Async()`
+- **Context Injection**: Automatic `context.Context` injection for async operations
+- **Channel Synchronization**: Advanced coordination between dependent async providers
+- **Error Handling**: Comprehensive error propagation across async boundaries
+- **Performance**: Optimized code generation for minimal memory allocations
 
 ## Common Commands
 
@@ -66,25 +74,34 @@ go tool goreleaser release --clean
 
 ### Code Organization
 - `cmd/kessoku/main.go`: Entry point that calls `config.Run()`
-- `annotation.go`: Public API (Inject, Provide, Bind, Value, Arg functions) - **Public package root**
+- `annotation.go`: Public API (Inject, Provide, Bind, Value, Arg, Async functions) - **Public package root**
 - `internal/config/config.go`: CLI configuration and kessoku generation orchestration
 - `internal/kessoku/`: Dependency injection implementation
   - `parser.go`: AST parsing for kessoku.Inject calls and provider functions
-  - `graph.go`: Dependency graph construction and cycle detection
-  - `generator.go`: Code generation for injector functions
+  - `graph.go`: Dependency graph construction, cycle detection, and async handling
+  - `generator.go`: Code generation for injector functions with async support
   - `processor.go`: File processing and orchestration
   - `provider.go`: Core data structures for providers and injectors
   - `const.go`: Package constants
 - `internal/pkg/collection/`: Utility data structures
   - `queue.go`: Queue implementation for graph traversal
+- `internal/pkg/strings/`: String utility functions
+  - `var_name.go`: Variable naming utilities for generated code
 - `tools/main.go`: Custom multi-checker with comprehensive Go analyzers
 - `examples/`: Example applications demonstrating usage
+  - `async_parallel/`: Parallel execution of independent async providers
+  - `complex_async/`: Complex async dependency chains with coordination
+  - `basic/`: Simple synchronous dependency injection
+  - `sets/`: Using value sets for configuration
+  - `cross_package/`: Cross-package dependency injection
 
 ### Key Dependencies
 - `github.com/alecthomas/kong`: CLI argument parsing
 - Standard library `log/slog`: Structured logging
 - Standard library `go/*`: AST parsing and type checking
 - `golang.org/x/tools/go/packages`: Package loading and type information
+- `golang.org/x/sync/errgroup`: Async provider coordination (generated code)
+- Standard library `context`: Context handling for async operations (generated code)
 
 ### Build Configuration
 - GoReleaser for cross-platform releases (Linux, Windows, macOS)
@@ -101,19 +118,32 @@ The tools module provides a comprehensive linting setup combining:
 
 ### Dependency Injection System
 
-Kessoku generates dependency injection code similar to google/wire:
+Kessoku generates dependency injection code similar to google/wire but with advanced async provider support:
 
 #### Provider Functions
 Create provider functions that return dependencies:
 ```go
-// NewDatabase creates a database connection.
+// Synchronous provider
+func NewConfig() *Config {
+    return &Config{Port: 8080}
+}
+
+// Async provider for slow operations
 func NewDatabase(config *Config) (*Database, error) {
-    // implementation
+    // Simulate slow database connection
+    time.Sleep(200 * time.Millisecond)
+    return &Database{URL: config.DatabaseURL}, nil
+}
+
+// Async provider without error
+func NewCacheService() *CacheService {
+    time.Sleep(150 * time.Millisecond)
+    return &CacheService{}
 }
 ```
 
 #### Injector Declarations
-Use kessoku.Inject to declare dependencies:
+Use kessoku.Inject to declare dependencies with async support:
 ```go
 package main
 
@@ -121,17 +151,36 @@ package main
 
 import "github.com/mazrean/kessoku"
 
+// Async providers execute in parallel
 var _ = kessoku.Inject[*App](
     "InitializeApp",
-    kessoku.Provide(NewConfig),
-    kessoku.Provide(NewDatabase),
-    kessoku.Provide(NewUserService),
-    kessoku.Provide(NewApp),
+    kessoku.Provide(NewConfig),                         // Synchronous
+    kessoku.Async(kessoku.Provide(NewDatabase)),        // Async parallel
+    kessoku.Async(kessoku.Provide(NewCacheService)),    // Async parallel
+    kessoku.Provide(NewUserService),                    // Depends on database/cache
+    kessoku.Provide(NewApp),                            // Final assembly
 )
 ```
 
+#### Generated Code Features
+- **Context Injection**: Automatic `context.Context` parameter when async providers exist
+- **Parallel Execution**: Independent async providers run concurrently
+- **Channel Synchronization**: Dependent providers wait for async completion
+- **Error Handling**: Proper error propagation with cleanup
+- **Performance**: Optimized execution paths with minimal overhead
+
 #### Code Generation
 Run `go generate` or `go tool kessoku` to generate `*_band.go` files with dependency injection implementations.
+
+Generated async injector signature:
+```go
+func InitializeApp(ctx context.Context) (*App, error)
+```
+
+Generated sync injector signature:
+```go
+func InitializeApp() (*App, error)
+```
 
 ## Development Guidelines
 
