@@ -1,5 +1,7 @@
 # Kessoku
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/mazrean/kessoku.svg)](https://pkg.go.dev/github.com/mazrean/kessoku)
+
 A dependency injection code generator for Go, similar to [google/wire](https://github.com/google/wire). Kessoku generates Go code for compile-time dependency injection, eliminating runtime reflection overhead.
 
 ## Features
@@ -267,79 +269,18 @@ go tool kessoku --version
 
 ## API Reference
 
-### kessoku.Inject
+For detailed API documentation, see the [Go Reference](https://pkg.go.dev/github.com/mazrean/kessoku).
 
-Declares an injector function with its dependencies:
+### Quick Reference
 
-```go
-var _ = kessoku.Inject[*App](
-    "InitializeApp",       // Function name to generate
-    kessoku.Provide(NewConfig),    // Provider functions
-    kessoku.Provide(NewDatabase),
-    kessoku.Provide(NewService),
-    kessoku.Provide(NewApp),
-)
-```
+- **`kessoku.Inject[T](name, ...providers)`** - Declares an injector function
+- **`kessoku.Provide(fn)`** - Wraps a provider function for dependency injection
+- **`kessoku.Async(provider)`** - Enables parallel execution of independent providers
+- **`kessoku.Bind[I](provider)`** - Binds an interface to its implementation
+- **`kessoku.Value(val)`** - Provides a constant value
+- **`kessoku.Arg[T](name)`** - Declares a runtime argument
 
-### kessoku.Provide
-
-Wraps a provider function for dependency injection:
-
-```go
-kessoku.Provide(NewConfig)     // Provides *Config
-kessoku.Provide(NewDatabase)   // Provides *Database, error
-```
-
-### kessoku.Async
-
-Enables parallel execution of independent providers:
-
-```go
-kessoku.Async(kessoku.Provide(NewDatabaseService))  // Executes in parallel
-kessoku.Async(kessoku.Provide(NewCacheService))     // Executes in parallel
-```
-
-**Key Features:**
-- Executes independent providers concurrently
-- Maintains dependency ordering automatically
-- Automatic context injection for cancellation/timeout
-- Error handling with proper cleanup
-
-### kessoku.Bind
-
-Binds an interface to its implementation:
-
-```go
-var _ = kessoku.Inject[*App](
-    "InitializeApp",
-    kessoku.Bind[UserRepository](kessoku.Provide(NewUserRepositoryImpl)),
-    kessoku.Provide(NewApp),
-)
-```
-
-### kessoku.Value
-
-Provides a constant value:
-
-```go
-var _ = kessoku.Inject[*App](
-    "InitializeApp",
-    kessoku.Value("postgres://localhost/mydb"),  // Provides string
-    kessoku.Provide(NewApp),
-)
-```
-
-### kessoku.Arg
-
-Declares a runtime argument to be passed to the injector:
-
-```go
-var _ = kessoku.Inject[*App](
-    "InitializeApp",
-    kessoku.Arg[*Config]("config"),  // Runtime argument
-    kessoku.Provide(NewApp),
-)
-```
+For complete documentation, examples, and detailed function signatures, visit the [Go Reference](https://pkg.go.dev/github.com/mazrean/kessoku).
 
 ## Examples
 
