@@ -9,7 +9,6 @@ var _ = kessoku.Inject[*App](
 	"InitializeApp",
 	kessoku.Provide(NewConfig),
 	kessoku.Provide(NewDatabase),
-	kessoku.Provide(NewLogger),
 	kessoku.Provide(NewUserService),
 	kessoku.Provide(NewApp),
 )

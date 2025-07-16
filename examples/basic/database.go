@@ -1,33 +1,45 @@
 package main
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
+	"log"
 )
 
-// Database represents a database connection.
+// Database represents a simple data store.
 type Database struct {
-	conn *sql.DB
+	config *Config
+	users  map[int]*User
 }
 
 // NewDatabase creates a new database connection.
-// wire: provider
 func NewDatabase(config *Config) (*Database, error) {
-	conn, err := sql.Open("sqlite3", config.DatabaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+	if config.Debug {
+		log.Println("Creating database connection")
+	}
+	
+	// Initialize with some sample data
+	users := map[int]*User{
+		1: {ID: 1, Name: "Alice", Email: "alice@example.com"},
+		2: {ID: 2, Name: "Bob", Email: "bob@example.com"},
 	}
 
-	return &Database{conn: conn}, nil
+	return &Database{
+		config: config,
+		users:  users,
+	}, nil
 }
 
-// Close closes the database connection.
-func (db *Database) Close() error {
-	return db.conn.Close()
+// GetUser retrieves a user by ID.
+func (db *Database) GetUser(id int) (*User, error) {
+	if db.config.Debug {
+		log.Printf("Querying user with ID: %d", id)
+	}
+	
+	user, exists := db.users[id]
+	if !exists {
+		return nil, fmt.Errorf("user with ID %d not found", id)
+	}
+	
+	return user, nil
 }
 
-// Query executes a query.
-func (db *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
-	return db.conn.QueryContext(context.Background(), query, args...)
-}

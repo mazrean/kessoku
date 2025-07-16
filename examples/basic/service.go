@@ -2,59 +2,53 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
+	"log"
 )
 
 // UserService provides user-related operations.
 type UserService struct {
 	db     *Database
-	logger *slog.Logger
+	config *Config
 }
 
 // NewUserService creates a new user service.
-// wire: provider
-func NewUserService(db *Database, logger *slog.Logger) *UserService {
+func NewUserService(db *Database, config *Config) *UserService {
+	if config.Debug {
+		log.Println("Creating user service")
+	}
+	
 	return &UserService{
 		db:     db,
-		logger: logger,
+		config: config,
 	}
 }
 
 // GetUser retrieves a user by ID.
 func (s *UserService) GetUser(id int) (*User, error) {
-	s.logger.Info("Getting user", "id", id)
-
-	rows, err := s.db.Query("SELECT id, name, email FROM users WHERE id = ?", id)
+	if s.config.Debug {
+		log.Printf("UserService: Getting user %d", id)
+	}
+	
+	user, err := s.db.GetUser(id)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query user: %w", err)
+		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			s.logger.Error("Failed to close rows", "error", closeErr)
+	
+	return user, nil
+}
+
+// ListUsers returns all users.
+func (s *UserService) ListUsers() []*User {
+	if s.config.Debug {
+		log.Println("UserService: Listing all users")
+	}
+	
+	users := []*User{}
+	for i := 1; i <= 10; i++ {
+		if user, err := s.db.GetUser(i); err == nil {
+			users = append(users, user)
 		}
-	}()
-
-	if !rows.Next() {
-		return nil, fmt.Errorf("user not found")
 	}
-
-	var user User
-	if err := rows.Scan(&user.ID, &user.Name, &user.Email); err != nil {
-		return nil, fmt.Errorf("failed to scan user: %w", err)
-	}
-
-	return &user, nil
-}
-
-// User represents a user entity.
-type User struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-	ID    int    `json:"id"`
-}
-
-// NewLogger creates a new logger instance.
-// wire: provider
-func NewLogger() *slog.Logger {
-	return slog.Default()
+	
+	return users
 }

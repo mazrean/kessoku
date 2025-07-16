@@ -1,12 +1,16 @@
 package main
 
+import (
+	"fmt"
+	"log"
+)
+
 func main() {
-	/*app, err := InitializeApp()
+	app, err := InitializeApp()
 	if err != nil {
 		log.Fatal("Failed to initialize app:", err)
 	}
 
-	if err := app.Run(); err != nil {
-		log.Fatal("Failed to run app:", err)
-	}*/
+	fmt.Println("App initialized successfully!")
+	app.Run()
 }

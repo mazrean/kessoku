@@ -6,13 +6,12 @@ import "github.com/mazrean/kessoku"
 
 func InitializeApp() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()
-	logger := kessoku.Provide(NewLogger).Fn()()
 	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *App
 		return zero, err
 	}
-	userService := kessoku.Provide(NewUserService).Fn()(database, logger)
-	app := kessoku.Provide(NewApp).Fn()(config, userService, logger)
+	userService := kessoku.Provide(NewUserService).Fn()(database, config)
+	app := kessoku.Provide(NewApp).Fn()(config, userService)
 	return app, nil
 }

@@ -2,56 +2,45 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
-	"net/http"
-	"strconv"
+	"log"
 )
 
 // App represents the main application.
 type App struct {
 	config      *Config
 	userService *UserService
-	logger      *slog.Logger
 }
 
 // NewApp creates a new application instance.
-// wire: provider
-func NewApp(config *Config, userService *UserService, logger *slog.Logger) *App {
+func NewApp(config *Config, userService *UserService) *App {
+	if config.Debug {
+		log.Println("Creating application")
+	}
+	
 	return &App{
 		config:      config,
 		userService: userService,
-		logger:      logger,
 	}
 }
 
 // Run starts the application.
-func (a *App) Run() error {
-	a.logger.Info("Starting application", "port", a.config.Port)
-
-	http.HandleFunc("/users/", a.handleGetUser)
-
-	addr := fmt.Sprintf(":%d", a.config.Port)
-	return http.ListenAndServe(addr, nil)
-}
-
-// handleGetUser handles GET /users/{id} requests.
-func (a *App) handleGetUser(w http.ResponseWriter, r *http.Request) {
-	idStr := r.URL.Path[len("/users/"):]
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		http.Error(w, "Invalid user ID", http.StatusBadRequest)
-		return
+func (a *App) Run() {
+	fmt.Printf("Starting %s\n", a.config.AppName)
+	
+	// Demonstrate the app functionality
+	users := a.userService.ListUsers()
+	fmt.Printf("Found %d users:\n", len(users))
+	
+	for _, user := range users {
+		fmt.Printf("  - %s (%s)\n", user.Name, user.Email)
 	}
-
-	user, err := a.userService.GetUser(id)
-	if err != nil {
-		a.logger.Error("Failed to get user", "error", err)
-		http.Error(w, "User not found", http.StatusNotFound)
-		return
+	
+	// Get a specific user
+	if user, err := a.userService.GetUser(1); err == nil {
+		fmt.Printf("\nUser 1 details: %+v\n", user)
+	} else {
+		fmt.Printf("\nError getting user 1: %v\n", err)
 	}
-
-	if _, err := fmt.Fprintf(w, "User: %+v\n", user); err != nil {
-		http.Error(w, "Failed to write response", http.StatusInternalServerError)
-		return
-	}
+	
+	fmt.Println("\nApplication completed successfully!")
 }
