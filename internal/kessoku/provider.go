@@ -112,7 +112,7 @@ type InjectorReturn struct {
 }
 
 type InjectorStmt interface {
-	Stmt(varPool *VarPool, injector *Injector, returnErrStmts []ast.Stmt) ([]ast.Stmt, []string)
+	Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(errExpr ast.Expr) []ast.Stmt) ([]ast.Stmt, []string)
 	HasAsync() bool
 }
 
@@ -149,6 +149,7 @@ type Injector struct {
 	Name          string
 	Params        []*InjectorParam
 	Args          []*InjectorArgument
+	Vars          []*InjectorParam
 	Stmts         []InjectorStmt
 	IsReturnError bool
 }

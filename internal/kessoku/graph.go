@@ -192,7 +192,7 @@ func CreateInjector(metaData *MetaData, build *BuildDirective) (*Injector, error
 		return nil, fmt.Errorf("create graph: %w", err)
 	}
 
-	injector, err := graph.Build()
+	injector, err := graph.Build(metaData)
 	if err != nil {
 		return nil, fmt.Errorf("build injector: %w", err)
 	}
@@ -361,6 +361,62 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 	return graph, nil
 }
 
+// hasAsyncProviders checks if any providers in the graph are async
+func (g *Graph) hasAsyncProviders() bool {
+	for _, n := range g.nodes {
+		if n.providerSpec != nil && n.providerSpec.IsAsync {
+			return true
+		}
+	}
+	return false
+}
+
+// injectContextArg injects context.Context as the first argument when async providers exist
+func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData) error {
+	if !g.hasAsyncProviders() {
+		return nil
+	}
+
+	// Create context.Context type
+	contextPkg := types.NewPackage("context", "context")
+	contextObj := types.NewTypeName(0, contextPkg, "Context", nil)
+	contextType := types.NewNamed(contextObj, types.NewInterfaceType([]*types.Func{}, nil), nil)
+
+	// Create AST expression for context.Context
+	contextExpr := &ast.SelectorExpr{
+		X:   ast.NewIdent("context"),
+		Sel: ast.NewIdent("Context"),
+	}
+
+	// Add context import if not already present
+	if _, exists := metaData.Imports["context"]; !exists {
+		metaData.Imports["context"] = &ast.ImportSpec{
+			Path: &ast.BasicLit{
+				Kind:  token.STRING,
+				Value: `"context"`,
+			},
+		}
+	}
+
+	// Create context parameter
+	contextParam := NewInjectorParam(contextType)
+	// errgroup.WithContext(ctx) requires context.Context as the first argument
+	contextParam.Ref(false)
+
+	// Create context argument
+	contextArg := &InjectorArgument{
+		Param:       contextParam,
+		Type:        contextType,
+		ASTTypeExpr: contextExpr,
+	}
+
+	// Insert context as the first argument
+	injector.Args = append([]*InjectorArgument{contextArg}, injector.Args...)
+	injector.Params = append([]*InjectorParam{contextParam}, injector.Params...)
+
+	return nil
+}
+
 func (g *Graph) autoAddMissingDependencies(metaData *MetaData, t types.Type) (*node, error) {
 	// Auto-detect missing dependency and create an argument for it
 	expr, requiredImports, err := createASTTypeExpr(metaData.Package.Path, t)
@@ -389,7 +445,7 @@ func (g *Graph) autoAddMissingDependencies(metaData *MetaData, t types.Type) (*n
 	}, nil
 }
 
-func (g *Graph) Build() (*Injector, error) {
+func (g *Graph) Build(metaData *MetaData) (*Injector, error) {
 	injector := &Injector{
 		Name:          g.injectorName,
 		IsReturnError: g.isReturnError(),
@@ -446,6 +502,7 @@ func (g *Graph) Build() (*Injector, error) {
 			for _, t := range n.providerSpec.Provides {
 				param := NewInjectorParam(t)
 				injector.Params = append(injector.Params, param)
+				injector.Vars = append(injector.Vars, param)
 				returnValues = append(returnValues, param)
 			}
 
@@ -512,6 +569,12 @@ func (g *Graph) Build() (*Injector, error) {
 	injector.Stmts, err = g.buildStmts(pools, nodeProvidedNodes, initialProvidedNodes)
 	if err != nil {
 		return nil, fmt.Errorf("build statements: %w", err)
+	}
+
+	// Inject context.Context argument if async providers exist
+	err = g.injectContextArg(injector, metaData)
+	if err != nil {
+		return nil, fmt.Errorf("inject context argument: %w", err)
 	}
 
 	return injector, nil
