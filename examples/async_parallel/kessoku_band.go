@@ -21,6 +21,7 @@ func InitializeApp() (*App, error) {
 	)
 	eg := &errgroup.Group{}
 	eg.Go(func() error {
+		var err error
 		databaseService, err = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
 		if err != nil {
 			return err
