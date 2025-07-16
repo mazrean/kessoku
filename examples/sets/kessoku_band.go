@@ -15,18 +15,7 @@ func InitializeAppBasic() (*App, error) {
 	app := kessoku.Provide(NewApp).Fn()(userService)
 	return app, nil
 }
-func InitializeAppWithInlineSet() (*App, error) {
-	config := kessoku.Provide(NewConfig).Fn()()
-	database, err := kessoku.Provide(NewDatabase).Fn()(config)
-	if err != nil {
-		var zero *App
-		return zero, err
-	}
-	userService := kessoku.Provide(NewUserService).Fn()(database)
-	app := kessoku.Provide(NewApp).Fn()(userService)
-	return app, nil
-}
-func InitializeAppWithSetVariable() (*App, error) {
+func InitializeAppWithSet() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()
 	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {

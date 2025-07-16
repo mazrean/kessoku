@@ -1,4 +1,3 @@
-// Package main demonstrates various ways to use kessoku.Set for organizing providers.
 package main
 
 import (
@@ -7,47 +6,43 @@ import (
 )
 
 func main() {
-	fmt.Println("kessoku.Set Examples")
-	fmt.Println("====================")
+	fmt.Println("🎯 Kessoku Sets Example")
+	fmt.Println("=======================")
 	fmt.Println()
 
-	// Example 1: Basic usage without Sets (for comparison)
-	fmt.Println("1. Basic usage (without Sets):")
+	// Example 1: Basic Set
+	fmt.Println("1. Basic Set (grouped providers):")
 	app1, err := InitializeAppBasic()
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("   ✓ App initialized with database: %s\n", app1.service.db.connectionString)
+	fmt.Printf("   ✅ App initialized with database: %s\n", app1.service.db.connectionString)
 	fmt.Println()
 
-	// Example 2: Using inline Set
-	fmt.Println("2. Using inline kessoku.Set:")
-	_, err = InitializeAppWithInlineSet()
+	// Example 2: Reusable Set
+	fmt.Println("2. Reusable Set (DatabaseSet variable):")
+	app2, err := InitializeAppWithSet()
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("   ✓ App initialized with grouped providers\n")
+	fmt.Printf("   ✅ App initialized using DatabaseSet: %s\n", app2.service.db.connectionString)
 	fmt.Println()
 
-	// Example 3: Using Set variable
-	fmt.Println("3. Using Set variable for reusability:")
-	_, err = InitializeAppWithSetVariable()
+	// Example 3: Nested Sets
+	fmt.Println("3. Nested Sets (ServiceSet includes DatabaseSet):")
+	app3, err := InitializeAppWithNestedSets()
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("   ✓ App initialized using DatabaseSet variable\n")
+	fmt.Printf("   ✅ App initialized using ServiceSet: %s\n", app3.service.db.connectionString)
 	fmt.Println()
 
-	// Example 4: Nested Sets
-	fmt.Println("4. Using nested Sets:")
-	_, err = InitializeAppWithNestedSets()
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("   ✓ App initialized using ServiceSet (which includes DatabaseSet)\n")
+	fmt.Println("🎉 All examples completed successfully!")
 	fmt.Println()
-
-	fmt.Println("All examples completed successfully!")
+	fmt.Println("💡 Key benefits of kessoku.Set:")
+	fmt.Println("   • Organization: Group related providers logically")
+	fmt.Println("   • Reusability: Define once, use multiple times")
+	fmt.Println("   • Modularity: Separate concerns into different sets")
 }
 
 // App represents the main application
