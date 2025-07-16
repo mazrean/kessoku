@@ -628,58 +628,35 @@ var chainReturnErrStmts = []ast.Stmt{
 func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ []ast.Stmt) ([]ast.Stmt, []string) {
 	var imports []string
 
-	// Check if this chain contains any async providers
-	hasAsyncInChain := false
-	for _, chainStmt := range stmt.Statements {
-		if chainStmt.HasAsync() {
-			hasAsyncInChain = true
-			break
-		}
-	}
-
-	if !hasAsyncInChain {
-		// For sync-only chains, generate statements directly without goroutines
-		var allStmts []ast.Stmt
-
-		// Create proper error return statements for sync chains
-		var syncReturnErrStmts []ast.Stmt
-		if injector.Return != nil && injector.Return.Return != nil && injector.Return.Return.ASTTypeExpr != nil {
-			syncReturnErrStmts = []ast.Stmt{
-				&ast.DeclStmt{
-					Decl: &ast.GenDecl{
-						Tok: token.VAR,
-						Specs: []ast.Spec{
-							&ast.ValueSpec{
-								Names: []*ast.Ident{ast.NewIdent("zero")},
-								Type:  injector.Return.Return.ASTTypeExpr,
-							},
+	// Create proper error return statements for the goroutine
+	var chainReturnErrStmts []ast.Stmt
+	if injector.Return != nil && injector.Return.Return != nil && injector.Return.Return.ASTTypeExpr != nil {
+		chainReturnErrStmts = []ast.Stmt{
+			&ast.DeclStmt{
+				Decl: &ast.GenDecl{
+					Tok: token.VAR,
+					Specs: []ast.Spec{
+						&ast.ValueSpec{
+							Names: []*ast.Ident{ast.NewIdent("zero")},
+							Type:  injector.Return.Return.ASTTypeExpr,
 						},
 					},
 				},
-				&ast.ReturnStmt{
-					Results: []ast.Expr{ast.NewIdent("zero"), ast.NewIdent("err")},
-				},
-			}
-		} else {
-			syncReturnErrStmts = []ast.Stmt{
-				&ast.ReturnStmt{
-					Results: []ast.Expr{ast.NewIdent("err")},
-				},
-			}
+			},
+			&ast.ReturnStmt{
+				Results: []ast.Expr{ast.NewIdent("zero"), ast.NewIdent("err")},
+			},
 		}
-
-		for _, chainStmt := range stmt.Statements {
-			chainStmts, chainImports := chainStmt.Stmt(varPool, injector, syncReturnErrStmts)
-			allStmts = append(allStmts, chainStmts...)
-			imports = append(imports, chainImports...)
+	} else {
+		chainReturnErrStmts = []ast.Stmt{
+			&ast.ReturnStmt{
+				Results: []ast.Expr{ast.NewIdent("err")},
+			},
 		}
-		return allStmts, imports
 	}
 
-	// For async chains, generate goroutine with proper variable assignment
-	var stmts []ast.Stmt
-
 	// Generate statements for this chain
+	var stmts []ast.Stmt
 	for _, chainStmt := range stmt.Statements {
 		chainStmts, chainImports := chainStmt.Stmt(varPool, injector, chainReturnErrStmts)
 		stmts = append(stmts, chainStmts...)
@@ -690,6 +667,7 @@ func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ []as
 		Results: []ast.Expr{ast.NewIdent("nil")},
 	})
 
+	// Always wrap in eg.Go() call as expected by tests
 	return []ast.Stmt{
 		&ast.ExprStmt{
 			X: &ast.CallExpr{
