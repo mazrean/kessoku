@@ -107,18 +107,6 @@ Kessoku generates **optimized parallel code** with automatic context injection a
 - **Test Suite**: Faster dependency setup means faster tests
 - **Development**: Quick feedback loop during development
 
-```go
-func main() {
-    // Automatically gets context parameter for async operations
-    app, err := InitializeApp(context.Background())
-    if err != nil {
-        log.Fatal("Failed to initialize:", err)
-    }
-    
-    app.Run() // Ready in 200ms instead of 450ms!
-}
-```
-
 ## Async Provider Support
 
 Kessoku's key differentiator is its support for async providers that execute in parallel while maintaining dependency order:
@@ -232,7 +220,7 @@ Flags:
   -v, --version             Show version and exit.
 ```
 
-**Common usage:**
+**Common usage**
 ```bash
 go tool kessoku kessoku.go        # Process single file
 go tool kessoku *.go              # Process multiple files
