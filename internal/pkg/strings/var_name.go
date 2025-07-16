@@ -1,3 +1,4 @@
+// Package strings provides string utility functions for variable naming.
 package strings
 
 import (

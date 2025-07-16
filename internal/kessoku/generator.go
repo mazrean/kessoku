@@ -267,11 +267,15 @@ func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
 	}
 
 	return []ast.Stmt{
-		&ast.ExprStmt{
-			X: &ast.CallExpr{
-				Fun: &ast.SelectorExpr{
-					X:   ast.NewIdent("eg"),
-					Sel: ast.NewIdent("Wait"),
+		&ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent("_")},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{
+				&ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X:   ast.NewIdent("eg"),
+						Sel: ast.NewIdent("Wait"),
+					},
 				},
 			},
 		},

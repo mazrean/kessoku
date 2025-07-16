@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+const (
+	databaseConnectionDelay = 200 * time.Millisecond
+	cacheConnectionDelay    = 150 * time.Millisecond
+	messagingConnectionDelay = 180 * time.Millisecond
+)
+
 // DatabaseService simulates a database connection service
 type DatabaseService struct {
 	connectionString string
@@ -13,7 +19,7 @@ type DatabaseService struct {
 func NewDatabaseService() (*DatabaseService, error) {
 	// Simulate slow database connection setup
 	fmt.Println("Connecting to database...")
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(databaseConnectionDelay)
 	fmt.Println("Database connected!")
 	return &DatabaseService{
 		connectionString: "postgres://localhost:5432/mydb",
@@ -28,7 +34,7 @@ type CacheService struct {
 func NewCacheService() *CacheService {
 	// Simulate slow cache connection setup
 	fmt.Println("Connecting to cache...")
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(cacheConnectionDelay)
 	fmt.Println("Cache connected!")
 	return &CacheService{
 		endpoint: "redis://localhost:6379",
@@ -43,7 +49,7 @@ type MessagingService struct {
 func NewMessagingService() *MessagingService {
 	// Simulate slow messaging setup
 	fmt.Println("Connecting to message broker...")
-	time.Sleep(180 * time.Millisecond)
+	time.Sleep(messagingConnectionDelay)
 	fmt.Println("Message broker connected!")
 	return &MessagingService{
 		brokerURL: "kafka://localhost:9092",

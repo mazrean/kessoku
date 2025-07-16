@@ -67,48 +67,48 @@ func TestIsContextType(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
 		typeExpr types.Type
+		name     string
 		expected bool
 	}{
 		{
-			name: "context.Context type",
 			typeExpr: func() types.Type {
 				pkg := types.NewPackage("context", "context")
 				ctx := types.NewTypeName(0, pkg, "Context", nil)
 				return types.NewNamed(ctx, types.NewInterfaceType([]*types.Func{}, nil), nil)
 			}(),
+			name: "context.Context type",
 			expected: true,
 		},
 		{
-			name: "non-context type",
 			typeExpr: func() types.Type {
 				pkg := types.NewPackage("fmt", "fmt")
 				stringer := types.NewTypeName(0, pkg, "Stringer", nil)
 				return types.NewNamed(stringer, types.NewInterfaceType([]*types.Func{}, nil), nil)
 			}(),
+			name: "non-context type",
 			expected: false,
 		},
 		{
-			name:     "basic type (string)",
 			typeExpr: types.Typ[types.String],
+			name:     "basic type (string)",
 			expected: false,
 		},
 		{
-			name: "named type with nil package",
 			typeExpr: func() types.Type {
 				ctx := types.NewTypeName(0, nil, "Context", nil)
 				return types.NewNamed(ctx, types.NewInterfaceType([]*types.Func{}, nil), nil)
 			}(),
+			name: "named type with nil package",
 			expected: false,
 		},
 		{
-			name: "context package but different type name",
 			typeExpr: func() types.Type {
 				pkg := types.NewPackage("context", "context")
 				cancelFunc := types.NewTypeName(0, pkg, "CancelFunc", nil)
 				return types.NewNamed(cancelFunc, types.NewInterfaceType([]*types.Func{}, nil), nil)
 			}(),
+			name: "context package but different type name",
 			expected: false,
 		},
 	}
@@ -130,17 +130,16 @@ func TestInjectorChainStmt_Stmt(t *testing.T) {
 	configType, serviceType, _ := createTestTypes()
 
 	tests := []struct {
-		name      string
 		chainStmt *InjectorChainStmt
+		name      string
 	}{
 		{
-			name: "empty chain",
 			chainStmt: &InjectorChainStmt{
 				Statements: []InjectorStmt{},
 			},
+			name: "empty chain",
 		},
 		{
-			name: "chain with provider call",
 			chainStmt: &InjectorChainStmt{
 				Statements: []InjectorStmt{
 					&InjectorProviderCallStmt{
@@ -155,6 +154,7 @@ func TestInjectorChainStmt_Stmt(t *testing.T) {
 					},
 				},
 			},
+			name: "chain with provider call",
 		},
 		{
 			name: "chain with multiple statements",

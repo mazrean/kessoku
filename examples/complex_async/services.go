@@ -5,7 +5,18 @@ import (
 	"time"
 )
 
-// Configuration and basic services
+const (
+	configCreationDelay        = 100 * time.Millisecond
+	databaseServiceDelay       = 200 * time.Millisecond
+	cacheServiceDelay          = 150 * time.Millisecond
+	messagingServiceDelay      = 180 * time.Millisecond
+	userServiceDelay           = 120 * time.Millisecond
+	sessionServiceDelay        = 100 * time.Millisecond
+	notificationServiceDelay   = 80 * time.Millisecond
+	appCreationDelay           = 50 * time.Millisecond
+)
+
+// Config represents the application configuration.
 type Config struct {
 	DatabaseURL string
 	CacheURL    string
@@ -27,7 +38,7 @@ type MessagingService struct {
 	Ready  bool
 }
 
-// Higher-level services that depend on basic services
+// UserService provides user-related functionality and depends on basic services.
 type UserService struct {
 	DB    *DatabaseService
 	Ready bool
@@ -45,7 +56,7 @@ type NotificationService struct {
 	Ready     bool
 }
 
-// Main application
+// App represents the main application that coordinates all services.
 type App struct {
 	Notifications *NotificationService
 	Ready         bool
@@ -55,7 +66,7 @@ type App struct {
 
 func NewConfig() *Config {
 	fmt.Println("Creating config...")
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(configCreationDelay)
 	return &Config{
 		DatabaseURL: "postgres://localhost:5432/db",
 		CacheURL:    "redis://localhost:6379",
@@ -65,7 +76,7 @@ func NewConfig() *Config {
 
 func NewDatabaseService(config *Config) *DatabaseService {
 	fmt.Printf("Creating database service with URL: %s\n", config.DatabaseURL)
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(databaseServiceDelay)
 	return &DatabaseService{
 		Config: config,
 		Ready:  true,
@@ -74,7 +85,7 @@ func NewDatabaseService(config *Config) *DatabaseService {
 
 func NewCacheService(config *Config) *CacheService {
 	fmt.Printf("Creating cache service with URL: %s\n", config.CacheURL)
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(cacheServiceDelay)
 	return &CacheService{
 		Config: config,
 		Ready:  true,
@@ -83,7 +94,7 @@ func NewCacheService(config *Config) *CacheService {
 
 func NewMessagingService(config *Config) *MessagingService {
 	fmt.Printf("Creating messaging service with URL: %s\n", config.MessageURL)
-	time.Sleep(180 * time.Millisecond)
+	time.Sleep(messagingServiceDelay)
 	return &MessagingService{
 		Config: config,
 		Ready:  true,
@@ -92,7 +103,7 @@ func NewMessagingService(config *Config) *MessagingService {
 
 func NewUserService(db *DatabaseService) *UserService {
 	fmt.Println("Creating user service...")
-	time.Sleep(120 * time.Millisecond)
+	time.Sleep(userServiceDelay)
 	return &UserService{
 		DB:    db,
 		Ready: true,
@@ -101,7 +112,7 @@ func NewUserService(db *DatabaseService) *UserService {
 
 func NewSessionService(cache *CacheService) *SessionService {
 	fmt.Println("Creating session service...")
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(sessionServiceDelay)
 	return &SessionService{
 		Cache: cache,
 		Ready: true,
@@ -110,7 +121,7 @@ func NewSessionService(cache *CacheService) *SessionService {
 
 func NewNotificationService(users *UserService, sessions *SessionService, messaging *MessagingService) *NotificationService {
 	fmt.Println("Creating notification service...")
-	time.Sleep(80 * time.Millisecond)
+	time.Sleep(notificationServiceDelay)
 	return &NotificationService{
 		Users:     users,
 		Sessions:  sessions,
@@ -121,7 +132,7 @@ func NewNotificationService(users *UserService, sessions *SessionService, messag
 
 func NewComplexApp(notifications *NotificationService) *App {
 	fmt.Println("Creating complex app...")
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(appCreationDelay)
 	return &App{
 		Notifications: notifications,
 		Ready:         true,

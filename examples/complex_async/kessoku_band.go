@@ -53,6 +53,6 @@ func InitializeComplexApp(ctx context.Context) *App {
 	}
 	notificationService = kessoku.Async(kessoku.Provide(NewNotificationService)).Fn()(userService, sessionService, messagingService)
 	app = kessoku.Provide(NewComplexApp).Fn()(notificationService)
-	eg.Wait()
+	_ = eg.Wait()
 	return app
 }

@@ -48,10 +48,10 @@ type BuildDirective struct {
 
 type InjectorParam struct {
 	t           types.Type
-	refCounter  int
-	withChannel bool
 	name        string
 	channelName string
+	refCounter  int
+	withChannel bool
 }
 
 func NewInjectorParam(t types.Type) *InjectorParam {

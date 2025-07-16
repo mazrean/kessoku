@@ -224,11 +224,11 @@ type returnVal struct {
 }
 
 type Graph struct {
-	returnType   *Return
-	returnValue  *returnVal
 	nodes        []*node
 	edges        map[*node][]*edgeNode
 	reverseEdges map[*node][]*node
+	returnType   *Return
+	returnValue  *returnVal
 	injectorName string
 }
 
