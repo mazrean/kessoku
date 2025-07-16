@@ -628,8 +628,33 @@ var chainReturnErrStmts = []ast.Stmt{
 func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ []ast.Stmt) ([]ast.Stmt, []string) {
 	var imports []string
 
-	// Generate statements for this chain
+	isReturnError := false
+	for _, chainStmt := range stmt.Statements {
+		if providerCall, ok := chainStmt.(*InjectorProviderCallStmt); ok {
+			isReturnError = providerCall.Provider.IsReturnError
+			if providerCall.Provider.IsReturnError {
+				break
+			}
+		}
+	}
+
 	var stmts []ast.Stmt
+
+	if isReturnError {
+		stmts = append(stmts, &ast.DeclStmt{
+			Decl: &ast.GenDecl{
+				Tok: token.VAR,
+				Specs: []ast.Spec{
+					&ast.ValueSpec{
+						Names: []*ast.Ident{ast.NewIdent("err")},
+						Type:  &ast.Ident{Name: "error"},
+					},
+				},
+			},
+		})
+	}
+
+	// Generate statements for this chain
 	for _, chainStmt := range stmt.Statements {
 		chainStmts, chainImports := chainStmt.Stmt(varPool, injector, chainReturnErrStmts)
 		stmts = append(stmts, chainStmts...)
