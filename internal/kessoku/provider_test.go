@@ -61,9 +61,9 @@ func TestInjectorParamChannelName(t *testing.T) {
 	_, serviceType, intType := createTestTypes()
 
 	tests := []struct {
-		name           string
-		setupParam     func() *InjectorParam
-		expectedResult string
+		name               string
+		setupParam         func() *InjectorParam
+		expectedResult     string
 		shouldBeUnderscore bool
 	}{
 		{
@@ -71,7 +71,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 			setupParam: func() *InjectorParam {
 				return NewInjectorParam(intType) // No Ref() call
 			},
-			expectedResult: "_",
+			expectedResult:     "_",
 			shouldBeUnderscore: true,
 		},
 		{
@@ -81,7 +81,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 				p.Ref(true) // Reference with channel
 				return p
 			},
-			expectedResult: "serviceCh",
+			expectedResult:     "serviceCh",
 			shouldBeUnderscore: false,
 		},
 		{
@@ -91,7 +91,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 				p.Ref(false) // Reference without channel
 				return p
 			},
-			expectedResult: "serviceCh", // Still gets a channel name, but WithChannel() is false
+			expectedResult:     "serviceCh", // Still gets a channel name, but WithChannel() is false
 			shouldBeUnderscore: false,
 		},
 	}
@@ -99,7 +99,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			param := tt.setupParam()
 			varPool := NewVarPool()
 			channelName := param.ChannelName(varPool)
@@ -122,20 +122,20 @@ func TestInjectorParamChannelName(t *testing.T) {
 	// Test caching behavior
 	t.Run("caching behavior", func(t *testing.T) {
 		t.Parallel()
-		
+
 		param := NewInjectorParam(serviceType)
 		param.Ref(true) // Reference with channel
 		varPool := NewVarPool()
-		
+
 		// First call
 		firstCall := param.ChannelName(varPool)
 		// Second call should return the same cached result
 		secondCall := param.ChannelName(varPool)
-		
+
 		if firstCall != secondCall {
 			t.Errorf("Expected cached channel name to be consistent, got %s then %s", firstCall, secondCall)
 		}
-		
+
 		if firstCall != "serviceCh" {
 			t.Errorf("Expected channel name serviceCh, got %s", firstCall)
 		}
@@ -148,8 +148,8 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 	configType, serviceType, _ := createTestTypes()
 
 	tests := []struct {
-		name      string
 		chainStmt *InjectorChainStmt
+		name      string
 		expected  bool
 	}{
 		{
@@ -297,8 +297,8 @@ func TestInjectorParam_Type(t *testing.T) {
 	configType, serviceType, intType := createTestTypes()
 
 	tests := []struct {
-		name     string
 		typeExpr types.Type
+		name     string
 	}{
 		{
 			name:     "config type",

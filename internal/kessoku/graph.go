@@ -224,12 +224,12 @@ type returnVal struct {
 }
 
 type Graph struct {
-	nodes        []*node
 	edges        map[*node][]*edgeNode
 	reverseEdges map[*node][]*node
 	returnType   *Return
 	returnValue  *returnVal
 	injectorName string
+	nodes        []*node
 }
 
 func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {

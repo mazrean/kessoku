@@ -431,11 +431,11 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name            string
-		metaData        *MetaData
 		dependencyType  types.Type
-		expectError     bool
+		metaData        *MetaData
+		name            string
 		expectedImports []string
+		expectError     bool
 	}{
 		{
 			name: "basic type dependency",
@@ -580,13 +580,13 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 	configType, _, intType := createTestTypes()
 
 	tests := []struct {
-		name                   string
 		setupGraph             func() *Graph
+		poolDependencyMap      map[*node][]int
+		nodeProvidedNodes      map[*node]map[*node]struct{}
+		name                   string
 		pool                   []*node
 		pools                  [][]*node
 		visited                []bool
-		poolDependencyMap      map[*node][]int
-		nodeProvidedNodes      map[*node]map[*node]struct{}
 		expectedStmtsMin       int
 		expectError            bool
 		expectProviderCallStmt bool
@@ -779,11 +779,11 @@ func TestGraph_BuildStmts(t *testing.T) {
 	configType, serviceType, intType := createTestTypes()
 
 	tests := []struct {
-		name                   string
 		setupGraph             func() *Graph
-		pools                  [][]*node
 		nodeProvidedNodes      map[*node]map[*node]struct{}
 		initialProvidedNodes   map[*node]struct{}
+		name                   string
+		pools                  [][]*node
 		expectedStmtsMin       int
 		expectError            bool
 		expectProviderCallStmt bool
@@ -973,12 +973,12 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 	configType, serviceType, _ := createTestTypes()
 
 	tests := []struct {
-		name                    string
 		build                   *BuildDirective
-		expectError             bool
-		expectContextInjection  bool
+		name                    string
 		expectedArgsCount       int
 		expectedContextPosition int
+		expectError             bool
+		expectContextInjection  bool
 	}{
 		{
 			name: "no async providers - no context injection",

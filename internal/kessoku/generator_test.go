@@ -77,7 +77,7 @@ func TestIsContextType(t *testing.T) {
 				ctx := types.NewTypeName(0, pkg, "Context", nil)
 				return types.NewNamed(ctx, types.NewInterfaceType([]*types.Func{}, nil), nil)
 			}(),
-			name: "context.Context type",
+			name:     "context.Context type",
 			expected: true,
 		},
 		{
@@ -86,7 +86,7 @@ func TestIsContextType(t *testing.T) {
 				stringer := types.NewTypeName(0, pkg, "Stringer", nil)
 				return types.NewNamed(stringer, types.NewInterfaceType([]*types.Func{}, nil), nil)
 			}(),
-			name: "non-context type",
+			name:     "non-context type",
 			expected: false,
 		},
 		{
@@ -99,7 +99,7 @@ func TestIsContextType(t *testing.T) {
 				ctx := types.NewTypeName(0, nil, "Context", nil)
 				return types.NewNamed(ctx, types.NewInterfaceType([]*types.Func{}, nil), nil)
 			}(),
-			name: "named type with nil package",
+			name:     "named type with nil package",
 			expected: false,
 		},
 		{
@@ -108,7 +108,7 @@ func TestIsContextType(t *testing.T) {
 				cancelFunc := types.NewTypeName(0, pkg, "CancelFunc", nil)
 				return types.NewNamed(cancelFunc, types.NewInterfaceType([]*types.Func{}, nil), nil)
 			}(),
-			name: "context package but different type name",
+			name:     "context package but different type name",
 			expected: false,
 		},
 	}
@@ -491,8 +491,8 @@ func TestGenerateStmts(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name                  string
 		injector              *Injector
+		name                  string
 		expectedStmtsMin      int
 		expectAsyncImport     bool
 		expectErrorHandling   bool
@@ -1085,10 +1085,10 @@ func TestInjectorProviderCallStmt_channelsWait(t *testing.T) {
 	configType, serviceType, _ := createTestTypes()
 
 	tests := []struct {
-		name        string
 		stmt        *InjectorProviderCallStmt
-		channels    []ast.Expr
 		injector    *Injector
+		name        string
+		channels    []ast.Expr
 		expectRange bool
 	}{
 		{
@@ -1170,8 +1170,8 @@ func TestInjectorProviderCallStmt_buildWaitStatement(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		hasCtx   bool
 		expected string
+		hasCtx   bool
 	}{
 		{
 			name:     "without context",
@@ -1222,8 +1222,8 @@ func TestInjectorProviderCallStmt_channelsClose(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		channels []ast.Expr
 		expected string
+		channels []ast.Expr
 	}{
 		{
 			name: "single channel",
@@ -1302,8 +1302,8 @@ func TestGenerateVariableSpecs(t *testing.T) {
 	configType, serviceType, intType := createTestTypes()
 
 	tests := []struct {
-		name            string
 		injector        *Injector
+		name            string
 		expectedSpecs   int
 		expectedImports int
 		expectError     bool
@@ -1472,8 +1472,8 @@ func TestDetectAsyncChains(t *testing.T) {
 	configType, serviceType, _ := createTestTypes()
 
 	tests := []struct {
-		name     string
 		injector *Injector
+		name     string
 		expected bool
 	}{
 		{
@@ -1633,19 +1633,19 @@ func TestVarPool_GetChannel(t *testing.T) {
 	t.Run("multiple calls same type", func(t *testing.T) {
 		t.Parallel()
 		freshPool := NewVarPool()
-		
+
 		// First call should get base name
 		first := freshPool.GetChannel(intType)
 		if first != "numCh" {
 			t.Errorf("First GetChannel() = %v, want numCh", first)
 		}
-		
+
 		// Second call should get numbered name
 		second := freshPool.GetChannel(intType)
 		if second != "numCh0" {
 			t.Errorf("Second GetChannel() = %v, want numCh0", second)
 		}
-		
+
 		// Third call should get next numbered name
 		third := freshPool.GetChannel(intType)
 		if third != "numCh1" {
@@ -1658,7 +1658,7 @@ func TestVarPool_GetChannel(t *testing.T) {
 		t.Parallel()
 		freshPool := NewVarPool()
 		contextType := createContextType()
-		
+
 		result := freshPool.GetChannel(contextType)
 		if result != "ctxCh" {
 			t.Errorf("GetChannel() for context = %v, want ctxCh", result)
