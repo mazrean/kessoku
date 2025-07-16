@@ -22,8 +22,9 @@ go get -tool github.com/mazrean/kessoku/cmd/kessoku@latest
 
 This installs kessoku as a Go tool, making it available via `go tool kessoku`.
 
+**Other Methods**
 <details>
-<summary>Direct Install</summary>
+<summary>Go Install</summary>
 
 ```bash
 go install github.com/mazrean/kessoku/cmd/kessoku@latest
@@ -31,13 +32,13 @@ go install github.com/mazrean/kessoku/cmd/kessoku@latest
 </details>
 
 <details>
-<summary>From Releases</summary>
+<summary>Download binary</summary>
 
 Download the latest binary from the [releases page](https://github.com/mazrean/kessoku/releases).
 </details>
 
 <details>
-<summary>Via Homebrew</summary>
+<summary>Homebrew</summary>
 
 ```bash
 brew install mazrean/tap/kessoku
@@ -217,24 +218,26 @@ func main() {
 
 ## CLI Usage
 
-```bash
-# Generate DI code for specific files
-go tool kessoku kessoku.go
+```
+Usage: kessoku <files> ... [flags]
 
-# Multiple files
-go tool kessoku file1.go file2.go
+A dependency injection code generator for Go, similar to google/wire
 
-# Using go generate (recommended)
-go generate ./...
+Arguments:
+  <files> ...    Go files to process
 
-# Show version
-go tool kessoku --version
+Flags:
+  -h, --help                Show context-sensitive help.
+  -l, --log-level="info"    Log level
+  -v, --version             Show version and exit.
 ```
 
-### Options
-
-- `-l, --log-level` - Log level (debug, info, warn, error)
-- `-v, --version` - Show version information
+**Common usage:**
+```bash
+go tool kessoku kessoku.go        # Process single file
+go tool kessoku *.go              # Process multiple files
+go generate ./...                 # Using go generate (recommended)
+```
 
 ## API Reference
 
