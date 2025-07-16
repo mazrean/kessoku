@@ -37,11 +37,6 @@ func (p fnProvider[T]) Fn() T {
 // Provide wraps a function to be used as a dependency provider.
 // The function fn should return one or more values that can be injected
 // as dependencies into other functions.
-//
-// Example:
-//
-//	kessoku.Provide(NewDatabase)  // where NewDatabase returns (*Database, error)
-//	kessoku.Provide(NewService)   // where NewService returns *Service
 func Provide[T any](fn T) fnProvider[T] {
 	return fnProvider[T]{fn: fn}
 }
@@ -56,6 +51,11 @@ func (p asyncProvider[T, F]) Fn() T {
 	return p.fn.Fn()
 }
 
+// Async wraps a provider to enable parallel execution with other async providers.
+// Async providers that don't depend on each other will be executed concurrently,
+// improving performance for slow operations like database connections or API calls.
+// When any async provider is present, the generated injector function will include
+// a context.Context parameter for cancellation and timeout support.
 func Async[T any, F funcProvider[T]](fn F) asyncProvider[T, F] {
 	return asyncProvider[T, F]{fn: fn}
 }
@@ -78,13 +78,6 @@ func (p bindProvider[_, T, _]) Fn() T {
 // Bind creates a type binding that maps type S to type T using the given provider.
 // This is useful when you want to provide a concrete implementation for an interface
 // or when you need to map one type to another in the dependency graph.
-//
-// Example:
-//
-//	kessoku.Bind[UserRepository, *DatabaseUserRepo](kessoku.Provide(NewDatabaseUserRepo))
-//
-// This tells kessoku that when a UserRepository is needed, it should use
-// the DatabaseUserRepo implementation provided by NewDatabaseUserRepo.
 func Bind[S, T any, F funcProvider[T]](fn F) bindProvider[S, T, F] {
 	return bindProvider[S, T, F]{fn: fn}
 }
@@ -92,12 +85,6 @@ func Bind[S, T any, F funcProvider[T]](fn F) bindProvider[S, T, F] {
 // Value creates a provider for a constant value.
 // This is useful when you want to inject configuration values, constants,
 // or other static data into your dependency graph.
-//
-// Example:
-//
-//	kessoku.Value("localhost:8080")  // provides a string value
-//	kessoku.Value(42)               // provides an int value
-//	kessoku.Value(&Config{...})     // provides a config struct
 func Value[T any](v T) fnProvider[func() T] {
 	return fnProvider[func() T]{
 		fn: func() T { return v },
@@ -113,28 +100,6 @@ func Value[T any](v T) fnProvider[func() T] {
 // 2. Call provider functions in the correct order based on dependencies
 // 3. Return an instance of type T (and error if any provider returns an error)
 //
-// Example:
-//
-//	var _ = kessoku.Inject[*App](
-//		"InitializeApp",
-//		kessoku.Provide(NewConfig),
-//		kessoku.Provide(NewDatabase),
-//		kessoku.Provide(NewUserService),
-//		kessoku.Provide(NewApp),
-//	)
-//
-// If NewConfig requires a string parameter that's not provided,
-// this generates a function like:
-//
-//	func InitializeApp(arg0 string) (*App, error) {
-//		config := NewConfig(arg0)
-//		db, err := NewDatabase(config)
-//		if err != nil { return nil, err }
-//		userService := NewUserService(db)
-//		app := NewApp(userService)
-//		return app, nil
-//	}
-//
 // Use go:generate to trigger code generation:
 //
 //	//go:generate go tool kessoku $GOFILE
@@ -148,6 +113,9 @@ type set struct{}
 
 func (s set) provide() {}
 
+// Set groups multiple providers together as a reusable unit.
+// This is useful for organizing related providers that are commonly used together,
+// such as database-related providers or authentication-related providers.
 func Set(providers ...provider) set {
 	return set{}
 }
