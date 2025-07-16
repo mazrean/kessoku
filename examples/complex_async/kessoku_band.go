@@ -22,6 +22,8 @@ func InitializeComplexApp() *App {
 		app                 *App
 	)
 	eg := &errgroup.Group{}
+	config = kessoku.Provide(NewConfig).Fn()()
+	close(configCh)
 	eg.Go(func() error {
 		<-configCh
 		databaseService = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()(config)
@@ -36,8 +38,6 @@ func InitializeComplexApp() *App {
 		close(sessionServiceCh)
 		return nil
 	})
-	config = kessoku.Provide(NewConfig).Fn()()
-	close(configCh)
 	messagingService = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(config)
 	for _, ch := range []<-chan struct{}{userServiceCh, sessionServiceCh} {
 		<-ch
