@@ -54,7 +54,7 @@ brew install mazrean/tap/kessoku
 
 ## Quick Start
 
-Experience Kessoku's **parallel processing power** in 3 simple steps:
+Experience Kessoku's **parallel processing power** in 2 simple steps:
 
 ### 1. Define Your Services with Async Providers
 
@@ -64,12 +64,11 @@ Experience Kessoku's **parallel processing power** in 3 simple steps:
 package main
 
 import (
-    "context"
     "time"
     "github.com/mazrean/kessoku"
 )
 
-// Slow async services that can run in parallel
+// Slow services that can run in parallel
 func NewDatabaseService() (*DatabaseService, error) {
     time.Sleep(200 * time.Millisecond) // Simulate slow DB connection
     return &DatabaseService{}, nil
@@ -80,75 +79,52 @@ func NewCacheService() *CacheService {
     return &CacheService{}
 }
 
+func NewMessagingService() *MessagingService {
+    time.Sleep(100 * time.Millisecond) // Simulate slow messaging setup
+    return &MessagingService{}
+}
+
 // Declare parallel execution with kessoku.Async()
 var _ = kessoku.Inject[*App](
     "InitializeApp",
-    kessoku.Async(kessoku.Provide(NewDatabaseService)), // Runs in parallel
-    kessoku.Async(kessoku.Provide(NewCacheService)),    // Runs in parallel
-    kessoku.Provide(NewApp),                            // Waits for both
+    kessoku.Async(kessoku.Provide(NewDatabaseService)),   // 200ms
+    kessoku.Async(kessoku.Provide(NewCacheService)),      // 150ms  
+    kessoku.Async(kessoku.Provide(NewMessagingService)),  // 100ms
+    kessoku.Provide(NewApp),                              // Waits for all
 )
 ```
 
-### 2. Generate High-Performance Code
+### 2. Generate and Get Dramatic Performance Boost
 
 ```bash
 go generate ./...
 ```
 
-Kessoku generates **optimized parallel code** with automatic context injection:
+Kessoku generates **optimized parallel code** with automatic context injection and synchronization.
 
-```go
-// Generated code - context automatically injected for async operations
-func InitializeApp(ctx context.Context) (*App, error) {
-    var (
-        databaseService *DatabaseService
-        cacheService    *CacheService
-    )
-    
-    eg, ctx := errgroup.WithContext(ctx)
-    
-    // Parallel execution - both services start simultaneously
-    eg.Go(func() error {
-        var err error
-        databaseService, err = NewDatabaseService()
-        return err
-    })
-    
-    eg.Go(func() error {
-        cacheService = NewCacheService()
-        return nil
-    })
-    
-    // Wait for all async operations to complete
-    if err := eg.Wait(); err != nil {
-        return nil, err
-    }
-    
-    // Final assembly after all dependencies are ready
-    app := NewApp(databaseService, cacheService)
-    return app, nil
-}
-```
+## 🚀 **Performance Comparison**
 
-### 3. Use with Context Support
+| Approach | Execution Time | Performance |
+|----------|---------------|-------------|
+| **Sequential** (google/wire style) | `200ms + 150ms + 100ms = 450ms` | ⏱️ Slow |
+| **Parallel** (Kessoku) | `max(200ms, 150ms, 100ms) = 200ms` | ⚡ **2.25x Faster** |
+
+### **Real-world Impact**
+- **Application Startup**: 450ms → 200ms (**55% faster**)
+- **Test Suite**: Faster dependency setup means faster tests
+- **Development**: Quick feedback loop during development
 
 ```go
 func main() {
-    // Context for timeout and cancellation
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    
-    // Parallel initialization - much faster than sequential!
-    app, err := InitializeApp(ctx)
+    // Automatically gets context parameter for async operations
+    app, err := InitializeApp(context.Background())
     if err != nil {
         log.Fatal("Failed to initialize:", err)
     }
     
-    app.Run()
+    app.Run() // Ready in 200ms instead of 450ms!
 }
 ```
-
-**🚀 Performance Boost**: Sequential execution would take 350ms, but parallel execution takes only ~200ms!
 
 ## Async Provider Support
 
