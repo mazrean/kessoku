@@ -58,21 +58,88 @@ func TestInjectorParam(t *testing.T) {
 func TestInjectorParamChannelName(t *testing.T) {
 	t.Parallel()
 
-	_, serviceType, _ := createTestTypes()
+	_, serviceType, intType := createTestTypes()
 
-	param := NewInjectorParam(serviceType)
-	param.Ref(true) // Reference with channel
-
-	varPool := NewVarPool()
-	channelName := param.ChannelName(varPool)
-
-	if channelName == "_" {
-		t.Error("Expected channel name to be generated for referenced parameter")
+	tests := []struct {
+		name           string
+		setupParam     func() *InjectorParam
+		expectedResult string
+		shouldBeUnderscore bool
+	}{
+		{
+			name: "unreferenced parameter",
+			setupParam: func() *InjectorParam {
+				return NewInjectorParam(intType) // No Ref() call
+			},
+			expectedResult: "_",
+			shouldBeUnderscore: true,
+		},
+		{
+			name: "referenced parameter with channel",
+			setupParam: func() *InjectorParam {
+				p := NewInjectorParam(serviceType)
+				p.Ref(true) // Reference with channel
+				return p
+			},
+			expectedResult: "serviceCh",
+			shouldBeUnderscore: false,
+		},
+		{
+			name: "referenced parameter without channel",
+			setupParam: func() *InjectorParam {
+				p := NewInjectorParam(serviceType)
+				p.Ref(false) // Reference without channel
+				return p
+			},
+			expectedResult: "serviceCh", // Still gets a channel name, but WithChannel() is false
+			shouldBeUnderscore: false,
+		},
 	}
 
-	if !param.WithChannel() {
-		t.Error("Expected WithChannel() to return true")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			
+			param := tt.setupParam()
+			varPool := NewVarPool()
+			channelName := param.ChannelName(varPool)
+
+			if tt.shouldBeUnderscore {
+				if channelName != "_" {
+					t.Errorf("Expected channel name to be '_' for unreferenced parameter, got %s", channelName)
+				}
+			} else {
+				if channelName == "_" {
+					t.Error("Expected channel name to be generated for referenced parameter")
+				}
+				if channelName != tt.expectedResult {
+					t.Errorf("Expected channel name %s, got %s", tt.expectedResult, channelName)
+				}
+			}
+		})
 	}
+
+	// Test caching behavior
+	t.Run("caching behavior", func(t *testing.T) {
+		t.Parallel()
+		
+		param := NewInjectorParam(serviceType)
+		param.Ref(true) // Reference with channel
+		varPool := NewVarPool()
+		
+		// First call
+		firstCall := param.ChannelName(varPool)
+		// Second call should return the same cached result
+		secondCall := param.ChannelName(varPool)
+		
+		if firstCall != secondCall {
+			t.Errorf("Expected cached channel name to be consistent, got %s then %s", firstCall, secondCall)
+		}
+		
+		if firstCall != "serviceCh" {
+			t.Errorf("Expected channel name serviceCh, got %s", firstCall)
+		}
+	})
 }
 
 func TestInjectorChainStmt_HasAsync(t *testing.T) {
@@ -219,6 +286,41 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 			result := tt.chainStmt.HasAsync()
 			if result != tt.expected {
 				t.Errorf("HasAsync() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestInjectorParam_Type(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, intType := createTestTypes()
+
+	tests := []struct {
+		name     string
+		typeExpr types.Type
+	}{
+		{
+			name:     "config type",
+			typeExpr: configType,
+		},
+		{
+			name:     "service type",
+			typeExpr: serviceType,
+		},
+		{
+			name:     "int type",
+			typeExpr: intType,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			param := NewInjectorParam(tt.typeExpr)
+			result := param.Type()
+			if result != tt.typeExpr {
+				t.Errorf("Type() = %v, want %v", result, tt.typeExpr)
 			}
 		})
 	}

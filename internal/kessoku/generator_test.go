@@ -1078,3 +1078,557 @@ func TestGenerate(t *testing.T) {
 		})
 	}
 }
+
+func TestInjectorProviderCallStmt_channelsWait(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, _ := createTestTypes()
+
+	tests := []struct {
+		name        string
+		stmt        *InjectorProviderCallStmt
+		channels    []ast.Expr
+		injector    *Injector
+		expectRange bool
+	}{
+		{
+			name: "wait multiple channels",
+			stmt: &InjectorProviderCallStmt{
+				Provider: &ProviderSpec{
+					Type:     ProviderTypeFunction,
+					Provides: []types.Type{serviceType},
+					Requires: []types.Type{configType},
+				},
+			},
+			channels: []ast.Expr{
+				&ast.Ident{Name: "ch1"},
+				&ast.Ident{Name: "ch2"},
+			},
+			injector: &Injector{
+				Args: []*InjectorArgument{
+					{
+						Type: createContextType(),
+					},
+				},
+			},
+			expectRange: true,
+		},
+		{
+			name: "wait single channel",
+			stmt: &InjectorProviderCallStmt{
+				Provider: &ProviderSpec{
+					Type:     ProviderTypeFunction,
+					Provides: []types.Type{serviceType},
+					Requires: []types.Type{configType},
+				},
+			},
+			channels: []ast.Expr{
+				&ast.Ident{Name: "ch1"},
+			},
+			injector: &Injector{
+				Args: []*InjectorArgument{},
+			},
+			expectRange: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := tt.stmt.channelsWait(tt.channels, tt.injector)
+
+			if result == nil {
+				t.Error("Expected statement, got nil")
+				return
+			}
+
+			if tt.expectRange {
+				// Multiple channels should return a for-range statement
+				if _, ok := result.(*ast.RangeStmt); !ok {
+					t.Errorf("Expected for-range statement for multiple channels, got %T", result)
+				}
+			} else {
+				// Single channel should return result from buildWaitStatement
+				// (could be ExprStmt or SelectStmt depending on context)
+				switch result.(type) {
+				case *ast.ExprStmt, *ast.SelectStmt:
+					// Both are valid for single channel
+				default:
+					t.Errorf("Expected ExprStmt or SelectStmt for single channel, got %T", result)
+				}
+			}
+		})
+	}
+}
+
+func TestInjectorProviderCallStmt_buildWaitStatement(t *testing.T) {
+	t.Parallel()
+
+	stmt := &InjectorProviderCallStmt{}
+	channel := &ast.Ident{Name: "testCh"}
+
+	tests := []struct {
+		name     string
+		hasCtx   bool
+		expected string
+	}{
+		{
+			name:     "without context",
+			hasCtx:   false,
+			expected: "channel receive",
+		},
+		{
+			name:     "with context",
+			hasCtx:   true,
+			expected: "select statement",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := stmt.buildWaitStatement(tt.hasCtx, channel)
+
+			if result == nil {
+				t.Error("Expected statement, got nil")
+				return
+			}
+
+			if !tt.hasCtx {
+				// Should be a simple channel receive expression statement
+				if exprStmt, ok := result.(*ast.ExprStmt); ok {
+					if _, ok := exprStmt.X.(*ast.UnaryExpr); !ok {
+						t.Errorf("Expected UnaryExpr for channel receive, got %T", exprStmt.X)
+					}
+				} else {
+					t.Errorf("Expected ExprStmt, got %T", result)
+				}
+			} else {
+				// Should be a select statement
+				if _, ok := result.(*ast.SelectStmt); !ok {
+					t.Errorf("Expected SelectStmt for context handling, got %T", result)
+				}
+			}
+		})
+	}
+}
+
+func TestInjectorProviderCallStmt_channelsClose(t *testing.T) {
+	t.Parallel()
+
+	stmt := &InjectorProviderCallStmt{}
+
+	tests := []struct {
+		name     string
+		channels []ast.Expr
+		expected string
+	}{
+		{
+			name: "single channel",
+			channels: []ast.Expr{
+				&ast.Ident{Name: "ch1"},
+			},
+			expected: "single close call",
+		},
+		{
+			name: "multiple channels",
+			channels: []ast.Expr{
+				&ast.Ident{Name: "ch1"},
+				&ast.Ident{Name: "ch2"},
+				&ast.Ident{Name: "ch3"},
+			},
+			expected: "multiple close calls",
+		},
+		{
+			name:     "no channels",
+			channels: []ast.Expr{},
+			expected: "empty block",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := stmt.channelsClose(tt.channels)
+
+			if result == nil {
+				t.Error("Expected statement, got nil")
+				return
+			}
+
+			switch len(tt.channels) {
+			case 1:
+				// Should be a single close call expression statement
+				if exprStmt, ok := result.(*ast.ExprStmt); ok {
+					if callExpr, ok := exprStmt.X.(*ast.CallExpr); ok {
+						if ident, ok := callExpr.Fun.(*ast.Ident); !ok || ident.Name != "close" {
+							t.Error("Expected close function call")
+						}
+					} else {
+						t.Errorf("Expected CallExpr, got %T", exprStmt.X)
+					}
+				} else {
+					t.Errorf("Expected ExprStmt for single channel, got %T", result)
+				}
+			default:
+				// Should be a for-range statement for multiple channels (including 0 channels)
+				if rangeStmt, ok := result.(*ast.RangeStmt); ok {
+					if rangeStmt.Body != nil {
+						if len(rangeStmt.Body.List) != 1 {
+							t.Errorf("Expected 1 statement in range body, got %d", len(rangeStmt.Body.List))
+						}
+					}
+				} else {
+					t.Errorf("Expected RangeStmt for non-single channels, got %T", result)
+				}
+			}
+		})
+	}
+}
+
+// Helper function to create context type for testing
+func createContextType() types.Type {
+	pkg := types.NewPackage("context", "context")
+	ctx := types.NewTypeName(0, pkg, "Context", nil)
+	return types.NewNamed(ctx, types.NewInterfaceType([]*types.Func{}, nil), nil)
+}
+
+func TestGenerateVariableSpecs(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, intType := createTestTypes()
+
+	tests := []struct {
+		name            string
+		injector        *Injector
+		expectedSpecs   int
+		expectedImports int
+		expectError     bool
+	}{
+		{
+			name: "no parameters",
+			injector: &Injector{
+				Params: []*InjectorParam{},
+			},
+			expectedSpecs:   0,
+			expectedImports: 0,
+			expectError:     false,
+		},
+		{
+			name: "single parameter no channel",
+			injector: &Injector{
+				Params: []*InjectorParam{
+					func() *InjectorParam {
+						p := NewInjectorParam(configType)
+						p.Ref(false) // Reference so it gets a name
+						return p
+					}(),
+				},
+			},
+			expectedSpecs:   1,
+			expectedImports: 0,
+			expectError:     false,
+		},
+		{
+			name: "single parameter with channel",
+			injector: &Injector{
+				Params: []*InjectorParam{
+					func() *InjectorParam {
+						p := NewInjectorParam(serviceType)
+						p.Ref(true) // Reference with channel
+						return p
+					}(),
+				},
+			},
+			expectedSpecs:   2, // one for param, one for channel
+			expectedImports: 0,
+			expectError:     false,
+		},
+		{
+			name: "multiple parameters mixed",
+			injector: &Injector{
+				Params: []*InjectorParam{
+					func() *InjectorParam {
+						p := NewInjectorParam(configType)
+						p.Ref(false) // No channel
+						return p
+					}(),
+					func() *InjectorParam {
+						p := NewInjectorParam(serviceType)
+						p.Ref(true) // With channel
+						return p
+					}(),
+					NewInjectorParam(intType), // Unreferenced (should be skipped)
+				},
+			},
+			expectedSpecs:   3, // config + service + serviceChannel
+			expectedImports: 0,
+			expectError:     false,
+		},
+		{
+			name: "all unreferenced parameters",
+			injector: &Injector{
+				Params: []*InjectorParam{
+					NewInjectorParam(configType),
+					NewInjectorParam(serviceType),
+					NewInjectorParam(intType),
+				},
+			},
+			expectedSpecs:   0, // All should be skipped as they have name "_"
+			expectedImports: 0,
+			expectError:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			varPool := NewVarPool()
+			specs, imports, err := generateVariableSpecs("test", tt.injector, varPool)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if len(specs) != tt.expectedSpecs {
+				t.Errorf("Expected %d specs, got %d", tt.expectedSpecs, len(specs))
+			}
+
+			if len(imports) != tt.expectedImports {
+				t.Errorf("Expected %d imports, got %d", tt.expectedImports, len(imports))
+			}
+
+			// Verify spec structure
+			for i, spec := range specs {
+				if valueSpec, ok := spec.(*ast.ValueSpec); ok {
+					if len(valueSpec.Names) == 0 {
+						t.Errorf("Spec %d has no names", i)
+					}
+					// Channel specs should have Values, regular specs should have Type
+					if valueSpec.Values != nil {
+						// This should be a channel spec
+						if len(valueSpec.Values) != 1 {
+							t.Errorf("Channel spec %d should have exactly 1 value", i)
+						}
+					} else if valueSpec.Type == nil {
+						t.Errorf("Non-channel spec %d should have a type", i)
+					}
+				} else {
+					t.Errorf("Spec %d is not a ValueSpec", i)
+				}
+			}
+		})
+	}
+}
+
+func TestDetectAsyncChains(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, _ := createTestTypes()
+
+	tests := []struct {
+		name     string
+		injector *Injector
+		expected bool
+	}{
+		{
+			name: "no statements",
+			injector: &Injector{
+				Stmts: []InjectorStmt{},
+			},
+			expected: false,
+		},
+		{
+			name: "sync provider call",
+			injector: &Injector{
+				Stmts: []InjectorStmt{
+					&InjectorProviderCallStmt{
+						Provider: &ProviderSpec{
+							IsAsync: false,
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "async provider call",
+			injector: &Injector{
+				Stmts: []InjectorStmt{
+					&InjectorProviderCallStmt{
+						Provider: &ProviderSpec{
+							IsAsync: true,
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "chain with sync providers",
+			injector: &Injector{
+				Stmts: []InjectorStmt{
+					&InjectorChainStmt{
+						Statements: []InjectorStmt{
+							&InjectorProviderCallStmt{
+								Provider: &ProviderSpec{
+									IsAsync: false,
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "chain with async provider",
+			injector: &Injector{
+				Stmts: []InjectorStmt{
+					&InjectorChainStmt{
+						Statements: []InjectorStmt{
+							&InjectorProviderCallStmt{
+								Provider: &ProviderSpec{
+									Type:     ProviderTypeFunction,
+									Provides: []types.Type{configType},
+									Requires: []types.Type{},
+									IsAsync:  false,
+								},
+							},
+							&InjectorProviderCallStmt{
+								Provider: &ProviderSpec{
+									Type:     ProviderTypeFunction,
+									Provides: []types.Type{serviceType},
+									Requires: []types.Type{configType},
+									IsAsync:  true, // This makes it async
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "mixed statements with async",
+			injector: &Injector{
+				Stmts: []InjectorStmt{
+					&InjectorProviderCallStmt{
+						Provider: &ProviderSpec{
+							IsAsync: false,
+						},
+					},
+					&InjectorChainStmt{
+						Statements: []InjectorStmt{
+							&InjectorProviderCallStmt{
+								Provider: &ProviderSpec{
+									IsAsync: true,
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := detectAsyncChains(tt.injector)
+			if result != tt.expected {
+				t.Errorf("detectAsyncChains() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestVarPool_GetChannel(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, intType := createTestTypes()
+
+	tests := []struct {
+		name     string
+		typeExpr types.Type
+		expected string
+	}{
+		{
+			name:     "int type channel",
+			typeExpr: intType,
+			expected: "numCh",
+		},
+		{
+			name:     "service type channel",
+			typeExpr: serviceType,
+			expected: "serviceCh",
+		},
+		{
+			name:     "config type channel",
+			typeExpr: configType,
+			expected: "configCh",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Create a fresh pool for each test to ensure predictable names
+			freshPool := NewVarPool()
+			result := freshPool.GetChannel(tt.typeExpr)
+			if result != tt.expected {
+				t.Errorf("GetChannel() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+
+	// Test multiple calls to same type (should get numbered names)
+	t.Run("multiple calls same type", func(t *testing.T) {
+		t.Parallel()
+		freshPool := NewVarPool()
+		
+		// First call should get base name
+		first := freshPool.GetChannel(intType)
+		if first != "numCh" {
+			t.Errorf("First GetChannel() = %v, want numCh", first)
+		}
+		
+		// Second call should get numbered name
+		second := freshPool.GetChannel(intType)
+		if second != "numCh0" {
+			t.Errorf("Second GetChannel() = %v, want numCh0", second)
+		}
+		
+		// Third call should get next numbered name
+		third := freshPool.GetChannel(intType)
+		if third != "numCh1" {
+			t.Errorf("Third GetChannel() = %v, want numCh1", third)
+		}
+	})
+
+	// Test context type special handling
+	t.Run("context type channel", func(t *testing.T) {
+		t.Parallel()
+		freshPool := NewVarPool()
+		contextType := createContextType()
+		
+		result := freshPool.GetChannel(contextType)
+		if result != "ctxCh" {
+			t.Errorf("GetChannel() for context = %v, want ctxCh", result)
+		}
+	})
+}
