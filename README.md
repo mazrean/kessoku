@@ -146,7 +146,7 @@ brew install mazrean/tap/kessoku
 </details>
 
 <details>
-<summary>Package Managers</summary>
+<summary>Other Package Managers</summary>
 
 **Debian/Ubuntu:**
 ```bash
