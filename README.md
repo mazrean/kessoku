@@ -2,135 +2,139 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/mazrean/kessoku.svg)](https://pkg.go.dev/github.com/mazrean/kessoku)
 
-**Kessoku speeds up Go application startup through parallel dependency injection.**
+**Kessoku is a compile-time dependency injection library for Go that speeds up application startup through parallel dependency injection.** Unlike traditional DI frameworks that initialize services sequentially, Kessoku automatically executes independent providers in parallel, dramatically reducing startup time for applications with multiple slow services. Built as a powerful alternative to google/wire, it generates optimized code at compile time with zero runtime overhead.
+
+**Sequential:** DB → Cache → Auth = Total waiting time  
+**Parallel:** DB + Cache + Auth = Fastest service wins
 
 ```go
 // Before: Sequential (google/wire)
-wire.Build(NewDB, NewCache, NewAPI, NewApp)     // 450ms
+wire.Build(NewDB, NewCache, NewAuth, NewApp)     // Each waits for previous
 
 // After: Parallel (Kessoku)  
 kessoku.Inject[*App]("InitApp",
-    kessoku.Async(kessoku.Provide(NewDB)),      // 200ms }
-    kessoku.Async(kessoku.Provide(NewCache)),   // 150ms } concurrent
-    kessoku.Async(kessoku.Provide(NewAPI)),     // 100ms }
+    kessoku.Async(kessoku.Provide(NewDB)),      // }
+    kessoku.Async(kessoku.Provide(NewCache)),   // } All run together
+    kessoku.Async(kessoku.Provide(NewAuth)),    // }
     kessoku.Provide(NewApp),                    // waits for all
-)                                               // 200ms total (2.25x faster in this example)
+)                                               // Fastest possible startup
 ```
+
+**Result:** Every restart gets faster. Multiple slow services? Maximum impact.
+
+## Why This Matters
+
+**Your typical day:** Restart your app 10 times during development. Each restart wastes time waiting for services to start one by one.
+
+```mermaid
+gantt
+    title Sequential vs Parallel Startup
+    dateFormat X
+    axisFormat %L
+    
+    section Sequential (slow)
+    DB Service    :0, 3
+    Cache Service :3, 5  
+    Auth Service  :5, 6
+    
+    section Parallel (fast)
+    DB Service    :0, 3
+    Cache Service :0, 2
+    Auth Service  :0, 1
+```
+
+**Perfect for:**
+- **Cold start nightmares:** Your Lambda/serverless function times out during initialization
+- **Dev restart hell:** You restart your app 10+ times daily, losing 3+ seconds each time  
+- **Multi-DB apps:** PostgreSQL + Redis + S3 + Auth0 = 800ms+ sequential startup pain
+- **google/wire refugees:** You love compile-time DI but hate slow startup times
 
 ## Quick Start
 
-**Try it yourself in 30 seconds:**
+**Install kessoku:**
 
-**1. Install:**
 ```bash
-go get github.com/mazrean/kessoku
+go get -tool github.com/mazrean/kessoku
 ```
 
-**2. Create demo file (main.go):**
+**Create `main.go`:**
 ```go
-//go:generate go tool kessoku $GOFILE
 package main
-import ("context"; "fmt"; "time"; "github.com/mazrean/kessoku")
 
-func connectDB() string { time.Sleep(200*time.Millisecond); return "DB" }
-func initCache() string { time.Sleep(150*time.Millisecond); return "Cache" }  
-func setupAuth() string { time.Sleep(100*time.Millisecond); return "Auth" }
+import (
+    "fmt"
+    "time"
+    "github.com/mazrean/kessoku"
+)
+
+func SlowDB() string {
+    time.Sleep(200 * time.Millisecond)
+    return "DB-connected"
+}
+
+func SlowCache() string {
+    time.Sleep(150 * time.Millisecond)
+    return "Cache-ready"
+}
+
+//go:generate go tool kessoku $GOFILE
 
 var _ = kessoku.Inject[string]("InitApp",
-    kessoku.Async(kessoku.Provide(connectDB)),   // runs in parallel
-    kessoku.Async(kessoku.Provide(initCache)),   // runs in parallel
-    kessoku.Async(kessoku.Provide(setupAuth)),   // runs in parallel
-    kessoku.Provide(func(db, cache, auth string) string {
-        return fmt.Sprintf("App: %s+%s+%s", db, cache, auth)
+    kessoku.Async(kessoku.Provide(SlowDB)),
+    kessoku.Async(kessoku.Provide(SlowCache)),
+    kessoku.Provide(func(db, cache string) string {
+        return fmt.Sprintf("App running with %s and %s", db, cache)
     }),
 )
 
 func main() {
     start := time.Now()
-    app, _ := InitApp(context.Background())
-    fmt.Printf("%s ready in %v\n", app, time.Since(start))
+    result, _ := InitApp()
+    fmt.Printf("%s in %v\n", result, time.Since(start))
 }
 ```
 
-**3. Run and see the improvement:**
+**Run:**
 ```bash
 go generate && go run main.go
-# Output: App: DB+Cache+Auth ready in ~200ms
-# Without Kessoku: would be 450ms (sequential execution)
+# Shows: App running with DB-connected and Cache-ready (parallel startup)
 ```
 
-## How It Works
+## From google/wire
 
-Kessoku identifies independent services and runs them in parallel instead of sequentially:
+**2-minute upgrade:**
+1. Replace `wire.Build(...)` → `kessoku.Inject[T]("FuncName", ...)`
+2. Add `kessoku.Async()` around slow providers
+3. Update `//go:generate` directive
 
-```mermaid
-gantt
-    title Sequential vs Parallel Execution
-    dateFormat X
-    axisFormat %Lms
-    
-    section Sequential (450ms)
-    Database    :0, 200
-    Cache       :200, 350  
-    Auth        :350, 450
-    
-    section Parallel (200ms)
-    Database    :0, 200
-    Cache       :0, 150
-    Auth        :0, 100
-```
+**Result:** Same functionality, faster startup.
 
-**Perfect for:**
-- Multiple slow services (databases, APIs, external connections)  
-- Performance-critical environments (microservices, serverless)
-- Existing google/wire projects wanting speed improvements
+## API Cheat Sheet
 
-## Migration from google/wire
+- **`kessoku.Async(provider)`** - Make this provider run in parallel
+- **`kessoku.Provide(fn)`** - Regular provider (sequential)
+- **`kessoku.Inject[T](name, ...)`** - Generate the injector function
+- **`kessoku.Set(...)`** - Group providers for reuse
+- **`kessoku.Value(val)`** - Inject constants
+- **`kessoku.Bind[Interface](impl)`** - Interface → implementation
 
-**Already using google/wire?** Upgrade in 2 minutes:
-
-```go
-// Before
-//go:generate wire
-func InitApp() (*App, error) {
-    wire.Build(NewDB, NewCache, NewApp)
-    return &App{}, nil
-}
-
-// After  
-//go:generate go tool kessoku $GOFILE
-var _ = kessoku.Inject[*App]("InitApp",
-    kessoku.Async(kessoku.Provide(NewDB)),    // now parallel
-    kessoku.Async(kessoku.Provide(NewCache)), // now parallel
-    kessoku.Provide(NewApp),
-)
-```
-
-**Changes:** Replace `wire.Build()` → `kessoku.Inject[T]()`, add `kessoku.Async()` for slow providers
-
-## API Reference
-
-**Core functions:**
-- **`kessoku.Inject[T](name, ...providers)`** - Declares an injector function
-- **`kessoku.Async(provider)`** - Enables parallel execution  
-- **`kessoku.Provide(fn)`** - Wraps a provider function
-- **`kessoku.Set(...providers)`** - Groups providers for reuse
-- **`kessoku.Bind[Interface](provider)`** - Interface binding
-- **`kessoku.Value(val)`** - Constant value injection
-
-**Dependency rules:** Independent providers run in parallel, dependent providers wait automatically.
+**Rule:** Independent providers run in parallel, dependent ones wait automatically.
 
 ---
 
-## Advanced Usage
+## vs Alternatives
 
-**Installation:** `go get github.com/mazrean/kessoku`
+| Tool | Best For | Startup Speed | Learning Curve |
+|------|----------|---------------|----------------|
+| **Kessoku** | Apps with slow services needing fast startup | Up to 1-5x faster[^1] | Easy (if you know wire) |
+| **google/wire** | Simple apps, maximum stability | Baseline | Easy |
+| **uber/fx** | Complex apps with lifecycles, hooks | Slowest (runtime) | Steep |
 
-**vs Alternatives:**
-- **Kessoku:** Parallel execution, 2.25x faster startup
-- **google/wire:** Sequential only, simpler but slower  
-- **uber/fx:** Runtime DI, complex lifecycles, reflection overhead
+[^1]: Speed improvement depends on number of slow, independent services
 
-**Examples:** See [examples/](./examples/) - basic, async_parallel, sets
+**Choose Kessoku if:** You have multiple slow services (DB, cache, APIs) and startup time matters  
+**Choose google/wire if:** You want maximum simplicity and startup speed isn't critical  
+**Choose uber/fx if:** You need complex lifecycle management and don't mind runtime overhead
 
+**Examples:** [examples/](./examples/) - basic, async_parallel, sets  
 **Full docs:** [pkg.go.dev/github.com/mazrean/kessoku](https://pkg.go.dev/github.com/mazrean/kessoku)
