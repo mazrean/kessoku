@@ -100,14 +100,76 @@ go generate && go run main.go
 # Shows: App running with DB-connected and Cache-ready (parallel startup)
 ```
 
-## From google/wire
+## Installation
 
-**2-minute upgrade:**
-1. Replace `wire.Build(...)` → `kessoku.Inject[T]("FuncName", ...)`
-2. Add `kessoku.Async()` around slow providers
-3. Update `//go:generate` directive
+**Recommended:**
+```bash
+go get -tool github.com/mazrean/kessoku
+```
 
-**Result:** Same functionality, faster startup.
+<details>
+<summary>Download binary</summary>
+
+Download the latest binary for your platform from the [releases page](https://github.com/mazrean/kessoku/releases).
+
+**Linux/macOS:**
+```bash
+# Download and install (replace with your platform)
+curl -L -o kessoku.tar.gz https://github.com/mazrean/kessoku/releases/latest/download/kessoku_Linux_x86_64.tar.gz
+tar -xzf kessoku.tar.gz
+sudo mv kessoku /usr/local/bin/
+```
+
+**Windows:**
+```powershell
+# Download and install
+Invoke-WebRequest -Uri "https://github.com/mazrean/kessoku/releases/latest/download/kessoku_Windows_x86_64.zip" -OutFile "kessoku.zip"
+Expand-Archive -Path "kessoku.zip" -DestinationPath "."
+Move-Item "kessoku.exe" "$env:USERPROFILE\bin\" -Force
+# Add $env:USERPROFILE\bin to your PATH if not already added
+```
+
+**Verify:**
+```bash
+kessoku --version
+```
+
+</details>
+
+<details>
+<summary>Homebrew (macOS/Linux)</summary>
+
+```bash
+brew install mazrean/tap/kessoku
+```
+
+</details>
+
+<details>
+<summary>Package Managers</summary>
+
+**Debian/Ubuntu:**
+```bash
+wget https://github.com/mazrean/kessoku/releases/latest/download/kessoku_amd64.deb
+sudo apt install ./kessoku_amd64.deb
+```
+
+**Red Hat/CentOS/Fedora:**
+```bash
+wget https://github.com/mazrean/kessoku/releases/latest/download/kessoku_amd64.rpm
+# For CentOS/RHEL 7 and older
+sudo yum install ./kessoku_amd64.rpm
+# For CentOS/RHEL 8+ and Fedora
+sudo dnf install ./kessoku_amd64.rpm
+```
+
+**Alpine Linux:**
+```bash
+wget https://github.com/mazrean/kessoku/releases/latest/download/kessoku_amd64.apk
+sudo apk add --allow-untrusted kessoku_amd64.apk
+```
+
+</details>
 
 ## API Cheat Sheet
 
@@ -128,7 +190,7 @@ go generate && go run main.go
 
 | Tool | Best For | Startup Speed | Learning Curve |
 |------|----------|---------------|----------------|
-| **Kessoku** | Apps with slow services needing fast startup | Up to 1-5x faster[^1] | Easy (if you know wire) |
+| **Kessoku** | Apps with slow services needing fast startup | Faster[^1] | Easy |
 | **google/wire** | Simple apps, maximum stability | Baseline | Easy |
 | **uber/fx** | Complex apps with lifecycles, hooks | Slowest (runtime) | Steep |
 
