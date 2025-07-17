@@ -174,6 +174,7 @@ sudo apk add --allow-untrusted kessoku_amd64.apk
 ## API Reference
 
 **Full docs:** [pkg.go.dev/github.com/mazrean/kessoku](https://pkg.go.dev/github.com/mazrean/kessoku)
+
 **Examples:** [examples/](./examples/) - basic, async_parallel, sets 
 
 - **`kessoku.Async(provider)`** - Make this provider run in parallel
