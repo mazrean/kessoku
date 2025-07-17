@@ -171,9 +171,10 @@ sudo apk add --allow-untrusted kessoku_amd64.apk
 
 </details>
 
-## API Cheat Sheet
+## API Reference
 
 **Full docs:** [pkg.go.dev/github.com/mazrean/kessoku](https://pkg.go.dev/github.com/mazrean/kessoku)
+**Examples:** [examples/](./examples/) - basic, async_parallel, sets 
 
 - **`kessoku.Async(provider)`** - Make this provider run in parallel
 - **`kessoku.Provide(fn)`** - Regular provider (sequential)
@@ -188,16 +189,13 @@ sudo apk add --allow-untrusted kessoku_amd64.apk
 
 ## vs Alternatives
 
-| Tool | Best For | Startup Speed | Learning Curve |
-|------|----------|---------------|----------------|
-| **Kessoku** | Apps with slow services needing fast startup | Faster[^1] | Easy |
-| **google/wire** | Simple apps, maximum stability | Baseline | Easy |
-| **uber/fx** | Complex apps with lifecycles, hooks | Slowest (runtime) | Steep |
-
-[^1]: Speed improvement depends on number of slow, independent services
+| | Kessoku | google/wire | uber/fx |
+|---|---------|-------------|---------|
+| **Startup Speed** | Parallel | Sequential | Sequential + runtime |
+| **Learning Curve** | Minimal | Minimal | Steep |
+| **Production Ready** | Yes | Yes | Yes |
 
 **Choose Kessoku if:** You have multiple slow services (DB, cache, APIs) and startup time matters  
 **Choose google/wire if:** You want maximum simplicity and startup speed isn't critical  
 **Choose uber/fx if:** You need complex lifecycle management and don't mind runtime overhead
-
-**Examples:** [examples/](./examples/) - basic, async_parallel, sets  
+ 
