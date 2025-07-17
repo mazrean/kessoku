@@ -1,8 +1,9 @@
-// Package kessoku provides fast, parallel dependency injection code generation for Go.
+// Package kessoku provides dependency injection code generation with parallel execution capabilities.
 // 
-// Kessoku makes your Go applications start 2.25x faster by executing independent
-// dependencies in parallel instead of sequentially. Perfect for speeding up
-// database connections, API initializations, and other slow startup operations.
+// Kessoku extends google/wire's compile-time dependency injection with automatic parallelization.
+// Independent providers can execute concurrently, reducing application startup time by up to 2.25x.
+// Particularly effective for applications with multiple slow initialization operations such as
+// database connections, API client setup, and external service configurations.
 package kessoku
 
 // name represents an identifier for injectors and arguments.
