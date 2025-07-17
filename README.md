@@ -1,271 +1,202 @@
 # Kessoku
 
-A dependency injection code generator for Go, similar to [google/wire](https://github.com/google/wire). Kessoku generates Go code for compile-time dependency injection, eliminating runtime reflection overhead.
+[![Go Reference](https://pkg.go.dev/badge/github.com/mazrean/kessoku.svg)](https://pkg.go.dev/github.com/mazrean/kessoku)
 
-## Features
+**Kessoku is a compile-time dependency injection library for Go that speeds up application startup through parallel dependency injection.** Unlike traditional DI frameworks that initialize services sequentially, Kessoku automatically executes independent providers in parallel, dramatically reducing startup time for applications with multiple slow services. Built as a powerful alternative to google/wire, it generates optimized code at compile time with zero runtime overhead.
 
-- ✅ **Compile-time dependency injection** - No runtime reflection
-- ✅ **Automatic dependency resolution** - Topological sorting of dependencies  
-- ✅ **Error handling** - Proper error propagation in generated code
-- ✅ **Cycle detection** - Prevents circular dependencies
-- ✅ **Go generate integration** - Works seamlessly with `go generate`
-- ✅ **Cross-platform support** (Linux, Windows, macOS)
+**Sequential:** DB → Cache → Auth = Total waiting time  
+**Parallel:** DB + Cache + Auth = Fastest service wins
+
+```go
+// Before: Sequential (google/wire)
+wire.Build(NewDB, NewCache, NewAuth, NewApp)     // Each waits for previous
+
+// After: Parallel (Kessoku)  
+kessoku.Inject[*App]("InitApp",
+    kessoku.Async(kessoku.Provide(NewDB)),      // }
+    kessoku.Async(kessoku.Provide(NewCache)),   // } All run together
+    kessoku.Async(kessoku.Provide(NewAuth)),    // }
+    kessoku.Provide(NewApp),                    // waits for all
+)                                               // Fastest possible startup
+```
+
+**Result:** Every restart gets faster. Multiple slow services? Maximum impact.
+
+## Why This Matters
+
+**Your typical day:** Restart your app 10 times during development. Each restart wastes time waiting for services to start one by one.
+
+```mermaid
+gantt
+    title Sequential vs Parallel Startup
+    dateFormat X
+    axisFormat %L
+    
+    section Sequential (slow)
+    DB Service    :0, 3
+    Cache Service :3, 5  
+    Auth Service  :5, 6
+    
+    section Parallel (fast)
+    DB Service    :0, 3
+    Cache Service :0, 2
+    Auth Service  :0, 1
+```
+
+**Perfect for:**
+- **Cold start nightmares:** Your Lambda/serverless function times out during initialization
+- **Dev restart hell:** You restart your app 10+ times daily, losing 3+ seconds each time  
+- **Multi-DB apps:** PostgreSQL + Redis + S3 + Auth0 = 800ms+ sequential startup pain
+- **google/wire refugees:** You love compile-time DI but hate slow startup times
+
+## Quick Start
+
+**Install kessoku:**
+
+```bash
+go get -tool github.com/mazrean/kessoku
+```
+
+**Create `main.go`:**
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+    "github.com/mazrean/kessoku"
+)
+
+func SlowDB() string {
+    time.Sleep(200 * time.Millisecond)
+    return "DB-connected"
+}
+
+func SlowCache() string {
+    time.Sleep(150 * time.Millisecond)
+    return "Cache-ready"
+}
+
+//go:generate go tool kessoku $GOFILE
+
+var _ = kessoku.Inject[string]("InitApp",
+    kessoku.Async(kessoku.Provide(SlowDB)),
+    kessoku.Async(kessoku.Provide(SlowCache)),
+    kessoku.Provide(func(db, cache string) string {
+        return fmt.Sprintf("App running with %s and %s", db, cache)
+    }),
+)
+
+func main() {
+    start := time.Now()
+    result, _ := InitApp()
+    fmt.Printf("%s in %v\n", result, time.Since(start))
+}
+```
+
+**Run:**
+```bash
+go generate && go run main.go
+# Shows: App running with DB-connected and Cache-ready (parallel startup)
+```
 
 ## Installation
 
-### From Source
-
+**Recommended:**
 ```bash
-go install github.com/mazrean/kessoku/cmd/kessoku@latest
+go get -tool github.com/mazrean/kessoku
 ```
 
-### From Releases
+<details>
+<summary>Download binary</summary>
 
-Download the latest binary from the [releases page](https://github.com/mazrean/kessoku/releases).
+Download the latest binary for your platform from the [releases page](https://github.com/mazrean/kessoku/releases).
 
-### Via Homebrew
+**Linux/macOS:**
+```bash
+# Download and install (replace with your platform)
+curl -L -o kessoku.tar.gz https://github.com/mazrean/kessoku/releases/latest/download/kessoku_Linux_x86_64.tar.gz
+tar -xzf kessoku.tar.gz
+sudo mv kessoku /usr/local/bin/
+```
+
+**Windows:**
+```powershell
+# Download and install
+Invoke-WebRequest -Uri "https://github.com/mazrean/kessoku/releases/latest/download/kessoku_Windows_x86_64.zip" -OutFile "kessoku.zip"
+Expand-Archive -Path "kessoku.zip" -DestinationPath "."
+Move-Item "kessoku.exe" "$env:USERPROFILE\bin\" -Force
+# Add $env:USERPROFILE\bin to your PATH if not already added
+```
+
+**Verify:**
+```bash
+kessoku --version
+```
+
+</details>
+
+<details>
+<summary>Homebrew (macOS/Linux)</summary>
 
 ```bash
 brew install mazrean/tap/kessoku
 ```
 
-## Quick Start
+</details>
 
-### 1. Create Provider Functions
+<details>
+<summary>Other Package Managers</summary>
 
-```go
-package main
-
-import "github.com/mazrean/kessoku"
-
-type Config struct {
-    DatabaseURL string
-    Port        int
-}
-
-func NewConfig() *Config {
-    return &Config{
-        DatabaseURL: "postgres://localhost/mydb",
-        Port:        8080,
-    }
-}
-
-type Database struct {
-    url string
-}
-
-func NewDatabase(config *Config) (*Database, error) {
-    return &Database{url: config.DatabaseURL}, nil
-}
-
-type UserService struct {
-    db *Database
-}
-
-func NewUserService(db *Database) *UserService {
-    return &UserService{db: db}
-}
-
-type App struct {
-    config  *Config
-    service *UserService
-}
-
-func NewApp(config *Config, service *UserService) *App {
-    return &App{
-        config:  config,
-        service: service,
-    }
-}
-```
-
-### 2. Define Injector Function
-
-Create a file `kessoku.go` with injector declarations:
-
-```go
-package main
-
-//go:generate go tool kessoku $GOFILE
-
-import "github.com/mazrean/kessoku"
-
-// InitializeApp creates the application with all dependencies.
-var _ = kessoku.Inject[*App](
-    "InitializeApp",
-    kessoku.Provide(NewConfig),
-    kessoku.Provide(NewDatabase),
-    kessoku.Provide(NewUserService),
-    kessoku.Provide(NewApp),
-)
-```
-
-### 3. Generate Dependency Injection Code
-
+**Debian/Ubuntu:**
 ```bash
-# Using go generate (recommended)
-go generate ./...
-
-# Or run kessoku directly
-go tool kessoku kessoku.go
+wget https://github.com/mazrean/kessoku/releases/latest/download/kessoku_amd64.deb
+sudo apt install ./kessoku_amd64.deb
 ```
 
-This generates `*_band.go` files with the actual dependency injection implementation.
-
-### 4. Use the Generated Code
-
-```go
-func main() {
-    app, err := InitializeApp()
-    if err != nil {
-        log.Fatal("Failed to initialize app:", err)
-    }
-    
-    // Use your app
-    fmt.Printf("App running on port %d\n", app.config.Port)
-}
-```
-
-## CLI Usage
-
+**Red Hat/CentOS/Fedora:**
 ```bash
-# Generate DI code for specific files
-go tool kessoku kessoku.go
-
-# Multiple files
-go tool kessoku file1.go file2.go
-
-# Using go generate (recommended)
-go generate ./...
-
-# Show version
-go tool kessoku --version
+wget https://github.com/mazrean/kessoku/releases/latest/download/kessoku_amd64.rpm
+# For CentOS/RHEL 7 and older
+sudo yum install ./kessoku_amd64.rpm
+# For CentOS/RHEL 8+ and Fedora
+sudo dnf install ./kessoku_amd64.rpm
 ```
 
-### Options
+**Alpine Linux:**
+```bash
+wget https://github.com/mazrean/kessoku/releases/latest/download/kessoku_amd64.apk
+sudo apk add --allow-untrusted kessoku_amd64.apk
+```
 
-- `-l, --log-level` - Log level (debug, info, warn, error)
-- `-v, --version` - Show version information
+</details>
 
 ## API Reference
 
-### kessoku.Inject
+**Full docs:** [pkg.go.dev/github.com/mazrean/kessoku](https://pkg.go.dev/github.com/mazrean/kessoku)
 
-Declares an injector function with its dependencies:
+**Examples:** [examples/](./examples/) - basic, async_parallel, sets 
 
-```go
-var _ = kessoku.Inject[*App](
-    "InitializeApp",       // Function name to generate
-    kessoku.Provide(NewConfig),    // Provider functions
-    kessoku.Provide(NewDatabase),
-    kessoku.Provide(NewService),
-    kessoku.Provide(NewApp),
-)
-```
+- **`kessoku.Async(provider)`** - Make this provider run in parallel
+- **`kessoku.Provide(fn)`** - Regular provider (sequential)
+- **`kessoku.Inject[T](name, ...)`** - Generate the injector function
+- **`kessoku.Set(...)`** - Group providers for reuse
+- **`kessoku.Value(val)`** - Inject constants
+- **`kessoku.Bind[Interface](impl)`** - Interface → implementation
 
-### kessoku.Provide
+**Rule:** Independent async providers run in parallel, dependent ones wait automatically.
 
-Wraps a provider function for dependency injection:
+---
 
-```go
-kessoku.Provide(NewConfig)     // Provides *Config
-kessoku.Provide(NewDatabase)   // Provides *Database, error
-```
+## vs Alternatives
 
-### kessoku.Bind
+| | Kessoku | google/wire | uber/fx |
+|---|---------|-------------|---------|
+| **Startup Speed** | Parallel | Sequential | Sequential + runtime |
+| **Learning Curve** | Minimal | Minimal | Steep |
+| **Production Ready** | Yes | Yes | Yes |
 
-Binds an interface to its implementation:
-
-```go
-var _ = kessoku.Inject[*App](
-    "InitializeApp",
-    kessoku.Bind[UserRepository](kessoku.Provide(NewUserRepositoryImpl)),
-    kessoku.Provide(NewApp),
-)
-```
-
-### kessoku.Value
-
-Provides a constant value:
-
-```go
-var _ = kessoku.Inject[*App](
-    "InitializeApp",
-    kessoku.Value("postgres://localhost/mydb"),  // Provides string
-    kessoku.Provide(NewApp),
-)
-```
-
-### kessoku.Arg
-
-Declares a runtime argument to be passed to the injector:
-
-```go
-var _ = kessoku.Inject[*App](
-    "InitializeApp",
-    kessoku.Arg[*Config]("config"),  // Runtime argument
-    kessoku.Provide(NewApp),
-)
-```
-
-## Examples
-
-See the [examples/](./examples/) directory for complete working examples.
-
-## Development
-
-### Prerequisites
-
-- Go 1.24 or later
-- golangci-lint (for linting)
-
-### Building
-
-```bash
-# Build the binary
-go build -o bin/kessoku ./cmd/kessoku
-
-# Run directly
-go run ./cmd/kessoku ./examples/basic/kessoku.go
-```
-
-### Testing
-
-```bash
-# Run tests
-go test -v ./...
-
-# Format code
-go fmt ./...
-
-# Run Go analyzer linter
-go tool tools lint ./...
-
-# Test code generation
-go generate ./examples/...
-```
-
-### Releasing
-
-This project uses GoReleaser for automated releases:
-
-```bash
-# Create a snapshot release (local testing)
-go tool goreleaser release --snapshot --clean
-
-# Create a full release (requires git tag)
-git tag v1.0.0
-go tool goreleaser release --clean
-```
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+**Choose Kessoku if:** You have multiple slow services (DB, cache, APIs) and startup time matters  
+**Choose google/wire if:** You want maximum simplicity and startup speed isn't critical  
+**Choose uber/fx if:** You need complex lifecycle management and don't mind runtime overhead
+ 
