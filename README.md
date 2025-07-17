@@ -273,11 +273,9 @@ For detailed API documentation, see the [Go Reference](https://pkg.go.dev/github
 
 See the [examples/](./examples/) directory for complete working examples:
 
-- **[basic/](./examples/basic/)** - Simple synchronous dependency injection
-- **[async_parallel/](./examples/async_parallel/)** - Parallel execution of independent async providers
-- **[complex_async/](./examples/complex_async/)** - Complex async dependency chains with coordination
-- **[sets/](./examples/sets/)** - Using value sets for configuration
-- **[cross_package/](./examples/cross_package/)** - Cross-package dependency injection
+- **[basic/](./examples/basic/)** - Simple dependency injection with in-memory database and user operations
+- **[async_parallel/](./examples/async_parallel/)** - Parallel execution demonstrating 2.2x performance improvement
+- **[sets/](./examples/sets/)** - Provider organization with Set patterns (basic, reusable, nested)
 
 ## Development
 
