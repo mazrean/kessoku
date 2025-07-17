@@ -132,8 +132,8 @@ type (
 	UserRepository  struct{}
 	OrderRepository struct{}
 	Server          struct {
-		Port        int
 		DatabaseURL string
+		Port        int
 		Debug       bool
 	}
 )
