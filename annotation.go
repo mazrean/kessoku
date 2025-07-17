@@ -60,7 +60,7 @@ func (p asyncProvider[T, F]) Fn() T {
 	return p.fn.Fn()
 }
 
-// Async enables PARALLEL execution for slow providers - the key to 2.25x faster startup! 🚀
+// Async enables parallel execution for slow providers, improving startup performance.
 //
 // Wrap slow operations (DB connections, API calls, cache setup) with Async() to run them
 // in parallel instead of waiting for each one sequentially. Perfect for cutting startup time.
