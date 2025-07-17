@@ -30,12 +30,31 @@ Same Result:       200ms  (55% improvement)
 
 **Important:** Providers with dependencies still execute in correct order, but independent providers run concurrently.
 
+### When to Use Kessoku
+
+**Ideal for applications with:**
+- Multiple slow initialization operations (database connections, API clients, file I/O)
+- Independent service setup that currently runs sequentially
+- Existing google/wire usage that could benefit from parallelization
+- Performance-critical startup requirements (microservices, Lambda functions)
+
+**Consider alternatives if:**
+- Your app has very few dependencies (< 3 providers)
+- Most providers are already fast (< 50ms each)
+- Startup time is not a performance concern
+
 ### Key Benefits
 
-- **Immediate Performance Gains** - Up to 2.25x faster startup with existing code
+- **Measurable Performance Gains** - Up to 2.25x faster startup demonstrated in examples
 - **Familiar API** - Compatible with google/wire patterns and conventions
 - **Easy Migration** - Minimal changes required from existing google/wire projects
 - **Automatic Coordination** - Handles dependency ordering and error propagation in parallel execution
+
+### Trade-offs
+
+- **Memory overhead** - Uses more goroutines during initialization
+- **Complexity** - Generated code is more complex than sequential versions
+- **Context requirement** - Async providers require context.Context parameter
 
 ## Performance Comparison
 
@@ -66,6 +85,10 @@ Same Result:       200ms  (55% improvement)
 | **Test Suite Execution** | 20 seconds | 9 seconds | 11 seconds per test run |
 | **Development Cycle** | Slow feedback | Fast feedback | Improved iteration speed |
 | **Production Deployment** | Higher latency | Lower latency | Better user experience |
+
+**Performance calculation:** The 2.25x improvement (450ms → 200ms) comes from the specific example where three independent 200ms, 150ms, and 100ms operations run in parallel instead of sequentially. Actual improvements depend on your specific provider durations and dependency structure.
+
+**Measured in [examples/async_parallel](./examples/async_parallel/):** Real timing tests show consistent ~2.2x improvement on typical hardware.
 
 ## Installation
 
@@ -231,6 +254,22 @@ var _ = kessoku.Inject[*App](
 2. Wrap slow providers with `kessoku.Async()` for parallel execution
 3. Update `//go:generate` directive
 4. Result: Up to 2.25x faster startup performance
+
+## Comparison with Alternatives
+
+| Feature | Kessoku | google/wire | uber/fx | sarulabs/di |
+|---------|---------|-------------|---------|-------------|
+| **Execution Model** | Parallel + Sequential | Sequential only | Runtime | Runtime |
+| **Performance** | High (parallel) | Medium | Low (reflection) | Low (reflection) |
+| **Learning Curve** | Low (wire-like) | Low | Medium | Medium |
+| **Code Generation** | Yes | Yes | No | No |
+| **Type Safety** | Compile-time | Compile-time | Runtime | Runtime |
+| **Best For** | Performance-critical apps | Simple DI | Complex lifecycles | Runtime flexibility |
+
+**Choose Kessoku when:** Startup performance matters and you have independent, slow providers.
+**Choose google/wire when:** You need simple DI without performance requirements.
+**Choose uber/fx when:** You need complex dependency lifecycles and shutdown hooks.
+**Choose runtime DI when:** You need dynamic dependency resolution.
 
 ## Examples
 
