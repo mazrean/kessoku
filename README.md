@@ -111,6 +111,8 @@ go generate && go run main.go
 
 ## API Cheat Sheet
 
+**Full docs:** [pkg.go.dev/github.com/mazrean/kessoku](https://pkg.go.dev/github.com/mazrean/kessoku)
+
 - **`kessoku.Async(provider)`** - Make this provider run in parallel
 - **`kessoku.Provide(fn)`** - Regular provider (sequential)
 - **`kessoku.Inject[T](name, ...)`** - Generate the injector function
@@ -118,7 +120,7 @@ go generate && go run main.go
 - **`kessoku.Value(val)`** - Inject constants
 - **`kessoku.Bind[Interface](impl)`** - Interface → implementation
 
-**Rule:** Independent providers run in parallel, dependent ones wait automatically.
+**Rule:** Independent async providers run in parallel, dependent ones wait automatically.
 
 ---
 
@@ -137,4 +139,3 @@ go generate && go run main.go
 **Choose uber/fx if:** You need complex lifecycle management and don't mind runtime overhead
 
 **Examples:** [examples/](./examples/) - basic, async_parallel, sets  
-**Full docs:** [pkg.go.dev/github.com/mazrean/kessoku](https://pkg.go.dev/github.com/mazrean/kessoku)
