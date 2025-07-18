@@ -417,6 +417,46 @@ var _ = kessoku.Inject[*App](
 			expectedInjectorName: "InitializeService",
 			shouldError:          false,
 		},
+		{
+			name: "bind provider should create multiple type bindings",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Interface interface {
+	DoSomething() string
+}
+
+type ConcreteImpl struct{}
+
+func (c *ConcreteImpl) DoSomething() string {
+	return "implementation"
+}
+
+func NewConcreteImpl() *ConcreteImpl {
+	return &ConcreteImpl{}
+}
+
+type Service struct {
+	impl Interface
+}
+
+func NewService(impl Interface) *Service {
+	return &Service{impl: impl}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	kessoku.Bind[Interface](kessoku.Provide(NewConcreteImpl)),
+	kessoku.Provide(NewService),
+)
+`,
+			expectedBuilds:       1,
+			expectedProviders:    2,
+			expectedArgs:         0,
+			expectedInjectorName: "InitializeService",
+			shouldError:          false,
+		},
 	}
 
 	// Additional test for edge cases related to Set variable parsing
@@ -557,9 +597,19 @@ var _ = kessoku.Inject[*Service](
 				var foundProvider *ProviderSpec
 				for _, provider := range build.Providers {
 					if len(provider.Provides) > 0 {
-						typeName := provider.Provides[0].String()
-						if typeName == tt.expectedProviderType {
-							foundProvider = provider
+						// Check all provided types, not just the first one
+						for _, typeGroup := range provider.Provides {
+							for _, providedType := range typeGroup {
+								if providedType.String() == tt.expectedProviderType {
+									foundProvider = provider
+									break
+								}
+							}
+							if foundProvider != nil {
+								break
+							}
+						}
+						if foundProvider != nil {
 							break
 						}
 					}
@@ -567,6 +617,150 @@ var _ = kessoku.Inject[*Service](
 
 				if foundProvider == nil {
 					t.Errorf("Expected to find provider for type %q", tt.expectedProviderType)
+				}
+			}
+		})
+	}
+}
+
+func TestParseBindProviderMultipleTypes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		content             string
+		name                string
+		expectedBuilds      int
+		expectedProviders   int
+		expectedConcreteType string
+		expectedInterfaceType string
+		shouldError         bool
+	}{
+		{
+			name: "bind provider should provide both concrete and interface types",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Interface interface {
+	DoSomething() string
+}
+
+type ConcreteImpl struct{}
+
+func (c *ConcreteImpl) DoSomething() string {
+	return "implementation"
+}
+
+func NewConcreteImpl() *ConcreteImpl {
+	return &ConcreteImpl{}
+}
+
+type Service struct {
+	impl Interface
+}
+
+func NewService(impl Interface) *Service {
+	return &Service{impl: impl}
+}
+
+type ConcreteService struct {
+	impl *ConcreteImpl
+}
+
+func NewConcreteService(impl *ConcreteImpl) *ConcreteService {
+	return &ConcreteService{impl: impl}
+}
+
+var _ = kessoku.Inject[*ConcreteService](
+	"InitializeConcreteService",
+	kessoku.Bind[Interface](kessoku.Provide(NewConcreteImpl)),
+	kessoku.Provide(NewConcreteService),
+)
+`,
+			expectedBuilds:        1,
+			expectedProviders:     2,
+			expectedConcreteType:  "*command-line-arguments.ConcreteImpl",
+			expectedInterfaceType: "command-line-arguments.Interface",
+			shouldError:           false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			testFile := filepath.Join(tempDir, "test.go")
+
+			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			parser := NewParser()
+			metadata, builds, err := parser.ParseFile(testFile)
+
+			if tt.shouldError {
+				if err == nil {
+					t.Fatal("Expected ParseFile to fail")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ParseFile failed: %v", err)
+			}
+
+			if len(builds) != tt.expectedBuilds {
+				t.Fatalf("Expected %d build directives, got %d", tt.expectedBuilds, len(builds))
+			}
+
+			if metadata == nil {
+				t.Fatal("Expected metadata to be returned")
+			}
+
+			build := builds[0]
+			if len(build.Providers) != tt.expectedProviders {
+				t.Errorf("Expected %d providers, got %d", tt.expectedProviders, len(build.Providers))
+			}
+
+			// Find the bind provider
+			var bindProvider *ProviderSpec
+			for _, provider := range build.Providers {
+				if len(provider.Provides) > 0 {
+					// Check if this provider provides the interface type
+					for _, typeGroup := range provider.Provides {
+						for _, providedType := range typeGroup {
+							if providedType.String() == tt.expectedInterfaceType {
+								bindProvider = provider
+								break
+							}
+						}
+						if bindProvider != nil {
+							break
+						}
+					}
+					if bindProvider != nil {
+						break
+					}
+				}
+			}
+
+			if bindProvider == nil {
+				t.Errorf("Expected to find bind provider for interface type %q", tt.expectedInterfaceType)
+			} else {
+				// TODO: This test will fail initially because the current implementation only
+				// provides the interface type, not both types. After implementing the feature,
+				// this test should verify that bindProvider.Provides contains both types.
+				t.Logf("Current bind provider provides: %v", bindProvider.Provides)
+				
+				// This is what we want to achieve: bindProvider should provide both types
+				// Count total types across all groups
+				totalTypes := 0
+				for _, typeGroup := range bindProvider.Provides {
+					totalTypes += len(typeGroup)
+				}
+				if totalTypes != 2 {
+					t.Errorf("Expected bind provider to provide 2 types (concrete and interface), got %d", totalTypes)
 				}
 			}
 		})
@@ -767,6 +961,171 @@ var _ = kessoku.Inject[*Service](
 					}
 				}
 			}
+		})
+	}
+}
+
+func TestParseBindProviderInterfaces(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		content                      string
+		name                         string
+		expectedBuilds               int
+		expectedProviders            int
+		expectedConcreteTypeProvided bool
+		expectedInterfaceTypeProvided bool
+		shouldError                  bool
+	}{
+		{
+			name: "bind provider should provide both concrete and interface types for dependency resolution",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Interface interface {
+	DoSomething() string
+}
+
+type ConcreteImpl struct{}
+
+func (c *ConcreteImpl) DoSomething() string {
+	return "implementation"
+}
+
+func NewConcreteImpl() *ConcreteImpl {
+	return &ConcreteImpl{}
+}
+
+type ServiceNeedsInterface struct {
+	impl Interface
+}
+
+func NewServiceNeedsInterface(impl Interface) *ServiceNeedsInterface {
+	return &ServiceNeedsInterface{impl: impl}
+}
+
+type ServiceNeedsConcrete struct {
+	impl *ConcreteImpl
+}
+
+func NewServiceNeedsConcrete(impl *ConcreteImpl) *ServiceNeedsConcrete {
+	return &ServiceNeedsConcrete{impl: impl}
+}
+
+type App struct {
+	interfaceService *ServiceNeedsInterface
+	concreteService  *ServiceNeedsConcrete
+}
+
+func NewApp(interfaceService *ServiceNeedsInterface, concreteService *ServiceNeedsConcrete) *App {
+	return &App{
+		interfaceService: interfaceService,
+		concreteService:  concreteService,
+	}
+}
+
+var _ = kessoku.Inject[*App](
+	"InitializeApp",
+	kessoku.Bind[Interface](kessoku.Provide(NewConcreteImpl)),
+	kessoku.Provide(NewServiceNeedsInterface),
+	kessoku.Provide(NewServiceNeedsConcrete),
+	kessoku.Provide(NewApp),
+)
+`,
+			expectedBuilds:                1,
+			expectedProviders:             4,
+			expectedConcreteTypeProvided:  true,  // This is what we want to achieve
+			expectedInterfaceTypeProvided: true,  // This is what we want to achieve
+			shouldError:                   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			testFile := filepath.Join(tempDir, "test.go")
+
+			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			parser := NewParser()
+			metadata, builds, err := parser.ParseFile(testFile)
+
+			if tt.shouldError {
+				if err == nil {
+					t.Fatal("Expected ParseFile to fail")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ParseFile failed: %v", err)
+			}
+
+			if len(builds) != tt.expectedBuilds {
+				t.Fatalf("Expected %d build directives, got %d", tt.expectedBuilds, len(builds))
+			}
+
+			if metadata == nil {
+				t.Fatal("Expected metadata to be returned")
+			}
+
+			build := builds[0]
+			if len(build.Providers) != tt.expectedProviders {
+				t.Errorf("Expected %d providers, got %d", tt.expectedProviders, len(build.Providers))
+			}
+
+			// Find the bind provider
+			var bindProvider *ProviderSpec
+			for _, provider := range build.Providers {
+				if len(provider.Provides) > 0 {
+					for _, typeGroup := range provider.Provides {
+						for _, providedType := range typeGroup {
+							if providedType.String() == "command-line-arguments.Interface" {
+								bindProvider = provider
+								break
+							}
+						}
+						if bindProvider != nil {
+							break
+						}
+					}
+				}
+			}
+
+			if bindProvider == nil {
+				t.Fatal("Expected to find bind provider")
+			}
+
+			// Check if concrete type is provided
+			concreteTypeProvided := false
+			interfaceTypeProvided := false
+			for _, typeGroup := range bindProvider.Provides {
+				for _, providedType := range typeGroup {
+					switch providedType.String() {
+					case "*command-line-arguments.ConcreteImpl":
+						concreteTypeProvided = true
+					case "command-line-arguments.Interface":
+						interfaceTypeProvided = true
+					}
+				}
+			}
+
+			if tt.expectedConcreteTypeProvided && !concreteTypeProvided {
+				t.Errorf("Expected bind provider to provide concrete type, but it doesn't")
+			}
+
+			if tt.expectedInterfaceTypeProvided && !interfaceTypeProvided {
+				t.Errorf("Expected bind provider to provide interface type, but it doesn't")
+			}
+
+			// TODO: After implementing the multi-type binding, this should pass
+			// For now, this test documents the expected behavior
+			t.Logf("Bind provider currently provides: %v", bindProvider.Provides)
 		})
 	}
 }

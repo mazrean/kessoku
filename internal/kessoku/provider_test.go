@@ -40,7 +40,7 @@ func TestInjectorParam(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			param := NewInjectorParam(tt.paramType)
+			param := NewInjectorParam([]types.Type{tt.paramType})
 
 			// Add references
 			for i := 0; i < tt.refCount; i++ {
@@ -69,7 +69,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 		{
 			name: "unreferenced parameter",
 			setupParam: func() *InjectorParam {
-				return NewInjectorParam(intType) // No Ref() call
+				return NewInjectorParam([]types.Type{intType}) // No Ref() call
 			},
 			expectedResult:     "_",
 			shouldBeUnderscore: true,
@@ -77,7 +77,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 		{
 			name: "referenced parameter with channel",
 			setupParam: func() *InjectorParam {
-				p := NewInjectorParam(serviceType)
+				p := NewInjectorParam([]types.Type{serviceType})
 				p.Ref(true) // Reference with channel
 				return p
 			},
@@ -87,7 +87,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 		{
 			name: "referenced parameter without channel",
 			setupParam: func() *InjectorParam {
-				p := NewInjectorParam(serviceType)
+				p := NewInjectorParam([]types.Type{serviceType})
 				p.Ref(false) // Reference without channel
 				return p
 			},
@@ -123,7 +123,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 	t.Run("caching behavior", func(t *testing.T) {
 		t.Parallel()
 
-		param := NewInjectorParam(serviceType)
+		param := NewInjectorParam([]types.Type{serviceType})
 		param.Ref(true) // Reference with channel
 		varPool := NewVarPool()
 
@@ -166,13 +166,13 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 					&InjectorProviderCallStmt{
 						Provider: &ProviderSpec{
 							Type:          ProviderTypeFunction,
-							Provides:      []types.Type{configType},
+							Provides:      [][]types.Type{{configType}},
 							Requires:      []types.Type{},
 							IsReturnError: false,
 							IsAsync:       false,
 						},
 						Arguments: []*InjectorCallArgument{},
-						Returns:   []*InjectorParam{NewInjectorParam(configType)},
+						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
 					},
 				},
 			},
@@ -185,13 +185,13 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 					&InjectorProviderCallStmt{
 						Provider: &ProviderSpec{
 							Type:          ProviderTypeFunction,
-							Provides:      []types.Type{configType},
+							Provides:      [][]types.Type{{configType}},
 							Requires:      []types.Type{},
 							IsReturnError: false,
 							IsAsync:       true,
 						},
 						Arguments: []*InjectorCallArgument{},
-						Returns:   []*InjectorParam{NewInjectorParam(configType)},
+						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
 					},
 				},
 			},
@@ -204,29 +204,29 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 					&InjectorProviderCallStmt{
 						Provider: &ProviderSpec{
 							Type:          ProviderTypeFunction,
-							Provides:      []types.Type{configType},
+							Provides:      [][]types.Type{{configType}},
 							Requires:      []types.Type{},
 							IsReturnError: false,
 							IsAsync:       false, // sync
 						},
 						Arguments: []*InjectorCallArgument{},
-						Returns:   []*InjectorParam{NewInjectorParam(configType)},
+						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
 					},
 					&InjectorProviderCallStmt{
 						Provider: &ProviderSpec{
 							Type:          ProviderTypeFunction,
-							Provides:      []types.Type{serviceType},
+							Provides:      [][]types.Type{{serviceType}},
 							Requires:      []types.Type{configType},
 							IsReturnError: false,
 							IsAsync:       true, // async
 						},
 						Arguments: []*InjectorCallArgument{
 							{
-								Param:  NewInjectorParam(configType),
+								Param:  NewInjectorParam([]types.Type{configType}),
 								IsWait: false,
 							},
 						},
-						Returns: []*InjectorParam{NewInjectorParam(serviceType)},
+						Returns: []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
 					},
 				},
 			},
@@ -241,13 +241,13 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 							&InjectorProviderCallStmt{
 								Provider: &ProviderSpec{
 									Type:          ProviderTypeFunction,
-									Provides:      []types.Type{configType},
+									Provides:      [][]types.Type{{configType}},
 									Requires:      []types.Type{},
 									IsReturnError: false,
 									IsAsync:       true, // nested async
 								},
 								Arguments: []*InjectorCallArgument{},
-								Returns:   []*InjectorParam{NewInjectorParam(configType)},
+								Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
 							},
 						},
 					},
@@ -264,13 +264,13 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 							&InjectorProviderCallStmt{
 								Provider: &ProviderSpec{
 									Type:          ProviderTypeFunction,
-									Provides:      []types.Type{configType},
+									Provides:      [][]types.Type{{configType}},
 									Requires:      []types.Type{},
 									IsReturnError: false,
 									IsAsync:       false, // nested sync
 								},
 								Arguments: []*InjectorCallArgument{},
-								Returns:   []*InjectorParam{NewInjectorParam(configType)},
+								Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
 							},
 						},
 					},
@@ -317,7 +317,7 @@ func TestInjectorParam_Type(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			param := NewInjectorParam(tt.typeExpr)
+			param := NewInjectorParam([]types.Type{tt.typeExpr})
 			result := param.Type()
 			if result != tt.typeExpr {
 				t.Errorf("Type() = %v, want %v", result, tt.typeExpr)
