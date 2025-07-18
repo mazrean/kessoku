@@ -199,4 +199,6 @@ sudo apk add --allow-untrusted kessoku_amd64.apk
 **Choose Kessoku if:** You have multiple slow services (DB, cache, APIs) and startup time matters  
 **Choose google/wire if:** You want maximum simplicity and startup speed isn't critical  
 **Choose uber/fx if:** You need complex lifecycle management and don't mind runtime overhead
- 
+
+## License
+[MIT License](./LICENSE)
