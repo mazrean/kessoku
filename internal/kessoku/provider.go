@@ -28,7 +28,7 @@ const (
 type ProviderSpec struct {
 	ASTExpr       ast.Expr
 	Type          ProviderType
-	Provides      []types.Type
+	Provides      [][]types.Type
 	Requires      []types.Type
 	IsReturnError bool
 	IsAsync       bool
@@ -47,16 +47,16 @@ type BuildDirective struct {
 }
 
 type InjectorParam struct {
-	t           types.Type
+	types       []types.Type
 	name        string
 	channelName string
 	refCounter  int
 	withChannel bool
 }
 
-func NewInjectorParam(t types.Type) *InjectorParam {
+func NewInjectorParam(ts []types.Type) *InjectorParam {
 	return &InjectorParam{
-		t: t,
+		types: ts,
 	}
 }
 
@@ -73,8 +73,7 @@ func (p *InjectorParam) Name(varPool *VarPool) string {
 	if p.refCounter == 0 {
 		return "_"
 	}
-
-	p.name = varPool.Get(p.t)
+	p.name = varPool.Get(p.types[0])
 
 	return p.name
 }
@@ -87,7 +86,7 @@ func (p *InjectorParam) ChannelName(varPool *VarPool) string {
 	if p.refCounter == 0 {
 		return "_"
 	}
-	p.channelName = varPool.GetChannel(p.t)
+	p.channelName = varPool.GetChannel(p.types[0])
 
 	return p.channelName
 }
@@ -97,7 +96,7 @@ func (p *InjectorParam) WithChannel() bool {
 }
 
 func (p *InjectorParam) Type() types.Type {
-	return p.t
+	return p.types[0]
 }
 
 type InjectorArgument struct {
