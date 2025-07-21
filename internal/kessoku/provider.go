@@ -47,9 +47,9 @@ type BuildDirective struct {
 }
 
 type InjectorParam struct {
-	types       []types.Type
 	name        string
 	channelName string
+	types       []types.Type
 	refCounter  int
 	withChannel bool
 }
