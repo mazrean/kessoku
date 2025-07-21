@@ -211,7 +211,7 @@ func TestNewGraph(t *testing.T) {
 				Imports: make(map[string]*ast.ImportSpec),
 			}
 
-			graph, err := NewGraph(metaData, tt.build)
+			graph, err := NewGraph(metaData, tt.build, NewVarPool())
 
 			if tt.expectError {
 				if err == nil {
@@ -389,7 +389,9 @@ func TestCreateASTTypeExpr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			expr, imports, err := createASTTypeExpr(tt.pkg, tt.typeExpr)
+			varPool := NewVarPool()
+			existingImports := make(map[string]*ast.ImportSpec)
+			expr, err := createASTTypeExpr(tt.pkg, tt.typeExpr, varPool, existingImports)
 
 			if tt.shouldError {
 				if err == nil {
@@ -413,14 +415,16 @@ func TestCreateASTTypeExpr(t *testing.T) {
 				return
 			}
 
-			if len(imports) != len(tt.expectedImports) {
-				t.Errorf("Expected %d imports, got %d: %v", len(tt.expectedImports), len(imports), imports)
+			// Check imports in existingImports map
+			if len(existingImports) != len(tt.expectedImports) {
+				t.Errorf("Expected %d imports, got %d", len(tt.expectedImports), len(existingImports))
 				return
 			}
 
-			for i, expectedImport := range tt.expectedImports {
-				if imports[i] != expectedImport {
-					t.Errorf("Expected import %q at index %d, got %q", expectedImport, i, imports[i])
+			// Verify each expected import is present
+			for _, expectedImport := range tt.expectedImports {
+				if _, exists := existingImports[expectedImport]; !exists {
+					t.Errorf("Expected import %q not found in existingImports", expectedImport)
 				}
 			}
 		})
@@ -532,7 +536,7 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 				reverseEdges: make(map[*node][]*node),
 			}
 
-			node, err := graph.autoAddMissingDependencies(tt.metaData, tt.dependencyType)
+			node, err := graph.autoAddMissingDependencies(tt.metaData, tt.dependencyType, NewVarPool())
 
 			if tt.expectError {
 				if err == nil {
@@ -1109,12 +1113,12 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 				Imports: make(map[string]*ast.ImportSpec),
 			}
 
-			graph, err := NewGraph(metaData, tt.build)
+			graph, err := NewGraph(metaData, tt.build, NewVarPool())
 			if err != nil {
 				t.Fatalf("Failed to create graph: %v", err)
 			}
 
-			injector, err := graph.Build(metaData)
+			injector, err := graph.Build(metaData, NewVarPool())
 			if tt.expectError {
 				if err == nil {
 					t.Error("Expected error but got none")
