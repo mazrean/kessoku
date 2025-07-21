@@ -284,19 +284,28 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 
 	fnProviderMap := make(map[string]*fnProvider)
 	for _, provider := range build.Providers {
-		for i, t := range provider.Provides {
-			if t == nil {
-				return nil, fmt.Errorf("provider has nil type at index %d", i)
-			}
-			key := t.String()
+		for groupIndex, typeGroup := range provider.Provides {
+			for typeIndex, t := range typeGroup {
+				if t == nil {
+					return nil, fmt.Errorf("provider has nil type at group %d, index %d", groupIndex, typeIndex)
+				}
+				key := t.String()
 
-			if _, ok := fnProviderMap[key]; ok {
-				return nil, fmt.Errorf("multiple providers provide %s", key)
-			}
+				if existing, ok := fnProviderMap[key]; ok {
+					// Allow the same provider to provide multiple types (e.g., concrete and interface)
+					// but still error if different providers try to provide the same type
+					if existing.provider != provider {
+						return nil, fmt.Errorf("multiple providers provide %s", key)
+					}
+					// If it's the same provider, just update the return index to the first occurrence
+					// This handles the case where bindProvider adds both concrete and interface types
+					continue
+				}
 
-			fnProviderMap[key] = &fnProvider{
-				provider:    provider,
-				returnIndex: i,
+				fnProviderMap[key] = &fnProvider{
+					provider:    provider,
+					returnIndex: groupIndex,
+				}
 			}
 		}
 	}
@@ -439,7 +448,7 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 	varPool.Register("context")
 
 	// Create context parameter
-	contextParam := NewInjectorParam(contextType)
+	contextParam := NewInjectorParam([]types.Type{contextType})
 	// errgroup.WithContext(ctx) requires context.Context as the first argument
 	contextParam.Ref(false)
 
@@ -515,7 +524,7 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 			providedNodes = initialProvidedNodes
 			poolIdx = -1 // Arguments are not in any pool
 
-			param := NewInjectorParam(n.arg.Type)
+			param := NewInjectorParam([]types.Type{n.arg.Type})
 			injector.Params = append(injector.Params, param)
 			returnValues = append(returnValues, param)
 
@@ -531,8 +540,8 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 			providedNodes = poolProvidedNodes[poolIdx]
 
 			returnValues = make([]*InjectorParam, 0, len(n.providerSpec.Provides))
-			for _, t := range n.providerSpec.Provides {
-				param := NewInjectorParam(t)
+			for _, types := range n.providerSpec.Provides {
+				param := NewInjectorParam(types)
 				injector.Params = append(injector.Params, param)
 				injector.Vars = append(injector.Vars, param)
 				returnValues = append(returnValues, param)
@@ -669,13 +678,20 @@ func (g *Graph) findAugmentingPath(u int, used []bool, matchR []int, adj [][]int
 }
 
 func (g *Graph) topologicalSortIter() func(yield func(*node) bool) {
+	type requireCounter struct {
+		probidedArg []bool
+		count       int
+	}
 	waitNodes := collection.NewQueue[*node]()
-	requireCounts := make(map[*node]int)
+	requireCounts := make(map[*node]*requireCounter)
 	visited := make(map[*node]struct{})
 
 	for _, n := range g.nodes {
 		requireCount := len(g.reverseEdges[n])
-		requireCounts[n] = requireCount
+		requireCounts[n] = &requireCounter{
+			count:       requireCount,
+			probidedArg: make([]bool, len(n.providerArgs)),
+		}
 
 		if requireCount == 0 {
 			waitNodes.Push(n)
@@ -690,8 +706,14 @@ func (g *Graph) topologicalSortIter() func(yield func(*node) bool) {
 			visited[n] = struct{}{}
 
 			for _, edge := range g.edges[n] {
-				requireCounts[edge.node]--
-				if requireCounts[edge.node] == 0 {
+				counter := requireCounts[edge.node]
+				if counter == nil || counter.probidedArg[edge.provideArgDst] {
+					continue
+				}
+
+				counter.count--
+				counter.probidedArg[edge.provideArgDst] = true
+				if counter.count == 0 {
 					waitNodes.Push(edge.node)
 				}
 			}

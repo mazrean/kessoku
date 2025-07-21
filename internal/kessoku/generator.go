@@ -690,10 +690,14 @@ func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ func
 func (stmt *InjectorProviderCallStmt) buildLhsExpressions(varPool *VarPool) []ast.Expr {
 	var lhs []ast.Expr
 
-	// Add output parameters
+	// Add output parameters, but avoid duplicates for multi-type providers
+	seenParams := make(map[*InjectorParam]bool)
 	for _, param := range stmt.Returns {
-		paramName := param.Name(varPool)
-		lhs = append(lhs, ast.NewIdent(paramName))
+		if !seenParams[param] {
+			paramName := param.Name(varPool)
+			lhs = append(lhs, ast.NewIdent(paramName))
+			seenParams[param] = true
+		}
 	}
 
 	// Add error parameter if provider returns error

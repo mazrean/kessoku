@@ -6,14 +6,14 @@ import (
 )
 
 const (
-	configCreationDelay        = 100 * time.Millisecond
-	databaseServiceDelay       = 200 * time.Millisecond
-	cacheServiceDelay          = 150 * time.Millisecond
-	messagingServiceDelay      = 180 * time.Millisecond
-	userServiceDelay           = 120 * time.Millisecond
-	sessionServiceDelay        = 100 * time.Millisecond
-	notificationServiceDelay   = 80 * time.Millisecond
-	appCreationDelay           = 50 * time.Millisecond
+	configCreationDelay      = 100 * time.Millisecond
+	databaseServiceDelay     = 200 * time.Millisecond
+	cacheServiceDelay        = 150 * time.Millisecond
+	messagingServiceDelay    = 180 * time.Millisecond
+	userServiceDelay         = 120 * time.Millisecond
+	sessionServiceDelay      = 100 * time.Millisecond
+	notificationServiceDelay = 80 * time.Millisecond
+	appCreationDelay         = 50 * time.Millisecond
 )
 
 // Config represents the application configuration.

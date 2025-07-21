@@ -32,13 +32,13 @@ func TestNewGraph(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
 					},
@@ -58,13 +58,13 @@ func TestNewGraph(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType}, // Duplicate!
+						Provides:      [][]types.Type{{configType}}, // Duplicate!
 						Requires:      []types.Type{},
 						IsReturnError: false,
 					},
@@ -83,7 +83,7 @@ func TestNewGraph(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 					},
@@ -103,19 +103,19 @@ func TestNewGraph(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{intType},
+						Provides:      [][]types.Type{{intType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{intType},
 						IsReturnError: false,
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
 					},
@@ -135,7 +135,7 @@ func TestNewGraph(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{intType}, // Missing provider for int
 						IsReturnError: false,
 					},
@@ -155,7 +155,7 @@ func TestNewGraph(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType, serviceType}, // Multiple returns
+						Provides:      [][]types.Type{{configType, serviceType}}, // Multiple returns
 						Requires:      []types.Type{},
 						IsReturnError: false,
 					},
@@ -175,19 +175,19 @@ func TestNewGraph(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{intType},
+						Provides:      [][]types.Type{{intType}},
 						Requires:      []types.Type{configType}, // Reuses config provider
 						IsReturnError: false,
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType, intType}, // Reuses both providers
 						IsReturnError: false,
 					},
@@ -254,6 +254,125 @@ func TestNewGraph(t *testing.T) {
 
 func containsError(err, substring string) bool {
 	return len(err) >= len(substring) && err[:len(substring)] == substring
+}
+
+func TestNewGraphMultiTypeProvider(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, _ := createTestTypes()
+
+	// Create an interface type
+	interfaceType := func() types.Type {
+		obj := types.NewTypeName(0, nil, "Interface", nil)
+		return types.NewNamed(obj, types.NewInterfaceType([]*types.Func{}, nil), nil)
+	}()
+
+	tests := []struct {
+		build         *BuildDirective
+		name          string
+		expectedNodes int
+		expectError   bool
+	}{
+		{
+			name: "provider provides both concrete and interface types",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: interfaceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{configType, interfaceType}}, // Both types
+						Requires:      []types.Type{},
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError:   false,
+			expectedNodes: 1,
+		},
+		{
+			name: "concrete service and interface service can use same provider",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{configType, interfaceType}}, // Provides both types
+						Requires:      []types.Type{},
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{serviceType}},
+						Requires:      []types.Type{interfaceType}, // Requires the interface
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError:   false,
+			expectedNodes: 2,
+		},
+		{
+			name: "should not error on duplicate types in same provider",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: configType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{configType, configType}}, // Duplicate should be handled
+						Requires:      []types.Type{},
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError:   false,
+			expectedNodes: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			metaData := &MetaData{
+				Package: Package{
+					Name: "test",
+					Path: "test",
+				},
+				Imports: make(map[string]*ast.ImportSpec),
+			}
+			varPool := NewVarPool()
+
+			graph, err := NewGraph(metaData, tt.build, varPool)
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if graph == nil {
+				t.Fatal("Expected graph to be non-nil")
+			}
+
+			if len(graph.nodes) != tt.expectedNodes {
+				t.Errorf("Expected %d nodes, got %d", tt.expectedNodes, len(graph.nodes))
+			}
+		})
+	}
 }
 
 func TestCreateASTTypeExpr(t *testing.T) {
@@ -653,12 +772,12 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 				{
 					providerSpec: &ProviderSpec{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 					},
 					providerArgs: []*InjectorCallArgument{},
-					returnValues: []*InjectorParam{NewInjectorParam(configType)},
+					returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType})},
 				},
 			},
 			pools:                  [][]*node{},
@@ -691,17 +810,17 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 					// provider node - should generate statement
 					providerSpec: &ProviderSpec{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{intType},
 						IsReturnError: false,
 					},
 					providerArgs: []*InjectorCallArgument{
 						{
-							Param:  NewInjectorParam(intType),
+							Param:  NewInjectorParam([]types.Type{intType}),
 							IsWait: false,
 						},
 					},
-					returnValues: []*InjectorParam{NewInjectorParam(configType)},
+					returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType})},
 				},
 			},
 			pools:                  [][]*node{},
@@ -822,13 +941,13 @@ func TestGraph_BuildStmts(t *testing.T) {
 					{
 						providerSpec: &ProviderSpec{
 							Type:          ProviderTypeFunction,
-							Provides:      []types.Type{configType},
+							Provides:      [][]types.Type{{configType}},
 							Requires:      []types.Type{},
 							IsReturnError: false,
 							IsAsync:       false,
 						},
 						providerArgs: []*InjectorCallArgument{},
-						returnValues: []*InjectorParam{NewInjectorParam(configType)},
+						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType})},
 					},
 				},
 			},
@@ -853,13 +972,13 @@ func TestGraph_BuildStmts(t *testing.T) {
 					{
 						providerSpec: &ProviderSpec{
 							Type:          ProviderTypeFunction,
-							Provides:      []types.Type{intType},
+							Provides:      [][]types.Type{{intType}},
 							Requires:      []types.Type{},
 							IsReturnError: false,
 							IsAsync:       false,
 						},
 						providerArgs: []*InjectorCallArgument{},
-						returnValues: []*InjectorParam{NewInjectorParam(intType)},
+						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{intType})},
 					},
 				},
 			},
@@ -883,26 +1002,26 @@ func TestGraph_BuildStmts(t *testing.T) {
 					{
 						providerSpec: &ProviderSpec{
 							Type:          ProviderTypeFunction,
-							Provides:      []types.Type{configType},
+							Provides:      [][]types.Type{{configType}},
 							Requires:      []types.Type{},
 							IsReturnError: false,
 							IsAsync:       true, // Async provider
 						},
 						providerArgs: []*InjectorCallArgument{},
-						returnValues: []*InjectorParam{NewInjectorParam(configType)},
+						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType})},
 					},
 				},
 				{
 					{
 						providerSpec: &ProviderSpec{
 							Type:          ProviderTypeFunction,
-							Provides:      []types.Type{serviceType},
+							Provides:      [][]types.Type{{serviceType}},
 							Requires:      []types.Type{},
 							IsReturnError: false,
 							IsAsync:       false, // Sync provider
 						},
 						providerArgs: []*InjectorCallArgument{},
-						returnValues: []*InjectorParam{NewInjectorParam(serviceType)},
+						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
 					},
 				},
 			},
@@ -994,14 +1113,14 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 						IsAsync:       false,
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
 						IsAsync:       false,
@@ -1022,14 +1141,14 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 						IsAsync:       true, // This should trigger context injection
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
 						IsAsync:       false,
@@ -1051,14 +1170,14 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 						IsAsync:       false,
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
 						IsAsync:       true, // This should trigger context injection
@@ -1080,14 +1199,14 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 				Providers: []*ProviderSpec{
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{configType},
+						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
 						IsAsync:       true, // Async
 					},
 					{
 						Type:          ProviderTypeFunction,
-						Provides:      []types.Type{serviceType},
+						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
 						IsAsync:       true, // Also async

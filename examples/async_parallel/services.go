@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	databaseConnectionDelay = 200 * time.Millisecond
-	cacheConnectionDelay    = 150 * time.Millisecond
+	databaseConnectionDelay  = 200 * time.Millisecond
+	cacheConnectionDelay     = 150 * time.Millisecond
 	messagingConnectionDelay = 180 * time.Millisecond
 )
 

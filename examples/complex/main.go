@@ -36,7 +36,7 @@ type Service struct {
 	arg    int
 }
 
-func NewService(config *Config, impl Interface, value string, arg int) *Service {
+func NewService(config *Config, impl *ConcreteImpl, value string, arg int) *Service {
 	return &Service{
 		config: config,
 		impl:   impl,

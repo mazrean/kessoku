@@ -15,6 +15,15 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+const (
+	// bindProviderMinTypeArgs is the minimum number of type arguments required for bindProvider
+	bindProviderMinTypeArgs = 3
+	// bindProviderInternalTypeIndex is the index of the internal provider type in bindProvider type arguments
+	bindProviderInternalTypeIndex = 2
+	// asyncProviderMinTypeArgs is the minimum number of type arguments required for asyncProvider
+	asyncProviderMinTypeArgs = 2
+)
+
 // Parser analyzes Go source code to find wire build directives and providers.
 type Parser struct {
 	fset     *token.FileSet
@@ -374,89 +383,114 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 		}
 	}
 
-	methodSet := types.NewMethodSet(providerType)
-	for method := range methodSet.Methods() {
-		if method == nil {
-			slog.Debug("method is nil", "arg", arg)
-			continue
-		}
-
-		methodObj := method.Obj()
-		if methodObj == nil {
-			slog.Debug("methodObj is nil", "arg", arg)
-			continue
-		}
-
-		methodName := methodObj.Name()
-		if methodName == "Fn" {
-			fnType := methodObj.Type().(*types.Signature)
-			if fnType.Params().Len() != 0 || fnType.Results().Len() != 1 {
-				slog.Debug("fnType is not a function", "arg", arg)
-				continue
-			}
-
-			providerFnType := fnType.Results().At(0).Type()
-			if providerFnType == nil {
-				slog.Warn("get provider function type", "method", methodObj.Name(), "arg", arg)
-				continue
-			}
-
-			providerFnSig, fnSigOk := providerFnType.(*types.Signature)
-			if !fnSigOk {
-				slog.Warn("provider function is not a function", "method", methodObj.Name(), "arg", arg)
-				continue
-			}
-
-			requires := make([]types.Type, 0, providerFnSig.Params().Len())
-			for i := 0; i < providerFnSig.Params().Len(); i++ {
-				requires = append(requires, providerFnSig.Params().At(i).Type())
-			}
-
-			isReturnError := false
-			provides := make([]types.Type, 0, providerFnSig.Results().Len())
-			for i := 0; i < providerFnSig.Results().Len(); i++ {
-				if types.Identical(providerFnSig.Results().At(i).Type(), types.Universe.Lookup("error").Type()) {
-					isReturnError = true
-					continue
-				}
-
-				provides = append(provides, providerFnSig.Results().At(i).Type())
-			}
-
-			// Check if this is a bindProvider or asyncProvider
-			isAsync := false
-			if named, ok := providerType.(*types.Named); ok {
-				typeName := named.Obj().Name()
-				if typeName == "bindProvider" {
-					// For bindProvider[S, T], we want to provide type S (the interface)
-					// but keep the original requires from the wrapped provider
-					if typeArgs := named.TypeArgs(); typeArgs != nil && typeArgs.Len() >= 1 {
-						interfaceType := typeArgs.At(0)
-						provides = []types.Type{interfaceType}
-					}
-				} else if typeName == "asyncProvider" {
-					// Mark this provider as async
-					isAsync = true
-				}
-			}
-
-			build.Providers = append(build.Providers, &ProviderSpec{
-				Type:          ProviderTypeFunction,
-				Requires:      requires,
-				Provides:      provides,
-				IsReturnError: isReturnError,
-				IsAsync:       isAsync,
-				ASTExpr:       arg,
-			})
-
-			// Collect dependencies from provider expression
-			p.collectDependencies(arg, pkg.TypesInfo, imports, fileImports, varPool)
-
-			return nil
-		}
+	requires, provides, isReturnError, isAsync, err := p.parseProviderType(pkg, providerType, varPool)
+	if err != nil {
+		return fmt.Errorf("parse provider type: %w", err)
 	}
 
-	return errors.New("unsupported provider expression")
+	build.Providers = append(build.Providers, &ProviderSpec{
+		ASTExpr:       arg,
+		Type:          ProviderTypeFunction,
+		Provides:      provides,
+		Requires:      requires,
+		IsReturnError: isReturnError,
+		IsAsync:       isAsync,
+	})
+
+	// Collect dependencies from provider expression
+	p.collectDependencies(arg, pkg.TypesInfo, imports, fileImports, varPool)
+
+	return nil
+}
+
+func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Type, varPool *VarPool) ([]types.Type, [][]types.Type, bool, bool, error) {
+	named, ok := providerType.(*types.Named)
+	if !ok {
+		slog.Debug("providerType is not a named type", "providerType", providerType)
+		return nil, nil, false, false, fmt.Errorf("provider type is not a named type")
+	}
+
+	typeArgs := named.TypeArgs()
+	if typeArgs == nil {
+		return nil, nil, false, false, fmt.Errorf("provider type has no type arguments")
+	}
+
+	switch named.Obj().Name() {
+	case "bindProvider":
+		if typeArgs.Len() < bindProviderMinTypeArgs {
+			break
+		}
+
+		interfaceType := typeArgs.At(0)
+		internalProviderType := typeArgs.At(bindProviderInternalTypeIndex)
+
+		intrfcType, ok := interfaceType.Underlying().(*types.Interface)
+		if !ok {
+			return nil, nil, false, false, fmt.Errorf("bind type argument is not an interface: %s", interfaceType)
+		}
+
+		requires, provides, isReturnError, isAsync, err := p.parseProviderType(pkg, internalProviderType, varPool)
+		if err != nil {
+			return nil, nil, false, false, fmt.Errorf("parse internal provider type: %w", err)
+		}
+
+		for i, provide := range provides {
+			for _, providedType := range provide {
+				if types.Implements(providedType, intrfcType) {
+					// If the provided type is the interface type, we can skip it
+					provides[i] = append(provides[i], interfaceType)
+					break
+				}
+			}
+		}
+
+		return requires, provides, isReturnError, isAsync, nil
+	case "asyncProvider":
+		if typeArgs.Len() < asyncProviderMinTypeArgs {
+			return nil, nil, false, false, fmt.Errorf("asyncProvider requires at least 2 type arguments")
+		}
+		internalProviderType := typeArgs.At(1)
+
+		requires, provides, isReturnError, _, err := p.parseProviderType(pkg, internalProviderType, varPool)
+		if err != nil {
+			return nil, nil, false, false, fmt.Errorf("parse internal provider type: %w", err)
+		}
+
+		return requires, provides, isReturnError, true, nil
+	case "fnProvider":
+		if typeArgs.Len() < 1 {
+			return nil, nil, false, false, fmt.Errorf("fnProvider requires at least 1 type argument")
+		}
+
+		providerFnSig, ok := typeArgs.At(0).(*types.Signature)
+		if !ok || providerFnSig == nil {
+			slog.Debug("fnType is nil", "providerType", providerType)
+			return nil, nil, false, false, fmt.Errorf("fnProvider type argument is not a function signature")
+		}
+
+		requires := make([]types.Type, 0, providerFnSig.Params().Len())
+		for i := range providerFnSig.Params().Len() {
+			requires = append(requires, providerFnSig.Params().At(i).Type())
+		}
+
+		isReturnError := false
+		provides := make([][]types.Type, 0, providerFnSig.Results().Len())
+		for i := range providerFnSig.Results().Len() {
+			if types.Identical(providerFnSig.Results().At(i).Type(), types.Universe.Lookup("error").Type()) {
+				isReturnError = true
+				continue
+			}
+
+			provides = append(provides, []types.Type{providerFnSig.Results().At(i).Type()})
+		}
+
+		// Check if this is a bindProvider or asyncProvider
+		isAsync := false
+
+		return requires, provides, isReturnError, isAsync, nil
+	}
+
+	return nil, nil, false, false, errors.New("no valid provider function found")
 }
 
 func (p *Parser) getVarDecl(pkg *packages.Package, obj *types.Var) ast.Expr {

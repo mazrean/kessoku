@@ -54,7 +54,7 @@ gantt
 **Install kessoku:**
 
 ```bash
-go get -tool github.com/mazrean/kessoku
+go get -tool github.com/mazrean/kessoku/cmd/kessoku
 ```
 
 **Create `main.go`:**
@@ -104,7 +104,7 @@ go generate && go run main.go
 
 **Recommended:**
 ```bash
-go get -tool github.com/mazrean/kessoku
+go get -tool github.com/mazrean/kessoku/cmd/kessoku
 ```
 
 <details>
