@@ -777,7 +777,7 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 						IsReturnError: false,
 					},
 					providerArgs: []*InjectorCallArgument{},
-					returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+					returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 				},
 			},
 			pools:                  [][]*node{},
@@ -816,11 +816,11 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 					},
 					providerArgs: []*InjectorCallArgument{
 						{
-							Param:  NewInjectorParam([]types.Type{intType}),
+							Param:  NewInjectorParam([]types.Type{intType}, false),
 							IsWait: false,
 						},
 					},
-					returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+					returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 				},
 			},
 			pools:                  [][]*node{},
@@ -947,7 +947,7 @@ func TestGraph_BuildStmts(t *testing.T) {
 							IsAsync:       false,
 						},
 						providerArgs: []*InjectorCallArgument{},
-						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 					},
 				},
 			},
@@ -978,7 +978,7 @@ func TestGraph_BuildStmts(t *testing.T) {
 							IsAsync:       false,
 						},
 						providerArgs: []*InjectorCallArgument{},
-						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{intType})},
+						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{intType}, false)},
 					},
 				},
 			},
@@ -1008,7 +1008,7 @@ func TestGraph_BuildStmts(t *testing.T) {
 							IsAsync:       true, // Async provider
 						},
 						providerArgs: []*InjectorCallArgument{},
-						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 					},
 				},
 				{
@@ -1021,7 +1021,7 @@ func TestGraph_BuildStmts(t *testing.T) {
 							IsAsync:       false, // Sync provider
 						},
 						providerArgs: []*InjectorCallArgument{},
-						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
+						returnValues: []*InjectorParam{NewInjectorParam([]types.Type{serviceType}, false)},
 					},
 				},
 			},

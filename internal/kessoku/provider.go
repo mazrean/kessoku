@@ -52,17 +52,19 @@ type InjectorParam struct {
 	types       []types.Type
 	refCounter  int
 	withChannel bool
+	isArg       bool
 }
 
-func NewInjectorParam(ts []types.Type) *InjectorParam {
+func NewInjectorParam(ts []types.Type, isArg bool) *InjectorParam {
 	return &InjectorParam{
 		types: ts,
+		isArg: isArg,
 	}
 }
 
 func (p *InjectorParam) Ref(isWait bool) {
 	p.refCounter++
-	p.withChannel = p.withChannel || isWait
+	p.withChannel = !p.isArg && (p.withChannel || isWait)
 }
 
 func (p *InjectorParam) Name(varPool *VarPool) string {
