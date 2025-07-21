@@ -36,7 +36,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 			// Format: package.TypeName
 			pkgPath := objPkg.Path()
 			pkgName := objPkg.Name()
-			
+
 			// Check if package is already imported
 			if existingSpec, exists := existingImports[pkgPath]; exists {
 				// Use existing package name (could be an alias)
@@ -52,7 +52,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 					},
 				}
 			}
-			
+
 			varPool.Register(pkgName)
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(pkgName),
@@ -68,7 +68,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 			// Format: package.TypeName
 			pkgPath := objPkg.Path()
 			pkgName := objPkg.Name()
-			
+
 			// Check if package is already imported
 			if existingSpec, exists := existingImports[pkgPath]; exists {
 				// Use existing package name (could be an alias)
@@ -84,7 +84,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 					},
 				}
 			}
-			
+
 			varPool.Register(pkgName)
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(pkgName),
@@ -98,7 +98,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 		if err != nil {
 			return nil, fmt.Errorf("slice element: %w", err)
 		}
-		
+
 		return &ast.ArrayType{
 			Elt: expr,
 		}, nil
@@ -107,7 +107,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 		if err != nil {
 			return nil, fmt.Errorf("array element: %w", err)
 		}
-		
+
 		return &ast.ArrayType{
 			Len: &ast.BasicLit{
 				Kind:  token.INT,
@@ -124,7 +124,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 		if err != nil {
 			return nil, fmt.Errorf("map value: %w", err)
 		}
-		
+
 		return &ast.MapType{
 			Key:   keyExpr,
 			Value: valueExpr,
@@ -136,7 +136,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 			if err != nil {
 				return nil, fmt.Errorf("method signature: %w", err)
 			}
-			
+
 			methodFields = append(methodFields, &ast.Field{
 				Names: []*ast.Ident{ast.NewIdent(method.Name())},
 				Type:  expr,
@@ -161,7 +161,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 		if err != nil {
 			return nil, fmt.Errorf("chan element: %w", err)
 		}
-		
+
 		return &ast.ChanType{
 			Dir:   dir,
 			Value: expr,
@@ -448,7 +448,7 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 	varPool.Register("context")
 
 	// Create context parameter
-	contextParam := NewInjectorParam([]types.Type{contextType})
+	contextParam := NewInjectorParam([]types.Type{contextType}, true)
 	// errgroup.WithContext(ctx) requires context.Context as the first argument
 	contextParam.Ref(false)
 
@@ -524,7 +524,7 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 			providedNodes = initialProvidedNodes
 			poolIdx = -1 // Arguments are not in any pool
 
-			param := NewInjectorParam([]types.Type{n.arg.Type})
+			param := NewInjectorParam([]types.Type{n.arg.Type}, true)
 			injector.Params = append(injector.Params, param)
 			returnValues = append(returnValues, param)
 
@@ -541,7 +541,7 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 
 			returnValues = make([]*InjectorParam, 0, len(n.providerSpec.Provides))
 			for _, types := range n.providerSpec.Provides {
-				param := NewInjectorParam(types)
+				param := NewInjectorParam(types, false)
 				injector.Params = append(injector.Params, param)
 				injector.Vars = append(injector.Vars, param)
 				returnValues = append(returnValues, param)
