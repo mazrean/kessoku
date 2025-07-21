@@ -627,13 +627,13 @@ func TestParseBindProviderMultipleTypes(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		content             string
-		name                string
-		expectedBuilds      int
-		expectedProviders   int
-		expectedConcreteType string
+		content               string
+		name                  string
+		expectedConcreteType  string
 		expectedInterfaceType string
-		shouldError         bool
+		expectedBuilds        int
+		expectedProviders     int
+		shouldError           bool
 	}{
 		{
 			name: "bind provider should provide both concrete and interface types",
@@ -752,7 +752,7 @@ var _ = kessoku.Inject[*ConcreteService](
 				// provides the interface type, not both types. After implementing the feature,
 				// this test should verify that bindProvider.Provides contains both types.
 				t.Logf("Current bind provider provides: %v", bindProvider.Provides)
-				
+
 				// This is what we want to achieve: bindProvider should provide both types
 				// Count total types across all groups
 				totalTypes := 0
@@ -969,13 +969,13 @@ func TestParseBindProviderInterfaces(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		content                      string
-		name                         string
-		expectedBuilds               int
-		expectedProviders            int
-		expectedConcreteTypeProvided bool
+		content                       string
+		name                          string
+		expectedBuilds                int
+		expectedProviders             int
+		expectedConcreteTypeProvided  bool
 		expectedInterfaceTypeProvided bool
-		shouldError                  bool
+		shouldError                   bool
 	}{
 		{
 			name: "bind provider should provide both concrete and interface types for dependency resolution",
@@ -1035,8 +1035,8 @@ var _ = kessoku.Inject[*App](
 `,
 			expectedBuilds:                1,
 			expectedProviders:             4,
-			expectedConcreteTypeProvided:  true,  // This is what we want to achieve
-			expectedInterfaceTypeProvided: true,  // This is what we want to achieve
+			expectedConcreteTypeProvided:  true, // This is what we want to achieve
+			expectedInterfaceTypeProvided: true, // This is what we want to achieve
 			shouldError:                   false,
 		},
 	}
