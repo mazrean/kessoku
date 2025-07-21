@@ -15,6 +15,15 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+const (
+	// bindProviderMinTypeArgs is the minimum number of type arguments required for bindProvider
+	bindProviderMinTypeArgs = 3
+	// bindProviderInternalTypeIndex is the index of the internal provider type in bindProvider type arguments
+	bindProviderInternalTypeIndex = 2
+	// asyncProviderMinTypeArgs is the minimum number of type arguments required for asyncProvider
+	asyncProviderMinTypeArgs = 2
+)
+
 // Parser analyzes Go source code to find wire build directives and providers.
 type Parser struct {
 	fset     *token.FileSet
@@ -408,12 +417,12 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 
 	switch named.Obj().Name() {
 	case "bindProvider":
-		if typeArgs.Len() < 3 {
+		if typeArgs.Len() < bindProviderMinTypeArgs {
 			break
 		}
 
 		interfaceType := typeArgs.At(0)
-		internalProviderType := typeArgs.At(2)
+		internalProviderType := typeArgs.At(bindProviderInternalTypeIndex)
 
 		intrfcType, ok := interfaceType.Underlying().(*types.Interface)
 		if !ok {
@@ -437,7 +446,7 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 
 		return requires, provides, isReturnError, isAsync, nil
 	case "asyncProvider":
-		if typeArgs.Len() < 2 {
+		if typeArgs.Len() < asyncProviderMinTypeArgs {
 			return nil, nil, false, false, fmt.Errorf("asyncProvider requires at least 2 type arguments")
 		}
 		internalProviderType := typeArgs.At(1)
