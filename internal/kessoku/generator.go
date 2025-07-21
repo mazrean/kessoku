@@ -9,10 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"slices"
-	"strconv"
 	"strings"
-
-	mystrings "github.com/mazrean/kessoku/internal/pkg/strings"
 )
 
 const (
@@ -20,33 +17,21 @@ const (
 	maxInjectorReturnValues = 2
 )
 
-func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Injector) error {
+func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Injector, varPool *VarPool) error {
 	file := &ast.File{
 		Name: ast.NewIdent(metaData.Package.Name),
 	}
 
-	// Generate injector function declarations and collect imports
+	// Generate injector function declarations
 	var funcDecls []ast.Decl
 	for _, injector := range injectors {
-		funcDecl, imports, err := generateInjectorDecl(metaData, injector)
+		funcDecl, err := generateInjectorDecl(metaData, injector, varPool)
 		if err != nil {
 			slog.Error("Failed to generate injector declaration", "error", err)
+			continue
 		}
 
 		funcDecls = append(funcDecls, funcDecl)
-
-		for _, importPath := range imports {
-			if _, exists := metaData.Imports[importPath]; exists {
-				continue
-			}
-
-			metaData.Imports[importPath] = &ast.ImportSpec{
-				Path: &ast.BasicLit{
-					Kind:  token.STRING,
-					Value: strconv.Quote(importPath),
-				},
-			}
-		}
 	}
 
 	// Generate import declaration first
@@ -110,9 +95,16 @@ func detectAsyncChains(injector *Injector) bool {
 }
 
 // generateAsyncInitialization creates errgroup and variable declarations for async execution
-func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool) ([]ast.Stmt, []string, error) {
+func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, existingImports map[string]*ast.ImportSpec) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
-	imports := []string{"golang.org/x/sync/errgroup"}
+	
+	// Add errgroup import
+	existingImports["golang.org/x/sync/errgroup"] = &ast.ImportSpec{
+		Path: &ast.BasicLit{
+			Kind:  token.STRING,
+			Value: `"golang.org/x/sync/errgroup"`,
+		},
+	}
 
 	// Check if context is available
 	hasCtx := false
@@ -124,12 +116,11 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 	}
 
 	// Generate variable declarations for async access
-	varSpecs, newImports, err := generateVariableSpecs(pkg, injector, varPool)
+	varSpecs, err := generateVariableSpecs(pkg, injector, varPool, existingImports)
 	if err != nil {
-		return nil, nil, fmt.Errorf("generate variable declarations: %w", err)
+		return nil, fmt.Errorf("generate variable declarations: %w", err)
 	}
 
-	imports = append(imports, newImports...)
 	stmts = append(stmts, &ast.DeclStmt{
 		Decl: &ast.GenDecl{
 			Tok:   token.VAR,
@@ -141,7 +132,7 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 	egDecl := generateErrGroupDeclaration(hasCtx)
 	stmts = append(stmts, egDecl)
 
-	return stmts, imports, nil
+	return stmts, nil
 }
 
 // generateErrGroupDeclaration creates the errgroup variable declaration
@@ -183,11 +174,8 @@ func generateErrGroupDeclaration(hasCtx bool) *ast.AssignStmt {
 }
 
 // generateVariableSpecs creates variable declarations for async access
-func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool) ([]ast.Spec, []string, error) {
-	var (
-		specs   []ast.Spec
-		imports []string
-	)
+func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, existingImports map[string]*ast.ImportSpec) ([]ast.Spec, error) {
+	var specs []ast.Spec
 
 	for _, param := range injector.Vars {
 		paramName := param.Name(varPool)
@@ -195,12 +183,10 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool) ([]
 			continue
 		}
 
-		typeExpr, newImports, err := createASTTypeExpr(pkg, param.Type())
+		typeExpr, err := createASTTypeExpr(pkg, param.Type(), varPool, existingImports)
 		if err != nil {
-			return nil, nil, fmt.Errorf("create AST type expression for %s: %w", paramName, err)
+			return nil, fmt.Errorf("create AST type expression for %s: %w", paramName, err)
 		}
-
-		imports = append(imports, newImports...)
 
 		specs = append(specs, &ast.ValueSpec{
 			Names: []*ast.Ident{ast.NewIdent(paramName)},
@@ -227,7 +213,7 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool) ([]
 		})
 	}
 
-	return specs, imports, nil
+	return specs, nil
 }
 
 // generateAsyncWaitStatements creates errgroup wait statements
@@ -297,8 +283,7 @@ func generateImportDecl(imporSpecs []*ast.ImportSpec) *ast.GenDecl {
 	}
 }
 
-func generateInjectorDecl(metaData *MetaData, injector *Injector) (ast.Decl, []string, error) {
-	varPool := NewVarPool()
+func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPool) (ast.Decl, error) {
 	paramFields := make([]*ast.Field, 0, len(injector.Args)+1)
 
 	// Add parameters
@@ -361,9 +346,9 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector) (ast.Decl, []s
 		Results: results,
 	}
 
-	stmts, imports, err := generateStmts(varPool, metaData.Package.Path, injector)
+	stmts, err := generateStmts(varPool, metaData.Package.Path, injector, metaData.Imports)
 	if err != nil {
-		return nil, nil, fmt.Errorf("generate statements: %w", err)
+		return nil, fmt.Errorf("generate statements: %w", err)
 	}
 
 	funcDecl := &ast.FuncDecl{
@@ -374,25 +359,23 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector) (ast.Decl, []s
 		},
 	}
 
-	return funcDecl, imports, nil
+	return funcDecl, nil
 }
 
 // generateStmts generates statements with parallel execution support using errgroup
-func generateStmts(varPool *VarPool, pkg string, injector *Injector) ([]ast.Stmt, []string, error) {
+func generateStmts(varPool *VarPool, pkg string, injector *Injector, existingImports map[string]*ast.ImportSpec) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
-	var imports []string
 
 	hasAsyncChains := detectAsyncChains(injector)
 
 	// Initialize async components if needed
 	if hasAsyncChains {
-		asyncStmts, asyncImports, err := generateAsyncInitialization(pkg, injector, varPool)
+		asyncStmts, err := generateAsyncInitialization(pkg, injector, varPool, existingImports)
 		if err != nil {
-			return nil, nil, fmt.Errorf("generate async initialization: %w", err)
+			return nil, fmt.Errorf("generate async initialization: %w", err)
 		}
 
 		stmts = append(stmts, asyncStmts...)
-		imports = append(imports, asyncImports...)
 	}
 
 	var returnErrStmts func(ast.Expr) []ast.Stmt
@@ -430,8 +413,7 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector) ([]ast.Stmt
 
 	// Process statements and collect completion channels
 	for _, stmt := range injector.Stmts {
-		newStmts, newImports := stmt.Stmt(varPool, injector, returnErrStmts)
-		imports = append(imports, newImports...)
+		newStmts, _ := stmt.Stmt(varPool, injector, returnErrStmts)
 		stmts = append(stmts, newStmts...)
 	}
 
@@ -455,7 +437,7 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector) ([]ast.Stmt
 		})
 	}
 
-	return stmts, imports, nil
+	return stmts, nil
 }
 
 func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) ([]ast.Stmt, []string) {
@@ -702,109 +684,6 @@ func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ func
 			},
 		},
 	}, imports
-}
-
-type VarPool struct {
-	vars map[string]int
-}
-
-func NewVarPool() *VarPool {
-	return &VarPool{
-		vars: make(map[string]int),
-	}
-}
-
-func (p *VarPool) Get(t types.Type) string {
-	name := p.getBaseName(t)
-
-	count, ok := p.vars[name]
-	if !ok {
-		count = 0
-	}
-	p.vars[name] = count + 1
-
-	if count == 0 {
-		return name
-	}
-
-	return fmt.Sprintf("%s%d", name, count-1)
-}
-
-func (p *VarPool) GetChannel(t types.Type) string {
-	name := p.getBaseName(t) + "Ch"
-
-	count, ok := p.vars[name]
-	if !ok {
-		count = 0
-	}
-	p.vars[name] = count + 1
-
-	if count == 0 {
-		return name
-	}
-
-	return fmt.Sprintf("%s%d", name, count-1)
-}
-
-// goReservedKeywords contains Go reserved keywords that cannot be used as variable names
-var goReservedKeywords = map[string]bool{
-	"break": true, "default": true, "func": true, "interface": true, "select": true,
-	"case": true, "defer": true, "go": true, "map": true, "struct": true,
-	"chan": true, "else": true, "goto": true, "package": true, "switch": true,
-	"const": true, "fallthrough": true, "if": true, "range": true, "type": true,
-	"continue": true, "for": true, "import": true, "return": true, "var": true,
-}
-
-// getTypeBaseName extracts a base name from a type for argument naming
-func (p *VarPool) getBaseName(t types.Type) string {
-	// For pointers, recurse on the element type
-	for ptr, ok := t.(*types.Pointer); ok; ptr, ok = t.(*types.Pointer) {
-		t = ptr.Elem()
-	}
-
-	var baseName string
-	switch t := t.(type) {
-	case *types.Named:
-		if obj := t.Obj(); obj != nil && obj.Pkg() != nil {
-			if obj.Pkg().Path() == "context" && obj.Name() == "Context" {
-				return "ctx"
-			}
-		}
-
-		baseName = mystrings.ToLowerCamel(t.Obj().Name())
-	case *types.Basic:
-		// Check by kind for all basic types (byte and rune are handled by their underlying types)
-		switch t.Kind() {
-		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64,
-			types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64,
-			types.Float32, types.Float64,
-			types.UntypedInt, types.UntypedFloat, types.UntypedRune:
-			return "num"
-		case types.String, types.UntypedString:
-			return "str"
-		case types.Bool, types.UntypedBool:
-			return "flag"
-		case types.Complex64, types.Complex128, types.UntypedComplex:
-			return "complex"
-		case types.Uintptr, types.UnsafePointer:
-			return "ptr"
-		case types.UntypedNil:
-			return "null"
-		case types.Invalid:
-			return "invalid"
-		default:
-			baseName = mystrings.ToLowerCamel(t.Name())
-		}
-	default:
-		baseName = "val"
-	}
-
-	// Check if the base name is a Go reserved keyword
-	if goReservedKeywords[baseName] {
-		return baseName + "Value"
-	}
-
-	return baseName
 }
 
 // buildLhsExpressions builds the left-hand side expressions for assignment
