@@ -40,7 +40,7 @@ func TestInjectorParam(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			param := NewInjectorParam([]types.Type{tt.paramType})
+			param := NewInjectorParam([]types.Type{tt.paramType}, false)
 
 			// Add references
 			for i := 0; i < tt.refCount; i++ {
@@ -69,7 +69,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 		{
 			name: "unreferenced parameter",
 			setupParam: func() *InjectorParam {
-				return NewInjectorParam([]types.Type{intType}) // No Ref() call
+				return NewInjectorParam([]types.Type{intType}, false) // No Ref() call
 			},
 			expectedResult:     "_",
 			shouldBeUnderscore: true,
@@ -77,7 +77,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 		{
 			name: "referenced parameter with channel",
 			setupParam: func() *InjectorParam {
-				p := NewInjectorParam([]types.Type{serviceType})
+				p := NewInjectorParam([]types.Type{serviceType}, false)
 				p.Ref(true) // Reference with channel
 				return p
 			},
@@ -87,7 +87,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 		{
 			name: "referenced parameter without channel",
 			setupParam: func() *InjectorParam {
-				p := NewInjectorParam([]types.Type{serviceType})
+				p := NewInjectorParam([]types.Type{serviceType}, false)
 				p.Ref(false) // Reference without channel
 				return p
 			},
@@ -123,7 +123,7 @@ func TestInjectorParamChannelName(t *testing.T) {
 	t.Run("caching behavior", func(t *testing.T) {
 		t.Parallel()
 
-		param := NewInjectorParam([]types.Type{serviceType})
+		param := NewInjectorParam([]types.Type{serviceType}, false)
 		param.Ref(true) // Reference with channel
 		varPool := NewVarPool()
 
@@ -172,7 +172,7 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 							IsAsync:       false,
 						},
 						Arguments: []*InjectorCallArgument{},
-						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 					},
 				},
 			},
@@ -191,7 +191,7 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 							IsAsync:       true,
 						},
 						Arguments: []*InjectorCallArgument{},
-						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 					},
 				},
 			},
@@ -210,7 +210,7 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 							IsAsync:       false, // sync
 						},
 						Arguments: []*InjectorCallArgument{},
-						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 					},
 					&InjectorProviderCallStmt{
 						Provider: &ProviderSpec{
@@ -222,11 +222,11 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 						},
 						Arguments: []*InjectorCallArgument{
 							{
-								Param:  NewInjectorParam([]types.Type{configType}),
+								Param:  NewInjectorParam([]types.Type{configType}, false),
 								IsWait: false,
 							},
 						},
-						Returns: []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
+						Returns: []*InjectorParam{NewInjectorParam([]types.Type{serviceType}, false)},
 					},
 				},
 			},
@@ -247,7 +247,7 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 									IsAsync:       true, // nested async
 								},
 								Arguments: []*InjectorCallArgument{},
-								Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+								Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 							},
 						},
 					},
@@ -270,7 +270,7 @@ func TestInjectorChainStmt_HasAsync(t *testing.T) {
 									IsAsync:       false, // nested sync
 								},
 								Arguments: []*InjectorCallArgument{},
-								Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+								Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 							},
 						},
 					},
@@ -317,7 +317,7 @@ func TestInjectorParam_Type(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			param := NewInjectorParam([]types.Type{tt.typeExpr})
+			param := NewInjectorParam([]types.Type{tt.typeExpr}, false)
 			result := param.Type()
 			if result != tt.typeExpr {
 				t.Errorf("Type() = %v, want %v", result, tt.typeExpr)

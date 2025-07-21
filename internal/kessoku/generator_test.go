@@ -150,7 +150,7 @@ func TestInjectorChainStmt_Stmt(t *testing.T) {
 							IsReturnError: false,
 						},
 						Arguments: []*InjectorCallArgument{},
-						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 					},
 				},
 			},
@@ -168,7 +168,7 @@ func TestInjectorChainStmt_Stmt(t *testing.T) {
 							IsReturnError: false,
 						},
 						Arguments: []*InjectorCallArgument{},
-						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 					},
 					&InjectorProviderCallStmt{
 						Provider: &ProviderSpec{
@@ -179,11 +179,11 @@ func TestInjectorChainStmt_Stmt(t *testing.T) {
 						},
 						Arguments: []*InjectorCallArgument{
 							{
-								Param:  NewInjectorParam([]types.Type{configType}),
+								Param:  NewInjectorParam([]types.Type{configType}, false),
 								IsWait: false,
 							},
 						},
-						Returns: []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
+						Returns: []*InjectorParam{NewInjectorParam([]types.Type{serviceType}, false)},
 					},
 				},
 			},
@@ -279,11 +279,11 @@ func TestGenerateStmts(t *testing.T) {
 							IsAsync:       false,
 						},
 						Arguments: []*InjectorCallArgument{},
-						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 					},
 				},
 				Return: &InjectorReturn{
-					Param: NewInjectorParam([]types.Type{configType}),
+					Param: NewInjectorParam([]types.Type{configType}, false),
 					Return: &Return{
 						Type:        configType,
 						ASTTypeExpr: &ast.StarExpr{X: &ast.Ident{Name: "Config"}},
@@ -312,11 +312,11 @@ func TestGenerateStmts(t *testing.T) {
 							IsAsync:       false,
 						},
 						Arguments: []*InjectorCallArgument{},
-						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
+						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{serviceType}, false)},
 					},
 				},
 				Return: &InjectorReturn{
-					Param: NewInjectorParam([]types.Type{serviceType}),
+					Param: NewInjectorParam([]types.Type{serviceType}, false),
 					Return: &Return{
 						Type:        serviceType,
 						ASTTypeExpr: &ast.StarExpr{X: &ast.Ident{Name: "Service"}},
@@ -347,13 +347,13 @@ func TestGenerateStmts(t *testing.T) {
 									IsAsync:       true, // This makes it async
 								},
 								Arguments: []*InjectorCallArgument{},
-								Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+								Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 							},
 						},
 					},
 				},
 				Return: &InjectorReturn{
-					Param: NewInjectorParam([]types.Type{configType}),
+					Param: NewInjectorParam([]types.Type{configType}, false),
 					Return: &Return{
 						Type:        configType,
 						ASTTypeExpr: &ast.StarExpr{X: &ast.Ident{Name: "Config"}},
@@ -373,7 +373,7 @@ func TestGenerateStmts(t *testing.T) {
 				IsReturnError: true,
 				Args: []*InjectorArgument{
 					{
-						Param: NewInjectorParam([]types.Type{contextType}),
+						Param: NewInjectorParam([]types.Type{contextType}, false),
 						Type:  contextType,
 						ASTTypeExpr: &ast.SelectorExpr{
 							X:   &ast.Ident{Name: "context"},
@@ -394,17 +394,17 @@ func TestGenerateStmts(t *testing.T) {
 								},
 								Arguments: []*InjectorCallArgument{
 									{
-										Param:  NewInjectorParam([]types.Type{contextType}),
+										Param:  NewInjectorParam([]types.Type{contextType}, false),
 										IsWait: false,
 									},
 								},
-								Returns: []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
+								Returns: []*InjectorParam{NewInjectorParam([]types.Type{serviceType}, false)},
 							},
 						},
 					},
 				},
 				Return: &InjectorReturn{
-					Param: NewInjectorParam([]types.Type{serviceType}),
+					Param: NewInjectorParam([]types.Type{serviceType}, false),
 					Return: &Return{
 						Type:        serviceType,
 						ASTTypeExpr: &ast.StarExpr{X: &ast.Ident{Name: "Service"}},
@@ -435,13 +435,13 @@ func TestGenerateStmts(t *testing.T) {
 									IsAsync:       true, // This makes it async
 								},
 								Arguments: []*InjectorCallArgument{},
-								Returns:   []*InjectorParam{NewInjectorParam([]types.Type{intType})},
+								Returns:   []*InjectorParam{NewInjectorParam([]types.Type{intType}, false)},
 							},
 						},
 					},
 				},
 				Return: &InjectorReturn{
-					Param: NewInjectorParam([]types.Type{intType}),
+					Param: NewInjectorParam([]types.Type{intType}, false),
 					Return: &Return{
 						Type:        intType,
 						ASTTypeExpr: &ast.Ident{Name: "int"},
@@ -470,7 +470,7 @@ func TestGenerateStmts(t *testing.T) {
 							IsAsync:       false,
 						},
 						Arguments: []*InjectorCallArgument{},
-						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+						Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 					},
 				},
 				Return: nil, // No return
@@ -567,7 +567,7 @@ func TestGenerate(t *testing.T) {
 								ASTExpr:       configProviderExpr,
 							},
 							Arguments: []*InjectorCallArgument{},
-							Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType})},
+							Returns:   []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 						},
 						&InjectorProviderCallStmt{
 							Provider: &ProviderSpec{
@@ -579,15 +579,15 @@ func TestGenerate(t *testing.T) {
 							},
 							Arguments: []*InjectorCallArgument{
 								{
-									Param:  NewInjectorParam([]types.Type{configType}),
+									Param:  NewInjectorParam([]types.Type{configType}, false),
 									IsWait: false,
 								},
 							},
-							Returns: []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
+							Returns: []*InjectorParam{NewInjectorParam([]types.Type{serviceType}, false)},
 						},
 					},
 					Return: &InjectorReturn{
-						Param: NewInjectorParam([]types.Type{serviceType}),
+						Param: NewInjectorParam([]types.Type{serviceType}, false),
 						Return: &Return{
 							Type:        serviceType,
 							ASTTypeExpr: serviceTypeExpr,
@@ -614,7 +614,7 @@ func TestGenerate(t *testing.T) {
 					Args: []*InjectorArgument{
 						{
 							Param: func() *InjectorParam {
-								p := NewInjectorParam([]types.Type{intType})
+								p := NewInjectorParam([]types.Type{intType}, false)
 								p.Ref(false) // Reference the parameter so it gets a name
 								return p
 							}(),
@@ -634,18 +634,18 @@ func TestGenerate(t *testing.T) {
 							Arguments: []*InjectorCallArgument{
 								{
 									Param: func() *InjectorParam {
-										p := NewInjectorParam([]types.Type{intType})
+										p := NewInjectorParam([]types.Type{intType}, false)
 										p.Ref(false)
 										return p
 									}(),
 									IsWait: false,
 								},
 							},
-							Returns: []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
+							Returns: []*InjectorParam{NewInjectorParam([]types.Type{serviceType}, false)},
 						},
 					},
 					Return: &InjectorReturn{
-						Param: NewInjectorParam([]types.Type{serviceType}),
+						Param: NewInjectorParam([]types.Type{serviceType}, false),
 						Return: &Return{
 							Type:        serviceType,
 							ASTTypeExpr: serviceTypeExpr,
@@ -677,11 +677,11 @@ func TestGenerate(t *testing.T) {
 								ASTExpr:       serviceProviderExpr,
 							},
 							Arguments: []*InjectorCallArgument{},
-							Returns:   []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
+							Returns:   []*InjectorParam{NewInjectorParam([]types.Type{serviceType}, false)},
 						},
 					},
 					Return: &InjectorReturn{
-						Param: NewInjectorParam([]types.Type{serviceType}),
+						Param: NewInjectorParam([]types.Type{serviceType}, false),
 						Return: &Return{
 							Type:        serviceType,
 							ASTTypeExpr: serviceTypeExpr,
@@ -714,11 +714,11 @@ func TestGenerate(t *testing.T) {
 								ASTExpr:       serviceProviderExpr,
 							},
 							Arguments: []*InjectorCallArgument{},
-							Returns:   []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
+							Returns:   []*InjectorParam{NewInjectorParam([]types.Type{serviceType}, false)},
 						},
 					},
 					Return: &InjectorReturn{
-						Param: NewInjectorParam([]types.Type{serviceType}),
+						Param: NewInjectorParam([]types.Type{serviceType}, false),
 						Return: &Return{
 							Type:        serviceType,
 							ASTTypeExpr: serviceTypeExpr,
@@ -740,11 +740,11 @@ func TestGenerate(t *testing.T) {
 								ASTExpr:       serviceProviderExpr,
 							},
 							Arguments: []*InjectorCallArgument{},
-							Returns:   []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
+							Returns:   []*InjectorParam{NewInjectorParam([]types.Type{serviceType}, false)},
 						},
 					},
 					Return: &InjectorReturn{
-						Param: NewInjectorParam([]types.Type{serviceType}),
+						Param: NewInjectorParam([]types.Type{serviceType}, false),
 						Return: &Return{
 							Type:        serviceType,
 							ASTTypeExpr: serviceTypeExpr,
@@ -783,11 +783,11 @@ func TestGenerate(t *testing.T) {
 								ASTExpr:       serviceProviderExpr,
 							},
 							Arguments: []*InjectorCallArgument{},
-							Returns:   []*InjectorParam{NewInjectorParam([]types.Type{serviceType})},
+							Returns:   []*InjectorParam{NewInjectorParam([]types.Type{serviceType}, false)},
 						},
 					},
 					Return: &InjectorReturn{
-						Param: NewInjectorParam([]types.Type{serviceType}),
+						Param: NewInjectorParam([]types.Type{serviceType}, false),
 						Return: &Return{
 							Type:        serviceType,
 							ASTTypeExpr: serviceTypeExpr,
@@ -1085,14 +1085,14 @@ func TestGenerateVariableSpecs(t *testing.T) {
 			injector: &Injector{
 				Params: []*InjectorParam{
 					func() *InjectorParam {
-						p := NewInjectorParam([]types.Type{configType})
+						p := NewInjectorParam([]types.Type{configType}, false)
 						p.Ref(false) // Reference so it gets a name
 						return p
 					}(),
 				},
 				Vars: []*InjectorParam{
 					func() *InjectorParam {
-						p := NewInjectorParam([]types.Type{configType})
+						p := NewInjectorParam([]types.Type{configType}, false)
 						p.Ref(false) // Reference so it gets a name
 						return p
 					}(),
@@ -1107,14 +1107,14 @@ func TestGenerateVariableSpecs(t *testing.T) {
 			injector: &Injector{
 				Params: []*InjectorParam{
 					func() *InjectorParam {
-						p := NewInjectorParam([]types.Type{serviceType})
+						p := NewInjectorParam([]types.Type{serviceType}, false)
 						p.Ref(true) // Reference with channel
 						return p
 					}(),
 				},
 				Vars: []*InjectorParam{
 					func() *InjectorParam {
-						p := NewInjectorParam([]types.Type{serviceType})
+						p := NewInjectorParam([]types.Type{serviceType}, false)
 						p.Ref(true) // Reference with channel
 						return p
 					}(),
@@ -1129,29 +1129,29 @@ func TestGenerateVariableSpecs(t *testing.T) {
 			injector: &Injector{
 				Params: []*InjectorParam{
 					func() *InjectorParam {
-						p := NewInjectorParam([]types.Type{configType})
+						p := NewInjectorParam([]types.Type{configType}, false)
 						p.Ref(false) // No channel
 						return p
 					}(),
 					func() *InjectorParam {
-						p := NewInjectorParam([]types.Type{serviceType})
+						p := NewInjectorParam([]types.Type{serviceType}, false)
 						p.Ref(true) // With channel
 						return p
 					}(),
-					NewInjectorParam([]types.Type{intType}), // Unreferenced (should be skipped)
+					NewInjectorParam([]types.Type{intType}, false), // Unreferenced (should be skipped)
 				},
 				Vars: []*InjectorParam{
 					func() *InjectorParam {
-						p := NewInjectorParam([]types.Type{configType})
+						p := NewInjectorParam([]types.Type{configType}, false)
 						p.Ref(false) // No channel
 						return p
 					}(),
 					func() *InjectorParam {
-						p := NewInjectorParam([]types.Type{serviceType})
+						p := NewInjectorParam([]types.Type{serviceType}, false)
 						p.Ref(true) // With channel
 						return p
 					}(),
-					NewInjectorParam([]types.Type{intType}), // Unreferenced (should be skipped)
+					NewInjectorParam([]types.Type{intType}, false), // Unreferenced (should be skipped)
 				},
 			},
 			expectedSpecs:   3, // config + service + serviceChannel
@@ -1162,14 +1162,14 @@ func TestGenerateVariableSpecs(t *testing.T) {
 			name: "all unreferenced parameters",
 			injector: &Injector{
 				Params: []*InjectorParam{
-					NewInjectorParam([]types.Type{configType}),
-					NewInjectorParam([]types.Type{serviceType}),
-					NewInjectorParam([]types.Type{intType}),
+					NewInjectorParam([]types.Type{configType}, false),
+					NewInjectorParam([]types.Type{serviceType}, false),
+					NewInjectorParam([]types.Type{intType}, false),
 				},
 				Vars: []*InjectorParam{
-					NewInjectorParam([]types.Type{configType}),
-					NewInjectorParam([]types.Type{serviceType}),
-					NewInjectorParam([]types.Type{intType}),
+					NewInjectorParam([]types.Type{configType}, false),
+					NewInjectorParam([]types.Type{serviceType}, false),
+					NewInjectorParam([]types.Type{intType}, false),
 				},
 			},
 			expectedSpecs:   0, // All should be skipped as they have name "_"
