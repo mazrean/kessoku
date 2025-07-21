@@ -14,90 +14,129 @@ import (
 	"github.com/mazrean/kessoku/internal/pkg/collection"
 )
 
-// createASTTypeExpr creates an AST type expression from a types.Type and returns required imports
-func createASTTypeExpr(pkg string, t types.Type) (ast.Expr, []string, error) {
-	var imports []string
+// createASTTypeExpr creates an AST type expression from a types.Type and updates existingImports
+func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImports map[string]*ast.ImportSpec) (ast.Expr, error) {
 
 	switch typ := t.(type) {
 	case *types.Basic:
-		return ast.NewIdent(typ.Name()), imports, nil
+		return ast.NewIdent(typ.Name()), nil
 	case *types.Pointer:
-		expr, elemImports, err := createASTTypeExpr(pkg, typ.Elem())
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
 		if err != nil {
-			return nil, nil, fmt.Errorf("pointer element: %w", err)
+			return nil, fmt.Errorf("pointer element: %w", err)
 		}
 
 		return &ast.StarExpr{
 			X: expr,
-		}, elemImports, nil
+		}, nil
 	case *types.Named:
 		name := typ.Obj().Name()
 		if objPkg := typ.Obj().Pkg(); objPkg != nil && objPkg.Path() != pkg {
 			// For types from other packages, create a selector expression
 			// Format: package.TypeName
-			imports = append(imports, objPkg.Path())
+			pkgPath := objPkg.Path()
+			pkgName := objPkg.Name()
+			
+			// Check if package is already imported
+			if existingSpec, exists := existingImports[pkgPath]; exists {
+				// Use existing package name (could be an alias)
+				if existingSpec.Name != nil {
+					pkgName = existingSpec.Name.Name
+				}
+			} else {
+				// Add new import if not already imported
+				existingImports[pkgPath] = &ast.ImportSpec{
+					Path: &ast.BasicLit{
+						Kind:  token.STRING,
+						Value: fmt.Sprintf("\"%s\"", pkgPath),
+					},
+				}
+			}
+			
+			varPool.Register(pkgName)
 			return &ast.SelectorExpr{
-				X:   ast.NewIdent(objPkg.Name()),
+				X:   ast.NewIdent(pkgName),
 				Sel: ast.NewIdent(name),
-			}, imports, nil
+			}, nil
 		}
-		return ast.NewIdent(name), imports, nil
+		varPool.Register(name)
+		return ast.NewIdent(name), nil
 	case *types.Alias:
 		name := typ.Obj().Name()
 		if objPkg := typ.Obj().Pkg(); objPkg != nil && objPkg.Path() != pkg {
 			// For types from other packages, create a selector expression
 			// Format: package.TypeName
-			imports = append(imports, objPkg.Path())
+			pkgPath := objPkg.Path()
+			pkgName := objPkg.Name()
+			
+			// Check if package is already imported
+			if existingSpec, exists := existingImports[pkgPath]; exists {
+				// Use existing package name (could be an alias)
+				if existingSpec.Name != nil {
+					pkgName = existingSpec.Name.Name
+				}
+			} else {
+				// Add new import if not already imported
+				existingImports[pkgPath] = &ast.ImportSpec{
+					Path: &ast.BasicLit{
+						Kind:  token.STRING,
+						Value: fmt.Sprintf("\"%s\"", pkgPath),
+					},
+				}
+			}
+			
+			varPool.Register(pkgName)
 			return &ast.SelectorExpr{
-				X:   ast.NewIdent(objPkg.Name()),
+				X:   ast.NewIdent(pkgName),
 				Sel: ast.NewIdent(name),
-			}, imports, nil
+			}, nil
 		}
-		return ast.NewIdent(name), imports, nil
+		varPool.Register(name)
+		return ast.NewIdent(name), nil
 	case *types.Slice:
-		expr, elemImports, err := createASTTypeExpr(pkg, typ.Elem())
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
 		if err != nil {
-			return nil, nil, fmt.Errorf("slice element: %w", err)
+			return nil, fmt.Errorf("slice element: %w", err)
 		}
+		
 		return &ast.ArrayType{
 			Elt: expr,
-		}, elemImports, nil
+		}, nil
 	case *types.Array:
-		expr, elemImports, err := createASTTypeExpr(pkg, typ.Elem())
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
 		if err != nil {
-			return nil, nil, fmt.Errorf("array element: %w", err)
+			return nil, fmt.Errorf("array element: %w", err)
 		}
+		
 		return &ast.ArrayType{
 			Len: &ast.BasicLit{
 				Kind:  token.INT,
 				Value: fmt.Sprintf("%d", typ.Len()),
 			},
 			Elt: expr,
-		}, elemImports, nil
+		}, nil
 	case *types.Map:
-		keyExpr, keyImports, err := createASTTypeExpr(pkg, typ.Key())
+		keyExpr, err := createASTTypeExpr(pkg, typ.Key(), varPool, existingImports)
 		if err != nil {
-			return nil, nil, fmt.Errorf("map key: %w", err)
+			return nil, fmt.Errorf("map key: %w", err)
 		}
-		valueExpr, valueImports, err := createASTTypeExpr(pkg, typ.Elem())
+		valueExpr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
 		if err != nil {
-			return nil, nil, fmt.Errorf("map value: %w", err)
+			return nil, fmt.Errorf("map value: %w", err)
 		}
-		allImports := make([]string, 0, len(keyImports)+len(valueImports))
-		allImports = append(allImports, keyImports...)
-		allImports = append(allImports, valueImports...)
+		
 		return &ast.MapType{
 			Key:   keyExpr,
 			Value: valueExpr,
-		}, allImports, nil
+		}, nil
 	case *types.Interface:
 		methodFields := make([]*ast.Field, 0, typ.NumMethods())
 		for method := range typ.Methods() {
-			expr, newImports, err := createASTTypeExpr(pkg, method.Signature())
+			expr, err := createASTTypeExpr(pkg, method.Signature(), varPool, existingImports)
 			if err != nil {
-				return nil, nil, fmt.Errorf("method signature: %w", err)
+				return nil, fmt.Errorf("method signature: %w", err)
 			}
-			imports = append(imports, newImports...)
+			
 			methodFields = append(methodFields, &ast.Field{
 				Names: []*ast.Ident{ast.NewIdent(method.Name())},
 				Type:  expr,
@@ -107,7 +146,7 @@ func createASTTypeExpr(pkg string, t types.Type) (ast.Expr, []string, error) {
 			Methods: &ast.FieldList{
 				List: methodFields,
 			},
-		}, imports, nil
+		}, nil
 	case *types.Chan:
 		var dir ast.ChanDir
 		switch typ.Dir() {
@@ -118,22 +157,22 @@ func createASTTypeExpr(pkg string, t types.Type) (ast.Expr, []string, error) {
 		case types.RecvOnly:
 			dir = ast.RECV
 		}
-		expr, elemImports, err := createASTTypeExpr(pkg, typ.Elem())
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
 		if err != nil {
-			return nil, nil, fmt.Errorf("chan element: %w", err)
+			return nil, fmt.Errorf("chan element: %w", err)
 		}
+		
 		return &ast.ChanType{
 			Dir:   dir,
 			Value: expr,
-		}, elemImports, nil
+		}, nil
 	case *types.Signature:
 		funcFields := make([]*ast.Field, 0, typ.Params().Len())
 		for i := 0; i < typ.Params().Len(); i++ {
-			expr, newImports, err := createASTTypeExpr(pkg, typ.Params().At(i).Type())
+			expr, err := createASTTypeExpr(pkg, typ.Params().At(i).Type(), varPool, existingImports)
 			if err != nil {
-				return nil, nil, fmt.Errorf("param %d: %w", i, err)
+				return nil, fmt.Errorf("param %d: %w", i, err)
 			}
-			imports = append(imports, newImports...)
 			funcFields = append(funcFields, &ast.Field{
 				Names: []*ast.Ident{ast.NewIdent(fmt.Sprintf("arg%d", i))},
 				Type:  expr,
@@ -141,11 +180,10 @@ func createASTTypeExpr(pkg string, t types.Type) (ast.Expr, []string, error) {
 		}
 		resultsFields := make([]*ast.Field, 0, typ.Results().Len())
 		for i := 0; i < typ.Results().Len(); i++ {
-			expr, newImports, err := createASTTypeExpr(pkg, typ.Results().At(i).Type())
+			expr, err := createASTTypeExpr(pkg, typ.Results().At(i).Type(), varPool, existingImports)
 			if err != nil {
-				return nil, nil, fmt.Errorf("result %d: %w", i, err)
+				return nil, fmt.Errorf("result %d: %w", i, err)
 			}
-			imports = append(imports, newImports...)
 			resultsFields = append(resultsFields, &ast.Field{
 				Names: []*ast.Ident{ast.NewIdent(fmt.Sprintf("result%d", i))},
 				Type:  expr,
@@ -158,15 +196,14 @@ func createASTTypeExpr(pkg string, t types.Type) (ast.Expr, []string, error) {
 			Results: &ast.FieldList{
 				List: resultsFields,
 			},
-		}, imports, nil
+		}, nil
 	case *types.Struct:
 		fields := make([]*ast.Field, 0, typ.NumFields())
 		for i := 0; i < typ.NumFields(); i++ {
-			expr, newImports, err := createASTTypeExpr(pkg, typ.Field(i).Type())
+			expr, err := createASTTypeExpr(pkg, typ.Field(i).Type(), varPool, existingImports)
 			if err != nil {
-				return nil, nil, fmt.Errorf("field %d: %w", i, err)
+				return nil, fmt.Errorf("field %d: %w", i, err)
 			}
-			imports = append(imports, newImports...)
 			fields = append(fields, &ast.Field{
 				Names: []*ast.Ident{ast.NewIdent(typ.Field(i).Name())},
 				Type:  expr,
@@ -176,23 +213,23 @@ func createASTTypeExpr(pkg string, t types.Type) (ast.Expr, []string, error) {
 			Fields: &ast.FieldList{
 				List: fields,
 			},
-		}, imports, nil
+		}, nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported type: %s", t.String())
+		return nil, fmt.Errorf("unsupported type: %s", t.String())
 	}
 }
 
-func CreateInjector(metaData *MetaData, build *BuildDirective) (*Injector, error) {
+func CreateInjector(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Injector, error) {
 	slog.Debug("CreateInjector", "build", build)
 	for _, provider := range build.Providers {
 		slog.Debug("provider", "provider", provider)
 	}
-	graph, err := NewGraph(metaData, build)
+	graph, err := NewGraph(metaData, build, varPool)
 	if err != nil {
 		return nil, fmt.Errorf("create graph: %w", err)
 	}
 
-	injector, err := graph.Build(metaData)
+	injector, err := graph.Build(metaData, varPool)
 	if err != nil {
 		return nil, fmt.Errorf("build injector: %w", err)
 	}
@@ -232,7 +269,7 @@ type Graph struct {
 	nodes        []*node
 }
 
-func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
+func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Graph, error) {
 	graph := &Graph{
 		injectorName: build.InjectorName,
 		returnType:   build.Return,
@@ -271,7 +308,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 
 	returnProvider, ok := fnProviderMap[returnTypeKey]
 	if !ok {
-		n, err := graph.autoAddMissingDependencies(metaData, build.Return.Type)
+		n, err := graph.autoAddMissingDependencies(metaData, build.Return.Type, varPool)
 		if err != nil {
 			return nil, fmt.Errorf("auto add missing return dependency: %w", err)
 		}
@@ -338,7 +375,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective) (*Graph, error) {
 			} else {
 				// Auto-detect missing dependency and create an argument for it
 				var err error
-				n2, err = graph.autoAddMissingDependencies(metaData, t)
+				n2, err = graph.autoAddMissingDependencies(metaData, t, varPool)
 				if err != nil {
 					return nil, fmt.Errorf("auto add missing dependency as argument: %w", err)
 				}
@@ -372,7 +409,7 @@ func (g *Graph) hasAsyncProviders() bool {
 }
 
 // injectContextArg injects context.Context as the first argument when async providers exist
-func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData) error {
+func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool *VarPool) error {
 	if !g.hasAsyncProviders() {
 		return nil
 	}
@@ -398,6 +435,9 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData) error {
 		}
 	}
 
+	// Register context package name to prevent shadowing
+	varPool.Register("context")
+
 	// Create context parameter
 	contextParam := NewInjectorParam(contextType)
 	// errgroup.WithContext(ctx) requires context.Context as the first argument
@@ -417,24 +457,11 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData) error {
 	return nil
 }
 
-func (g *Graph) autoAddMissingDependencies(metaData *MetaData, t types.Type) (*node, error) {
+func (g *Graph) autoAddMissingDependencies(metaData *MetaData, t types.Type, varPool *VarPool) (*node, error) {
 	// Auto-detect missing dependency and create an argument for it
-	expr, requiredImports, err := createASTTypeExpr(metaData.Package.Path, t)
+	expr, err := createASTTypeExpr(metaData.Package.Path, t, varPool, metaData.Imports)
 	if err != nil {
 		return nil, fmt.Errorf("create AST type expr: %w", err)
-	}
-
-	// Add required imports to metadata
-	for _, importPath := range requiredImports {
-		if _, exists := metaData.Imports[importPath]; !exists {
-			// Create import spec for the required package
-			metaData.Imports[importPath] = &ast.ImportSpec{
-				Path: &ast.BasicLit{
-					Kind:  token.STRING,
-					Value: fmt.Sprintf("\"%s\"", importPath),
-				},
-			}
-		}
 	}
 
 	return &node{
@@ -445,10 +472,15 @@ func (g *Graph) autoAddMissingDependencies(metaData *MetaData, t types.Type) (*n
 	}, nil
 }
 
-func (g *Graph) Build(metaData *MetaData) (*Injector, error) {
+func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 	injector := &Injector{
 		Name:          g.injectorName,
 		IsReturnError: g.isReturnError(),
+	}
+
+	if injector.IsReturnError {
+		varPool.Register("err")
+		varPool.Register("error")
 	}
 
 	maxAnchainSize := g.findMaximumAntichainSize()
@@ -572,7 +604,7 @@ func (g *Graph) Build(metaData *MetaData) (*Injector, error) {
 	}
 
 	// Inject context.Context argument if async providers exist
-	err = g.injectContextArg(injector, metaData)
+	err = g.injectContextArg(injector, metaData, varPool)
 	if err != nil {
 		return nil, fmt.Errorf("inject context argument: %w", err)
 	}
