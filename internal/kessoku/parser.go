@@ -30,7 +30,7 @@ func NewParser() *Parser {
 }
 
 // ParseFile parses a Go file and extracts wire build directives.
-func (p *Parser) ParseFile(filename string) (*MetaData, []*BuildDirective, error) {
+func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*BuildDirective, error) {
 	astFile, err := parser.ParseFile(p.fset, filename, nil, parser.ParseComments)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse file %s: %w", filename, err)
@@ -87,7 +87,7 @@ func (p *Parser) ParseFile(filename string) (*MetaData, []*BuildDirective, error
 		return nil, nil, fmt.Errorf("target file not found in package syntax")
 	}
 
-	builds, err := p.findInjectDirectives(targetFile, pkg, kessokuPackageScope, metaData.Imports, astFile.Imports)
+	builds, err := p.findInjectDirectives(targetFile, pkg, kessokuPackageScope, metaData.Imports, astFile.Imports, varPool)
 	if err != nil {
 		return nil, nil, fmt.Errorf("find inject directives: %w", err)
 	}
@@ -141,7 +141,7 @@ func (p *Parser) initializePackages(filename string) (*packages.Package, error) 
 }
 
 // FindInjectDirectives finds all kessoku.Inject calls in the AST.
-func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kessokuPackageScope *types.Scope, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec) ([]*BuildDirective, error) {
+func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kessokuPackageScope *types.Scope, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, varPool *VarPool) ([]*BuildDirective, error) {
 	injectorObj := kessokuPackageScope.Lookup("Inject")
 	if injectorObj == nil || injectorObj.Type() == nil {
 		slog.Warn("kessoku package is imported, but kessoku.Inject function is not found")
@@ -152,6 +152,20 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 	if injectorType == nil {
 		slog.Warn("kessoku package is imported, but kessoku.Inject function is not found")
 		return nil, nil
+	}
+
+	// Register imported package names to prevent shadowing
+	for _, imp := range fileImports {
+		if imp.Name != nil {
+			// Register alias name
+			varPool.Register(imp.Name.Name)
+		} else {
+			// Register package name from path
+			impPath := imp.Path.Value[1 : len(imp.Path.Value)-1] // Remove quotes
+			if pkgObj, exists := pkg.Imports[impPath]; exists {
+				varPool.Register(pkgObj.Name)
+			}
+		}
 	}
 
 	var builds []*BuildDirective
@@ -193,7 +207,7 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 			return true
 		}
 
-		build, err := p.parseInjectCall(pkg, kessokuPackageScope, callExpr, imports, fileImports)
+		build, err := p.parseInjectCall(pkg, kessokuPackageScope, callExpr, imports, fileImports, varPool)
 		if err != nil {
 			slog.Warn("parseInjectCall failed", "callExpr", callExpr, "error", err)
 			return true
@@ -207,7 +221,7 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 }
 
 // parseInjectCall parses a kessoku.Inject call expression.
-func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *types.Scope, call *ast.CallExpr, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec) (*BuildDirective, error) {
+func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *types.Scope, call *ast.CallExpr, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, varPool *VarPool) (*BuildDirective, error) {
 	build := &BuildDirective{
 		Providers: make([]*ProviderSpec, 0),
 	}
@@ -221,7 +235,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 			ASTTypeExpr: fun.Index,
 		}
 		// Collect dependencies from return type expression
-		p.collectDependencies(fun.Index, pkg.TypesInfo, imports, fileImports)
+		p.collectDependencies(fun.Index, pkg.TypesInfo, imports, fileImports, varPool)
 	case *ast.IndexListExpr:
 		if len(call.Fun.(*ast.IndexListExpr).Indices) == 0 {
 			return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
@@ -232,7 +246,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 			ASTTypeExpr: fun.Indices[0],
 		}
 		// Collect dependencies from return type expression
-		p.collectDependencies(fun.Indices[0], pkg.TypesInfo, imports, fileImports)
+		p.collectDependencies(fun.Indices[0], pkg.TypesInfo, imports, fileImports, varPool)
 	default:
 		return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
 	}
@@ -255,7 +269,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 
 	// Parse provider arguments (starting from index 1)
 	for _, arg := range call.Args[1:] {
-		if err := p.parseProviderArgument(pkg, kessokuPackageScope, arg, build, imports, fileImports); err != nil {
+		if err := p.parseProviderArgument(pkg, kessokuPackageScope, arg, build, imports, fileImports, varPool); err != nil {
 			return nil, fmt.Errorf("parse provider argument: %w", err)
 		}
 	}
@@ -264,7 +278,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 }
 
 // parseProviderArgument parses a provider argument in kessoku.Inject call.
-func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScope *types.Scope, arg ast.Expr, build *BuildDirective, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec) error {
+func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScope *types.Scope, arg ast.Expr, build *BuildDirective, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, varPool *VarPool) error {
 	providerType := pkg.TypesInfo.TypeOf(arg)
 	if providerType == nil {
 		return fmt.Errorf("get type of argument")
@@ -329,7 +343,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 		}
 
 		for _, setArg := range callExpr.Args {
-			if err := p.parseProviderArgument(pkg, kessokuPackageScope, setArg, build, imports, fileImports); err != nil {
+			if err := p.parseProviderArgument(pkg, kessokuPackageScope, setArg, build, imports, fileImports, varPool); err != nil {
 				return fmt.Errorf("parse Set provider argument: %w", err)
 			}
 		}
@@ -346,12 +360,12 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 						if selExpr.Sel.Name == "Set" {
 							// This is a kessoku.Set(...) call, parse its arguments as providers
 							for _, setArg := range callExpr.Args {
-								if err := p.parseProviderArgument(pkg, kessokuPackageScope, setArg, build, imports, fileImports); err != nil {
+								if err := p.parseProviderArgument(pkg, kessokuPackageScope, setArg, build, imports, fileImports, varPool); err != nil {
 									return fmt.Errorf("parse Set provider argument: %w", err)
 								}
 							}
 							// Collect dependencies from the Set call expression
-							p.collectDependencies(arg, pkg.TypesInfo, imports, fileImports)
+							p.collectDependencies(arg, pkg.TypesInfo, imports, fileImports, varPool)
 							return nil
 						}
 					}
@@ -436,7 +450,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 			})
 
 			// Collect dependencies from provider expression
-			p.collectDependencies(arg, pkg.TypesInfo, imports, fileImports)
+			p.collectDependencies(arg, pkg.TypesInfo, imports, fileImports, varPool)
 
 			return nil
 		}
@@ -470,7 +484,7 @@ func (p *Parser) getVarDecl(pkg *packages.Package, obj *types.Var) ast.Expr {
 }
 
 // collectDependencies extracts package dependencies from an AST expression
-func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec) {
+func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, imports map[string]*ast.ImportSpec, fileImports []*ast.ImportSpec, varPool *VarPool) {
 	ast.Inspect(expr, func(n ast.Node) bool {
 		switch node := n.(type) {
 		case *ast.SelectorExpr:
@@ -479,6 +493,8 @@ func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, import
 				if obj := typeInfo.ObjectOf(ident); obj != nil {
 					if pkgName, ok := obj.(*types.PkgName); ok {
 						pkgPath := pkgName.Imported().Path()
+						// Register package name to prevent shadowing
+						varPool.Register(pkgName.Name())
 						// Find the corresponding import spec from the original file
 						for _, imp := range fileImports {
 							impPath := imp.Path.Value[1 : len(imp.Path.Value)-1] // Remove quotes
@@ -490,7 +506,14 @@ func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, import
 					}
 				}
 			}
+			// Register selector name
+			if node.Sel != nil {
+				varPool.Register(node.Sel.Name)
+			}
 		case *ast.Ident:
+			// Register identifier name to prevent shadowing
+			varPool.Register(node.Name)
+
 			// Check if this identifier refers to a type from another package
 			if obj := typeInfo.ObjectOf(node); obj != nil {
 				if pkg := obj.Pkg(); pkg != nil && pkg.Path() != "" {
