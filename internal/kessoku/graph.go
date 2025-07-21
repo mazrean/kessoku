@@ -679,8 +679,8 @@ func (g *Graph) findAugmentingPath(u int, used []bool, matchR []int, adj [][]int
 
 func (g *Graph) topologicalSortIter() func(yield func(*node) bool) {
 	type requireCounter struct {
-		count       int
 		probidedArg []bool
+		count       int
 	}
 	waitNodes := collection.NewQueue[*node]()
 	requireCounts := make(map[*node]*requireCounter)
