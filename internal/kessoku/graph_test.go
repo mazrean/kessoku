@@ -349,8 +349,9 @@ func TestNewGraphMultiTypeProvider(t *testing.T) {
 				},
 				Imports: make(map[string]*ast.ImportSpec),
 			}
+			varPool := NewVarPool()
 
-			graph, err := NewGraph(metaData, tt.build)
+			graph, err := NewGraph(metaData, tt.build, varPool)
 
 			if tt.expectError {
 				if err == nil {

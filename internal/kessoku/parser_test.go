@@ -691,13 +691,14 @@ var _ = kessoku.Inject[*ConcreteService](
 
 			tempDir := t.TempDir()
 			testFile := filepath.Join(tempDir, "test.go")
+			varPool := NewVarPool()
 
 			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
 				t.Fatalf("Failed to write test file: %v", err)
 			}
 
 			parser := NewParser()
-			metadata, builds, err := parser.ParseFile(testFile)
+			metadata, builds, err := parser.ParseFile(testFile, varPool)
 
 			if tt.shouldError {
 				if err == nil {
@@ -1047,13 +1048,14 @@ var _ = kessoku.Inject[*App](
 
 			tempDir := t.TempDir()
 			testFile := filepath.Join(tempDir, "test.go")
+			varPool := NewVarPool()
 
 			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
 				t.Fatalf("Failed to write test file: %v", err)
 			}
 
 			parser := NewParser()
-			metadata, builds, err := parser.ParseFile(testFile)
+			metadata, builds, err := parser.ParseFile(testFile, varPool)
 
 			if tt.shouldError {
 				if err == nil {
