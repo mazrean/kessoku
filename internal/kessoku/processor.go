@@ -10,13 +10,15 @@ import (
 
 // Processor handles the overall dependency injection code generation process.
 type Processor struct {
-	parser *Parser
+	parser  *Parser
+	varPool *VarPool
 }
 
 // NewProcessor creates a new processor instance.
 func NewProcessor() *Processor {
 	return &Processor{
-		parser: NewParser(),
+		parser:  NewParser(),
+		varPool: NewVarPool(),
 	}
 }
 
@@ -34,7 +36,7 @@ func (p *Processor) ProcessFiles(files []string) error {
 func (p *Processor) processFile(filename string) error {
 	slog.Debug("Processing file", "file", filename)
 
-	metaData, builds, err := p.parser.ParseFile(filename)
+	metaData, builds, err := p.parser.ParseFile(filename, p.varPool)
 	if err != nil {
 		return fmt.Errorf("parse file %s: %w", filename, err)
 	}
@@ -50,7 +52,7 @@ func (p *Processor) processFile(filename string) error {
 
 	injectors := make([]*Injector, 0, len(builds))
 	for _, build := range builds {
-		injector, injectorErr := CreateInjector(metaData, build)
+		injector, injectorErr := CreateInjector(metaData, build, p.varPool)
 		if injectorErr != nil {
 			return fmt.Errorf("create injector: %w", injectorErr)
 		}
@@ -70,7 +72,7 @@ func (p *Processor) processFile(filename string) error {
 		}
 	}()
 
-	if genErr := Generate(f, filename, metaData, injectors); genErr != nil {
+	if genErr := Generate(f, filename, metaData, injectors, p.varPool); genErr != nil {
 		return fmt.Errorf("generate: %w", genErr)
 	}
 

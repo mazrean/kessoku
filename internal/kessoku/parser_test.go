@@ -464,7 +464,7 @@ var _ = kessoku.Inject[*Service](
 			}
 
 			parser := NewParser()
-			metadata, builds, err := parser.ParseFile(testFile)
+			metadata, builds, err := parser.ParseFile(testFile, NewVarPool())
 
 			if tt.shouldHaveError {
 				if err == nil {
@@ -502,7 +502,7 @@ var _ = kessoku.Inject[*Service](
 			}
 
 			parser := NewParser()
-			metadata, builds, err := parser.ParseFile(testFile)
+			metadata, builds, err := parser.ParseFile(testFile, NewVarPool())
 
 			if tt.shouldError {
 				if err == nil {
@@ -724,7 +724,7 @@ var _ = kessoku.Inject[*Service](
 			}
 
 			parser := NewParser()
-			metadata, builds, err := parser.ParseFile(testFile)
+			metadata, builds, err := parser.ParseFile(testFile, NewVarPool())
 
 			if tt.shouldError {
 				if err == nil {
