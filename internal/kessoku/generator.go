@@ -411,6 +411,22 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, existingImp
 		}
 	}
 
+	for _, stmt := range injector.Stmts {
+		if callStmt, ok := stmt.(*InjectorProviderCallStmt); ok && callStmt.Provider.IsReturnError {
+			stmts = append(stmts, &ast.DeclStmt{
+				Decl: &ast.GenDecl{
+					Tok: token.VAR,
+					Specs: []ast.Spec{
+						&ast.ValueSpec{
+							Names: []*ast.Ident{ast.NewIdent("err")},
+							Type:  ast.NewIdent("error"),
+						},
+					},
+				},
+			})
+		}
+	}
+
 	// Process statements and collect completion channels
 	for _, stmt := range injector.Stmts {
 		newStmts, _ := stmt.Stmt(varPool, injector, returnErrStmts)
