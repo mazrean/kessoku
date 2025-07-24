@@ -459,7 +459,7 @@ func (e *CycleError) Error() string {
 func (g *Graph) detectCycles() error {
 	colors := make(map[*node]nodeColor)
 	parent := make(map[*node]*node)
-	
+
 	// Initialize all nodes as white (unvisited)
 	for _, n := range g.nodes {
 		colors[n] = white
@@ -505,7 +505,7 @@ func (g *Graph) dfsCycleDetection(node *node, colors map[*node]nodeColor, parent
 // buildCyclePath builds the cycle path from the detected back edge
 func (g *Graph) buildCyclePath(cycleStart, cycleEnd *node, parent map[*node]*node) []*node {
 	var cycle []*node
-	
+
 	// Start from the cycle end and work backwards to find the cycle
 	current := cycleEnd
 	for current != cycleStart {
@@ -516,10 +516,10 @@ func (g *Graph) buildCyclePath(cycleStart, cycleEnd *node, parent map[*node]*nod
 			break
 		}
 	}
-	
+
 	// Add the cycle start to complete the cycle
 	cycle = append([]*node{cycleStart}, cycle...)
-	
+
 	return cycle
 }
 
@@ -613,7 +613,7 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 
 	initialProvidedNodes := make(map[*node]struct{})
 	for _, n := range g.nodes {
-		if len(g.reverseEdges[n]) == 0 {
+		if n.providerSpec == nil {
 			initialProvidedNodes[n] = struct{}{}
 		}
 	}
@@ -654,6 +654,7 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 			pools[poolIdx] = append(pools[poolIdx], n)
 
 			providedNodes = poolProvidedNodes[poolIdx]
+			poolProvidedNodes[poolIdx][n] = struct{}{}
 
 			returnValues = make([]*InjectorParam, 0, len(n.providerSpec.Provides))
 			for _, types := range n.providerSpec.Provides {
@@ -675,12 +676,6 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 
 		// Mark current node as provided before processing edges
 		providedNodes[n] = struct{}{}
-
-		// Update pool's provided nodes if this is a provider node
-		if n.providerSpec != nil {
-			poolProvidedNodes[poolIdx][n] = struct{}{}
-		}
-
 		nodeProvidedNodes[n] = maps.Clone(providedNodes)
 
 		if n == g.returnValue.node {
@@ -848,45 +843,20 @@ func (g *Graph) findOptimalPool(n *node, pools [][]*node, poolProvidedNodes []ma
 		return 0
 	}
 
-	// For sync-only cases, use a single pool (pool 0) to maintain dependency order
-	if !n.providerSpec.IsAsync {
-		// Check if there are any async providers in the whole graph
-		hasAsyncProviders := false
-		for _, node := range g.nodes {
-			if node.providerSpec != nil && node.providerSpec.IsAsync {
-				hasAsyncProviders = true
-				break
-			}
-		}
-
-		// If no async providers exist, use pool 0 for all sync providers
-		if !hasAsyncProviders {
-			return 0
-		}
-	}
-
-	emptyPools := make([]int, 0)
-	maxProvidedPools := make([]int, 0)
-	for i, pool := range pools {
-		if len(pool) == 0 {
-			emptyPools = append(emptyPools, i)
-		} else {
-			maxProvidedPools = append(maxProvidedPools, i)
-		}
-	}
-	if len(maxProvidedPools) == 0 {
-		return 0
-	}
-
 	dependencies := g.reverseEdges[n]
 
 	maxProvidedCount := 0
+	maxProvidedPools := make([]int, 0)
 	for i, providedNodeMap := range poolProvidedNodes {
 		providedCount := 0
 		for _, dependency := range dependencies {
 			if _, ok := providedNodeMap[dependency]; ok {
 				providedCount++
 			}
+		}
+
+		if !n.providerSpec.IsAsync && len(pools[i]) == 0 {
+			continue
 		}
 
 		switch {
@@ -898,23 +868,46 @@ func (g *Graph) findOptimalPool(n *node, pools [][]*node, poolProvidedNodes []ma
 		}
 	}
 
-	if n.providerSpec.IsAsync {
-		if maxProvidedCount == len(dependencies) {
-			for _, poolIdx := range maxProvidedPools {
-				if len(pools[poolIdx]) != 0 && slices.Contains(dependencies, pools[poolIdx][len(pools[poolIdx])-1]) {
+	if len(maxProvidedPools) == 0 {
+		return 0
+	}
+
+	if maxProvidedCount == len(dependencies) {
+	POOL_LOOP:
+		for _, poolIdx := range maxProvidedPools {
+			if !n.providerSpec.IsAsync {
+				return poolIdx
+			}
+
+			for i := range pools[poolIdx] {
+				nd := pools[poolIdx][len(pools[poolIdx])-1-i]
+				if slices.Contains(dependencies, nd) {
 					return poolIdx
 				}
+				if nd.providerSpec.IsAsync {
+					continue POOL_LOOP
+				}
+			}
+			if poolIdx == 0 {
+				return 0
 			}
 		}
+	}
 
-		if len(emptyPools) > 0 {
-			return emptyPools[0]
+	if n.providerSpec.IsAsync {
+		for i, pool := range pools {
+			if len(pool) == 0 {
+				return i
+			}
 		}
 	}
 
 	minSize := math.MaxInt
 	minSizePool := 0
 	for _, poolIdx := range maxProvidedPools {
+		if !n.providerSpec.IsAsync && len(pools[poolIdx]) == 0 {
+			continue
+		}
 		if len(pools[poolIdx]) < minSize {
 			minSize = len(pools[poolIdx])
 			minSizePool = poolIdx
