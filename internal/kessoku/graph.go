@@ -404,7 +404,123 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 		}
 	}
 
+	// Check for cycles in the dependency graph
+	if err := graph.detectCycles(); err != nil {
+		return nil, fmt.Errorf("dependency cycle detected: %w", err)
+	}
+
 	return graph, nil
+}
+
+// nodeColor represents the color of a node during DFS for cycle detection
+type nodeColor int
+
+const (
+	white nodeColor = iota // unvisited
+	gray                   // currently being processed
+	black                  // completely processed
+)
+
+// CycleError represents an error when a dependency cycle is detected
+type CycleError struct {
+	Cycle []*node
+}
+
+func (e *CycleError) Error() string {
+	if len(e.Cycle) == 0 {
+		return "circular dependency detected"
+	}
+
+	var providerTypes []string
+	for _, n := range e.Cycle {
+		if n.providerSpec != nil && len(n.providerSpec.Provides) > 0 && len(n.providerSpec.Provides[0]) > 0 {
+			// Use the first provided type as identifier
+			providerTypes = append(providerTypes, n.providerSpec.Provides[0][0].String())
+		} else if n.arg != nil {
+			providerTypes = append(providerTypes, fmt.Sprintf("arg(%s)", n.arg.Type.String()))
+		}
+	}
+
+	if len(providerTypes) == 0 {
+		return "circular dependency detected"
+	}
+
+	// Build the cycle path: TypeA -> TypeB -> TypeC -> TypeA
+	cyclePath := providerTypes[0]
+	for i := 1; i < len(providerTypes); i++ {
+		cyclePath += fmt.Sprintf(" -> %s", providerTypes[i])
+	}
+	cyclePath += fmt.Sprintf(" -> %s", providerTypes[0])
+
+	return fmt.Sprintf("circular dependency detected: %s", cyclePath)
+}
+
+// detectCycles detects cycles in the dependency graph using DFS
+func (g *Graph) detectCycles() error {
+	colors := make(map[*node]nodeColor)
+	parent := make(map[*node]*node)
+	
+	// Initialize all nodes as white (unvisited)
+	for _, n := range g.nodes {
+		colors[n] = white
+	}
+
+	// Run DFS from each unvisited node
+	for _, n := range g.nodes {
+		if colors[n] == white {
+			if cycle := g.dfsCycleDetection(n, colors, parent); cycle != nil {
+				return &CycleError{Cycle: cycle}
+			}
+		}
+	}
+
+	return nil
+}
+
+// dfsCycleDetection performs DFS and returns the cycle if found
+func (g *Graph) dfsCycleDetection(node *node, colors map[*node]nodeColor, parent map[*node]*node) []*node {
+	colors[node] = gray
+
+	// Visit all adjacent nodes (dependencies)
+	for _, edge := range g.edges[node] {
+		neighbor := edge.node
+		parent[neighbor] = node
+
+		if colors[neighbor] == gray {
+			// Back edge found - cycle detected
+			return g.buildCyclePath(neighbor, node, parent)
+		}
+
+		if colors[neighbor] == white {
+			if cycle := g.dfsCycleDetection(neighbor, colors, parent); cycle != nil {
+				return cycle
+			}
+		}
+	}
+
+	colors[node] = black
+	return nil
+}
+
+// buildCyclePath builds the cycle path from the detected back edge
+func (g *Graph) buildCyclePath(cycleStart, cycleEnd *node, parent map[*node]*node) []*node {
+	var cycle []*node
+	
+	// Start from the cycle end and work backwards to find the cycle
+	current := cycleEnd
+	for current != cycleStart {
+		cycle = append([]*node{current}, cycle...)
+		current = parent[current]
+		if current == nil {
+			// This shouldn't happen in a proper cycle, but just in case
+			break
+		}
+	}
+	
+	// Add the cycle start to complete the cycle
+	cycle = append([]*node{cycleStart}, cycle...)
+	
+	return cycle
 }
 
 // hasAsyncProviders checks if any providers in the graph are async
