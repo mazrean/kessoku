@@ -10,6 +10,7 @@ import (
 	"go/types"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
@@ -90,6 +91,16 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 				break
 			}
 		}
+	}
+
+	for _, imp := range astFile.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			slog.Warn("failed to unquote import path", "error", err, "import", imp.Path.Value)
+			continue
+		}
+
+		metaData.Imports[path] = imp
 	}
 
 	if targetFile == nil {
