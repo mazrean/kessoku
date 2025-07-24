@@ -79,16 +79,9 @@ func isContextType(t types.Type) bool {
 // detectAsyncChains determines if the injector contains async provider chains
 func detectAsyncChains(injector *Injector) bool {
 	for _, stmt := range injector.Stmts {
-		if stmt.HasAsync() {
-			return true
-		}
 		// Check if the ChainStmt actually contains async providers
-		if chainStmt, ok := stmt.(*InjectorChainStmt); ok {
-			for _, subStmt := range chainStmt.Statements {
-				if subStmt.HasAsync() {
-					return true
-				}
-			}
+		if _, ok := stmt.(*InjectorChainStmt); ok {
+			return true
 		}
 	}
 	return false
@@ -424,6 +417,7 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, existingImp
 					},
 				},
 			})
+			break
 		}
 	}
 
