@@ -21,26 +21,7 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		app                   *App
 	)
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		var err error
-		databaseService, err = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
-		if err != nil {
-			return err
-		}
-		select {
-		case <-cacheServiceCh:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		userService = kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
-		select {
-		case <-notificationServiceCh:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		app = kessoku.Provide(NewApp).Fn()(userService, notificationService)
-		return nil
-	})
+	var err error
 	eg.Go(func() error {
 		cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
 		close(cacheServiceCh)
@@ -58,6 +39,25 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		close(messagingServiceCh)
 		return nil
 	})
+	databaseService, err = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
+	if err != nil {
+		var zero *App
+		return zero, err
+	}
+	select {
+	case <-cacheServiceCh:
+	case <-ctx.Done():
+		var zero *App
+		return zero, ctx.Err()
+	}
+	userService = kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
+	select {
+	case <-notificationServiceCh:
+	case <-ctx.Done():
+		var zero *App
+		return zero, ctx.Err()
+	}
+	app = kessoku.Provide(NewApp).Fn()(userService, notificationService)
 	if err := eg.Wait(); err != nil {
 		return nil, err
 	}

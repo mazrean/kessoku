@@ -5,6 +5,7 @@ package main
 import "github.com/mazrean/kessoku"
 
 func InitializeApp() (*App, error) {
+	var err error
 	config := kessoku.Provide(NewConfig).Fn()()
 	logger := kessoku.Provide(NewLogger).Fn()()
 	database, err := kessoku.Provide(NewDatabase).Fn()(config)

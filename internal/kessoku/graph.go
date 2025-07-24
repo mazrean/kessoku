@@ -863,22 +863,25 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 	stmts := make([]InjectorStmt, 0)
 
 	// If there's a sync pool, execute it first
+	var parentStmts []InjectorStmt
 	if syncPoolIdx != -1 {
 		visited[syncPoolIdx] = true
-		parentStmts, err := g.buildPoolStmts(pools[syncPoolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
+
+		var err error
+		parentStmts, err = g.buildPoolStmts(pools[syncPoolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
 		if err != nil {
 			return nil, fmt.Errorf("build sync pool statements: %w", err)
 		}
-		stmts = append(stmts, parentStmts...)
 	} else {
 		// If no sync pool, just start with the first available async pool
 		parentPoolIdx := initialPoolIdxs[0]
 		visited[parentPoolIdx] = true
-		parentStmts, err := g.buildPoolStmts(pools[parentPoolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
+
+		var err error
+		parentStmts, err = g.buildPoolStmts(pools[parentPoolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
 		if err != nil {
 			return nil, fmt.Errorf("build first async pool statements: %w", err)
 		}
-		stmts = append(stmts, parentStmts...)
 	}
 
 	// Then add all remaining ready async pools as chain statements
@@ -897,6 +900,8 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 			Statements: subStmts,
 		})
 	}
+
+	stmts = append(stmts, parentStmts...)
 
 	return stmts, nil
 }
