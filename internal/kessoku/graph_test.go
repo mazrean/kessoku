@@ -1,6 +1,7 @@
 package kessoku
 
 import (
+	"errors"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -1309,6 +1310,196 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 						t.Errorf("Unexpected context injection at position %d", i)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestGraph_DetectCycles(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, intType := createTestTypes()
+
+	tests := []struct {
+		build         *BuildDirective
+		name          string
+		errorContains string
+		expectError   bool
+	}{
+		{
+			name: "no cycle - linear dependency chain",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{configType}},
+						Requires:      []types.Type{},
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{serviceType}},
+						Requires:      []types.Type{configType},
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "simple cycle - A depends on B, B depends on A",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{configType}},
+						Requires:      []types.Type{serviceType}, // Config depends on Service
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{serviceType}},
+						Requires:      []types.Type{configType}, // Service depends on Config
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError:   true,
+			errorContains: "dependency cycle detected",
+		},
+		{
+			name: "three-node cycle - A -> B -> C -> A",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{configType}},
+						Requires:      []types.Type{intType}, // Config depends on Int
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{intType}},
+						Requires:      []types.Type{serviceType}, // Int depends on Service
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{serviceType}},
+						Requires:      []types.Type{configType}, // Service depends on Config
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError:   true,
+			errorContains: "dependency cycle detected",
+		},
+		{
+			name: "no cycle - complex dependency graph",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{intType}},
+						Requires:      []types.Type{}, // No dependencies
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{configType}},
+						Requires:      []types.Type{intType}, // Config depends on Int
+						IsReturnError: false,
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{serviceType}},
+						Requires:      []types.Type{configType, intType}, // Service depends on both Config and Int
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "no cycle - with missing dependencies (auto-added as arguments)",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{serviceType}},
+						Requires:      []types.Type{configType}, // Config will be auto-added as argument
+						IsReturnError: false,
+					},
+				},
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			metaData := &MetaData{
+				Package: Package{
+					Name: "test",
+					Path: "test",
+				},
+				Imports: make(map[string]*ast.ImportSpec),
+			}
+
+			graph, err := NewGraph(metaData, tt.build, NewVarPool())
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected error but got none")
+				}
+
+				if tt.errorContains != "" && !containsError(err.Error(), tt.errorContains) {
+					t.Fatalf("Expected error to contain %q, got %q", tt.errorContains, err.Error())
+				}
+
+				// Check if error is or wraps a CycleError
+				var cycleErr *CycleError
+				if !errors.As(err, &cycleErr) {
+					t.Errorf("Expected CycleError but got %T", err)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if graph == nil {
+				t.Fatal("Expected graph to be non-nil")
+			}
+
+			// Additional verification that the graph is actually cycle-free
+			// by running a simple topological sort check
+			if err := graph.detectCycles(); err != nil {
+				t.Error("Graph should be cycle-free but cycle detection found a cycle")
 			}
 		})
 	}
