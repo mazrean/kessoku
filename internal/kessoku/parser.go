@@ -94,9 +94,9 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 	}
 
 	for _, imp := range astFile.Imports {
-		path, err := strconv.Unquote(imp.Path.Value)
-		if err != nil {
-			slog.Warn("failed to unquote import path", "error", err, "import", imp.Path.Value)
+		path, unquoteErr := strconv.Unquote(imp.Path.Value)
+		if unquoteErr != nil {
+			slog.Warn("failed to unquote import path", "error", unquoteErr, "import", imp.Path.Value)
 			continue
 		}
 
