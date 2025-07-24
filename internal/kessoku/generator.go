@@ -97,7 +97,7 @@ func detectAsyncChains(injector *Injector) bool {
 // generateAsyncInitialization creates errgroup and variable declarations for async execution
 func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, existingImports map[string]*ast.ImportSpec) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
-	
+
 	// Add errgroup import
 	existingImports["golang.org/x/sync/errgroup"] = &ast.ImportSpec{
 		Path: &ast.BasicLit{
@@ -773,7 +773,7 @@ func (stmt *InjectorProviderCallStmt) generateChannelWaitStatement(varPool *VarP
 
 	// Collect channels from dependencies
 	for _, arg := range stmt.Arguments {
-		if arg.IsWait {
+		if arg.IsWait && arg.Param.WithChannel() {
 			channels = append(channels, ast.NewIdent(arg.Param.ChannelName(varPool)))
 		}
 	}
