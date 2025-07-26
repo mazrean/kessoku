@@ -22,7 +22,7 @@ type Import struct {
 func importSpec(imp *Import, path string) *ast.ImportSpec {
 	// Mark import as used when generating import specification
 	imp.IsUsed = true
-	
+
 	if imp.IsDefaultName {
 		return &ast.ImportSpec{
 			Path: &ast.BasicLit{
@@ -41,28 +41,42 @@ func importSpec(imp *Import, path string) *ast.ImportSpec {
 	}
 }
 
-// MarkImportUsed marks an import as used if it exists in the imports map
-func MarkImportUsed(imports map[string]*Import, pkgPath string) {
-	if imp, exists := imports[pkgPath]; exists {
-		imp.IsUsed = true
-	}
-}
-
-// MarkImportsUsedFromProviders marks imports as used based on providers that are actually used
-func MarkImportsUsedFromProviders(providers []*ProviderSpec) {
-	for _, provider := range providers {
-		for _, imp := range provider.ReferencedImports {
+// MarkImportsUsedFromParams marks imports as used based on InjectorParams
+func MarkImportsUsedFromParams(params []*InjectorParam) {
+	for _, param := range params {
+		for _, imp := range param.ReferencedImports {
 			imp.IsUsed = true
 		}
 	}
 }
 
-// MarkImportsUsedFromStatements marks imports as used based on statements that are actually used  
+// MarkImportsUsedFromArguments marks imports as used based on InjectorArguments
+func MarkImportsUsedFromArguments(args []*InjectorArgument) {
+	for _, arg := range args {
+		for _, imp := range arg.Param.ReferencedImports {
+			imp.IsUsed = true
+		}
+	}
+}
+
+// MarkImportsUsedFromStatements marks imports as used based on statements that are actually used
 func MarkImportsUsedFromStatements(stmts []InjectorStmt) {
 	for _, stmt := range stmts {
 		if providerStmt, ok := stmt.(*InjectorProviderCallStmt); ok {
-			for _, imp := range providerStmt.ReferencedImports {
+			for _, imp := range providerStmt.Provider.ReferencedImports {
 				imp.IsUsed = true
+			}
+			// Mark imports used by arguments
+			for _, arg := range providerStmt.Arguments {
+				for _, imp := range arg.Param.ReferencedImports {
+					imp.IsUsed = true
+				}
+			}
+			// Mark imports used by return parameters
+			for _, returnParam := range providerStmt.Returns {
+				for _, imp := range returnParam.ReferencedImports {
+					imp.IsUsed = true
+				}
 			}
 		}
 	}
@@ -116,18 +130,108 @@ type BuildDirective struct {
 }
 
 type InjectorParam struct {
-	name        string
-	channelName string
-	types       []types.Type
-	refCounter  int
-	withChannel bool
-	isArg       bool
+	name              string
+	channelName       string
+	types             []types.Type
+	refCounter        int
+	withChannel       bool
+	isArg             bool
+	ReferencedImports map[string]*Import // Package paths to Import structs this parameter references
 }
 
 func NewInjectorParam(ts []types.Type, isArg bool) *InjectorParam {
 	return &InjectorParam{
-		types: ts,
-		isArg: isArg,
+		types:             ts,
+		isArg:             isArg,
+		ReferencedImports: make(map[string]*Import),
+	}
+}
+
+// NewInjectorParamWithImports creates a new InjectorParam and collects imports from the types
+func NewInjectorParamWithImports(ts []types.Type, isArg bool, pkg string, imports map[string]*Import, varPool *VarPool) *InjectorParam {
+	referencedImports := make(map[string]*Import)
+	
+	// Collect imports from all types
+	for _, t := range ts {
+		collectImportsFromType(t, pkg, imports, referencedImports, varPool)
+	}
+	
+	return &InjectorParam{
+		types:             ts,
+		isArg:             isArg,
+		ReferencedImports: referencedImports,
+	}
+}
+
+// collectImportsFromType recursively collects imports needed for a type
+func collectImportsFromType(t types.Type, pkg string, imports map[string]*Import, referencedImports map[string]*Import, varPool *VarPool) {
+	switch typ := t.(type) {
+	case *types.Named:
+		if objPkg := typ.Obj().Pkg(); objPkg != nil && objPkg.Path() != pkg {
+			pkgPath := objPkg.Path()
+			if imp, exists := imports[pkgPath]; exists {
+				referencedImports[pkgPath] = imp
+			} else {
+				// Create new import if it doesn't exist
+				pkgName := objPkg.Name()
+				newPkgName := varPool.GetName(pkgName)
+				newImp := &Import{
+					Name:          newPkgName,
+					IsDefaultName: newPkgName == pkgName,
+					IsUsed:        false,
+				}
+				imports[pkgPath] = newImp
+				referencedImports[pkgPath] = newImp
+			}
+		}
+	case *types.Alias:
+		if objPkg := typ.Obj().Pkg(); objPkg != nil && objPkg.Path() != pkg {
+			pkgPath := objPkg.Path()
+			if imp, exists := imports[pkgPath]; exists {
+				referencedImports[pkgPath] = imp
+			} else {
+				// Create new import if it doesn't exist
+				pkgName := objPkg.Name()
+				newPkgName := varPool.GetName(pkgName)
+				newImp := &Import{
+					Name:          newPkgName,
+					IsDefaultName: newPkgName == pkgName,
+					IsUsed:        false,
+				}
+				imports[pkgPath] = newImp
+				referencedImports[pkgPath] = newImp
+			}
+		}
+	case *types.Pointer:
+		collectImportsFromType(typ.Elem(), pkg, imports, referencedImports, varPool)
+	case *types.Slice:
+		collectImportsFromType(typ.Elem(), pkg, imports, referencedImports, varPool)
+	case *types.Array:
+		collectImportsFromType(typ.Elem(), pkg, imports, referencedImports, varPool)
+	case *types.Map:
+		collectImportsFromType(typ.Key(), pkg, imports, referencedImports, varPool)
+		collectImportsFromType(typ.Elem(), pkg, imports, referencedImports, varPool)
+	case *types.Chan:
+		collectImportsFromType(typ.Elem(), pkg, imports, referencedImports, varPool)
+	case *types.Signature:
+		if params := typ.Params(); params != nil {
+			for i := 0; i < params.Len(); i++ {
+				collectImportsFromType(params.At(i).Type(), pkg, imports, referencedImports, varPool)
+			}
+		}
+		if results := typ.Results(); results != nil {
+			for i := 0; i < results.Len(); i++ {
+				collectImportsFromType(results.At(i).Type(), pkg, imports, referencedImports, varPool)
+			}
+		}
+	case *types.Struct:
+		for i := 0; i < typ.NumFields(); i++ {
+			collectImportsFromType(typ.Field(i).Type(), pkg, imports, referencedImports, varPool)
+		}
+	case *types.Interface:
+		for i := 0; i < typ.NumMethods(); i++ {
+			collectImportsFromType(typ.Method(i).Type(), pkg, imports, referencedImports, varPool)
+		}
 	}
 }
 
@@ -192,10 +296,9 @@ type InjectorCallArgument struct {
 }
 
 type InjectorProviderCallStmt struct {
-	Provider          *ProviderSpec
-	Arguments         []*InjectorCallArgument
-	Returns           []*InjectorParam
-	ReferencedImports map[string]*Import // Package paths to Import structs this statement references
+	Provider  *ProviderSpec
+	Arguments []*InjectorCallArgument
+	Returns   []*InjectorParam
 }
 
 func (stmt *InjectorProviderCallStmt) HasAsync() bool {

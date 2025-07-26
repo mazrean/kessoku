@@ -37,6 +37,12 @@ func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Inj
 	// Mark imports as used based on generated statements from all injectors
 	for _, injector := range injectors {
 		MarkImportsUsedFromStatements(injector.Stmts)
+		// Mark imports used by injector arguments
+		MarkImportsUsedFromArguments(injector.Args)
+		// Mark imports used by injector parameters (return types)
+		if injector.Return != nil && injector.Return.Param != nil {
+			MarkImportsUsedFromParams([]*InjectorParam{injector.Return.Param})
+		}
 	}
 	
 	// Generate import declarations only for used imports

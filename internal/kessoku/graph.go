@@ -557,7 +557,7 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 	}
 
 	// Create context parameter
-	contextParam := NewInjectorParam([]types.Type{contextType}, true)
+	contextParam := NewInjectorParamWithImports([]types.Type{contextType}, true, metaData.Package.Path, metaData.Imports, varPool)
 	// errgroup.WithContext(ctx) requires context.Context as the first argument
 	contextParam.Ref(false)
 
@@ -628,7 +628,7 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 			providedNodes = initialProvidedNodes
 			poolIdx = -1 // Arguments are not in any pool
 
-			param := NewInjectorParam([]types.Type{n.arg.Type}, true)
+			param := NewInjectorParamWithImports([]types.Type{n.arg.Type}, true, metaData.Package.Path, metaData.Imports, varPool)
 			injector.Params = append(injector.Params, param)
 			returnValues = append(returnValues, param)
 
@@ -646,7 +646,7 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 
 			returnValues = make([]*InjectorParam, 0, len(n.providerSpec.Provides))
 			for _, types := range n.providerSpec.Provides {
-				param := NewInjectorParam(types, false)
+				param := NewInjectorParamWithImports(types, false, metaData.Package.Path, metaData.Imports, varPool)
 				injector.Params = append(injector.Params, param)
 				injector.Vars = append(injector.Vars, param)
 				returnValues = append(returnValues, param)
@@ -1013,10 +1013,9 @@ func (g *Graph) buildPoolStmts(pool []*node, pools [][]*node, visited []bool, po
 		}
 
 		stmts = append(stmts, &InjectorProviderCallStmt{
-			Provider:          n.providerSpec,
-			Arguments:         n.providerArgs,
-			Returns:           n.returnValues,
-			ReferencedImports: n.providerSpec.ReferencedImports,
+			Provider:  n.providerSpec,
+			Arguments: n.providerArgs,
+			Returns:   n.returnValues,
 		})
 
 		// Check if this node's execution enables any dependency pools to start
