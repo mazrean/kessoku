@@ -14,12 +14,11 @@ func createTestMetaData() *MetaData {
 			Name: "main",
 			Path: "main",
 		},
-		Imports: map[string]*ast.ImportSpec{
+		Imports: map[string]*Import{
 			"github.com/mazrean/kessoku": {
-				Path: &ast.BasicLit{
-					Kind:  0,
-					Value: `"github.com/mazrean/kessoku"`,
-				},
+				Name:          "kessoku",
+				IsDefaultName: true,
+				IsUsed:        false,
 			},
 		},
 	}
@@ -488,7 +487,7 @@ func TestGenerateStmts(t *testing.T) {
 			t.Parallel()
 
 			varPool := NewVarPool()
-			existingImports := make(map[string]*ast.ImportSpec)
+			existingImports := make(map[string]*Import)
 			stmts, err := generateStmts(varPool, "", tt.injector, existingImports)
 			if err != nil {
 				if !tt.expectErrorHandling {
@@ -766,7 +765,7 @@ func TestGenerate(t *testing.T) {
 					Name: "main",
 					Path: "main",
 				},
-				Imports: make(map[string]*ast.ImportSpec),
+				Imports: make(map[string]*Import),
 			},
 			injectors: []*Injector{
 				{
@@ -1183,7 +1182,7 @@ func TestGenerateVariableSpecs(t *testing.T) {
 			t.Parallel()
 
 			varPool := NewVarPool()
-			existingImports := make(map[string]*ast.ImportSpec)
+			existingImports := make(map[string]*Import)
 			specs, err := generateVariableSpecs("test", tt.injector, varPool, existingImports)
 
 			if tt.expectError {
