@@ -15,13 +15,13 @@ import (
 )
 
 // createASTTypeExpr creates an AST type expression from a types.Type and updates existingImports
-func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImports map[string]*ast.ImportSpec) (ast.Expr, error) {
+func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[string]Import) (ast.Expr, error) {
 
 	switch typ := t.(type) {
 	case *types.Basic:
 		return ast.NewIdent(typ.Name()), nil
 	case *types.Pointer:
-		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("pointer element: %w", err)
 		}
@@ -38,28 +38,22 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 			pkgName := objPkg.Name()
 
 			// Check if package is already imported
-			if existingSpec, exists := existingImports[pkgPath]; exists {
-				// Use existing package name (could be an alias)
-				if existingSpec.Name != nil {
-					pkgName = existingSpec.Name.Name
-				}
+			if imp, exists := imports[pkgPath]; exists {
+				pkgName = imp.Name
 			} else {
-				// Add new import if not already imported
-				existingImports[pkgPath] = &ast.ImportSpec{
-					Path: &ast.BasicLit{
-						Kind:  token.STRING,
-						Value: fmt.Sprintf("\"%s\"", pkgPath),
-					},
+				newPkgName := varPool.GetName(pkgName)
+				imports[pkgPath] = Import{
+					Name:          newPkgName,
+					IsDefaultName: newPkgName == pkgName,
 				}
 			}
 
-			varPool.Register(pkgName)
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(pkgName),
 				Sel: ast.NewIdent(name),
 			}, nil
 		}
-		varPool.Register(name)
+
 		return ast.NewIdent(name), nil
 	case *types.Alias:
 		name := typ.Obj().Name()
@@ -70,31 +64,25 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 			pkgName := objPkg.Name()
 
 			// Check if package is already imported
-			if existingSpec, exists := existingImports[pkgPath]; exists {
-				// Use existing package name (could be an alias)
-				if existingSpec.Name != nil {
-					pkgName = existingSpec.Name.Name
-				}
+			if imp, exists := imports[pkgPath]; exists {
+				pkgName = imp.Name
 			} else {
-				// Add new import if not already imported
-				existingImports[pkgPath] = &ast.ImportSpec{
-					Path: &ast.BasicLit{
-						Kind:  token.STRING,
-						Value: fmt.Sprintf("\"%s\"", pkgPath),
-					},
+				newPkgName := varPool.GetName(pkgName)
+				imports[pkgPath] = Import{
+					Name:          newPkgName,
+					IsDefaultName: newPkgName == pkgName,
 				}
 			}
 
-			varPool.Register(pkgName)
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(pkgName),
 				Sel: ast.NewIdent(name),
 			}, nil
 		}
-		varPool.Register(name)
+
 		return ast.NewIdent(name), nil
 	case *types.Slice:
-		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("slice element: %w", err)
 		}
@@ -103,7 +91,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 			Elt: expr,
 		}, nil
 	case *types.Array:
-		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("array element: %w", err)
 		}
@@ -116,11 +104,11 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 			Elt: expr,
 		}, nil
 	case *types.Map:
-		keyExpr, err := createASTTypeExpr(pkg, typ.Key(), varPool, existingImports)
+		keyExpr, err := createASTTypeExpr(pkg, typ.Key(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("map key: %w", err)
 		}
-		valueExpr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
+		valueExpr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("map value: %w", err)
 		}
@@ -132,7 +120,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 	case *types.Interface:
 		methodFields := make([]*ast.Field, 0, typ.NumMethods())
 		for method := range typ.Methods() {
-			expr, err := createASTTypeExpr(pkg, method.Signature(), varPool, existingImports)
+			expr, err := createASTTypeExpr(pkg, method.Signature(), varPool, imports)
 			if err != nil {
 				return nil, fmt.Errorf("method signature: %w", err)
 			}
@@ -157,7 +145,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 		case types.RecvOnly:
 			dir = ast.RECV
 		}
-		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("chan element: %w", err)
 		}
@@ -169,7 +157,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 	case *types.Signature:
 		funcFields := make([]*ast.Field, 0, typ.Params().Len())
 		for i := 0; i < typ.Params().Len(); i++ {
-			expr, err := createASTTypeExpr(pkg, typ.Params().At(i).Type(), varPool, existingImports)
+			expr, err := createASTTypeExpr(pkg, typ.Params().At(i).Type(), varPool, imports)
 			if err != nil {
 				return nil, fmt.Errorf("param %d: %w", i, err)
 			}
@@ -180,7 +168,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 		}
 		resultsFields := make([]*ast.Field, 0, typ.Results().Len())
 		for i := 0; i < typ.Results().Len(); i++ {
-			expr, err := createASTTypeExpr(pkg, typ.Results().At(i).Type(), varPool, existingImports)
+			expr, err := createASTTypeExpr(pkg, typ.Results().At(i).Type(), varPool, imports)
 			if err != nil {
 				return nil, fmt.Errorf("result %d: %w", i, err)
 			}
@@ -200,7 +188,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 	case *types.Struct:
 		fields := make([]*ast.Field, 0, typ.NumFields())
 		for i := 0; i < typ.NumFields(); i++ {
-			expr, err := createASTTypeExpr(pkg, typ.Field(i).Type(), varPool, existingImports)
+			expr, err := createASTTypeExpr(pkg, typ.Field(i).Type(), varPool, imports)
 			if err != nil {
 				return nil, fmt.Errorf("field %d: %w", i, err)
 			}
@@ -540,28 +528,27 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 	}
 
 	// Create context.Context type
-	contextPkg := types.NewPackage("context", "context")
-	contextObj := types.NewTypeName(0, contextPkg, "Context", nil)
+	contextPkg := types.NewPackage(contextPkgPath, contextPkgName)
+	contextObj := types.NewTypeName(0, contextPkg, contextTypeName, nil)
 	contextType := types.NewNamed(contextObj, types.NewInterfaceType([]*types.Func{}, nil), nil)
+
+	contextPkgName := contextPkgName
+	if imp, exists := metaData.Imports[contextPkgPath]; exists {
+		contextPkgName = imp.Name
+	} else {
+		newPkgName := varPool.GetName(contextPkgName)
+		metaData.Imports[contextPkgPath] = Import{
+			Name:          newPkgName,
+			IsDefaultName: newPkgName == contextPkgName,
+		}
+		contextPkgName = newPkgName
+	}
 
 	// Create AST expression for context.Context
 	contextExpr := &ast.SelectorExpr{
-		X:   ast.NewIdent("context"),
-		Sel: ast.NewIdent("Context"),
+		X:   ast.NewIdent(contextPkgName),
+		Sel: ast.NewIdent(contextTypeName),
 	}
-
-	// Add context import if not already present
-	if _, exists := metaData.Imports["context"]; !exists {
-		metaData.Imports["context"] = &ast.ImportSpec{
-			Path: &ast.BasicLit{
-				Kind:  token.STRING,
-				Value: `"context"`,
-			},
-		}
-	}
-
-	// Register context package name to prevent shadowing
-	varPool.Register("context")
 
 	// Create context parameter
 	contextParam := NewInjectorParam([]types.Type{contextType}, true)
@@ -601,11 +588,6 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 	injector := &Injector{
 		Name:          g.injectorName,
 		IsReturnError: g.isReturnError(),
-	}
-
-	if injector.IsReturnError {
-		varPool.Register("err")
-		varPool.Register("error")
 	}
 
 	maxAnchainSize := g.findMaximumAntichainSize()
