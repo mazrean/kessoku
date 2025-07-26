@@ -34,6 +34,11 @@ func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Inj
 		funcDecls = append(funcDecls, funcDecl)
 	}
 
+	// Mark imports as used based on generated statements from all injectors
+	for _, injector := range injectors {
+		MarkImportsUsedFromStatements(injector.Stmts)
+	}
+	
 	// Generate import declarations only for used imports
 	usedImports := GetUsedImports(metaData.Imports)
 	importSpecs := make([]*ast.ImportSpec, 0, len(usedImports))
@@ -94,13 +99,13 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 
 	// Add errgroup import and mark it as used
 	if imp, exists := imports[errgroupPkgPath]; exists {
-		imp.IsUsed = true
+		imp.IsUsed = true // Mark as used since we're generating errgroup code
 	} else {
 		name := varPool.GetName(errgroupPkgName)
 		imports[errgroupPkgPath] = &Import{
 			Name:          name,
 			IsDefaultName: errgroupPkgName == name,
-			IsUsed:        true,
+			IsUsed:        true, // Mark as used since we're generating errgroup code
 		}
 	}
 

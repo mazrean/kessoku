@@ -39,13 +39,12 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 			// Check if package is already imported
 			if imp, exists := imports[pkgPath]; exists {
 				pkgName = imp.Name
-				imp.IsUsed = true
 			} else {
 				newPkgName := varPool.GetName(pkgName)
 				imports[pkgPath] = &Import{
 					Name:          newPkgName,
 					IsDefaultName: newPkgName == pkgName,
-					IsUsed:        true,
+					IsUsed:        false, // Will be marked during code generation
 				}
 			}
 
@@ -67,13 +66,12 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 			// Check if package is already imported
 			if imp, exists := imports[pkgPath]; exists {
 				pkgName = imp.Name
-				imp.IsUsed = true
 			} else {
 				newPkgName := varPool.GetName(pkgName)
 				imports[pkgPath] = &Import{
 					Name:          newPkgName,
 					IsDefaultName: newPkgName == pkgName,
-					IsUsed:        true,
+					IsUsed:        false, // Will be marked during code generation
 				}
 			}
 
@@ -538,15 +536,18 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 	contextPkgName := contextPkgName
 	if imp, exists := metaData.Imports[contextPkgPath]; exists {
 		contextPkgName = imp.Name
-		imp.IsUsed = true
 	} else {
 		newPkgName := varPool.GetName(contextPkgName)
 		metaData.Imports[contextPkgPath] = &Import{
 			Name:          newPkgName,
 			IsDefaultName: newPkgName == contextPkgName,
-			IsUsed:        true,
+			IsUsed:        false, // Will be marked during code generation
 		}
 		contextPkgName = newPkgName
+	}
+	// Mark context import as used since we're injecting context.Context
+	if imp, exists := metaData.Imports[contextPkgPath]; exists {
+		imp.IsUsed = true
 	}
 
 	// Create AST expression for context.Context
@@ -1012,9 +1013,10 @@ func (g *Graph) buildPoolStmts(pool []*node, pools [][]*node, visited []bool, po
 		}
 
 		stmts = append(stmts, &InjectorProviderCallStmt{
-			Provider:  n.providerSpec,
-			Arguments: n.providerArgs,
-			Returns:   n.returnValues,
+			Provider:          n.providerSpec,
+			Arguments:         n.providerArgs,
+			Returns:           n.returnValues,
+			ReferencedImports: n.providerSpec.ReferencedImports,
 		})
 
 		// Check if this node's execution enables any dependency pools to start
