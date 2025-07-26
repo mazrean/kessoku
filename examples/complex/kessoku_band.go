@@ -2,7 +2,10 @@
 
 package main
 
-import "github.com/mazrean/kessoku"
+import (
+	"fmt"
+	"github.com/mazrean/kessoku"
+)
 
 func InitializeComplexService(num int) *Service {
 	config := kessoku.Provide(NewConfig).Fn()()

@@ -4,8 +4,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/mazrean/kessoku"
 	"golang.org/x/sync/errgroup"
+	"time"
 )
 
 func InitializeApp(ctx context.Context) (*App, error) {
@@ -20,7 +22,6 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		app                   *App
 	)
 	eg, ctx := errgroup.WithContext(ctx)
-	var err error
 	eg.Go(func() error {
 		cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
 		close(cacheServiceCh)
@@ -32,6 +33,7 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		close(notificationServiceCh)
 		return nil
 	})
+	var err error
 	databaseService, err = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
 	if err != nil {
 		var zero *App

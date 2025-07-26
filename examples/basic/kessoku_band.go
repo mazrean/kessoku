@@ -2,12 +2,20 @@
 
 package main
 
-import "github.com/mazrean/kessoku"
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"github.com/mazrean/kessoku"
+	"log/slog"
+	"net/http"
+	"strconv"
+)
 
 func InitializeApp() (*App, error) {
-	var err error
 	config := kessoku.Provide(NewConfig).Fn()()
 	logger := kessoku.Provide(NewLogger).Fn()()
+	var err error
 	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *App
