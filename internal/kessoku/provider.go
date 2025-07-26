@@ -3,7 +3,9 @@ package kessoku
 
 import (
 	"go/ast"
+	"go/token"
 	"go/types"
+	"strconv"
 )
 
 type Package struct {
@@ -11,8 +13,32 @@ type Package struct {
 	Path string
 }
 
+type Import struct {
+	Name          string
+	IsDefaultName bool
+}
+
+func importSpec(imp Import, path string) *ast.ImportSpec {
+	if imp.IsDefaultName {
+		return &ast.ImportSpec{
+			Path: &ast.BasicLit{
+				Kind:  token.STRING,
+				Value: strconv.Quote(path),
+			},
+		}
+	}
+
+	return &ast.ImportSpec{
+		Name: ast.NewIdent(imp.Name),
+		Path: &ast.BasicLit{
+			Kind:  token.STRING,
+			Value: strconv.Quote(path),
+		},
+	}
+}
+
 type MetaData struct {
-	Imports map[string]*ast.ImportSpec // Map from package path to import spec
+	Imports map[string]Import
 	Package Package
 }
 
