@@ -158,6 +158,7 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 			metaData.Imports[path] = &Import{
 				Name:          name,
 				IsDefaultName: name == baseName,
+				IsUsed:        false, // Will be set to true only when actually used in code generation
 			}
 		}
 	}
@@ -300,7 +301,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 			ASTTypeExpr: fun.Index,
 		}
 		// Collect dependencies from return type expression
-		fun.Index = p.collectDependencies(fun.Index, pkg.TypesInfo, imports, varPool)
+		fun.Index, _ = p.collectDependencies(fun.Index, pkg.TypesInfo, imports, varPool)
 	case *ast.IndexListExpr:
 		if len(call.Fun.(*ast.IndexListExpr).Indices) == 0 {
 			return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
@@ -311,7 +312,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 			ASTTypeExpr: fun.Indices[0],
 		}
 		// Collect dependencies from return type expression
-		fun.Indices[0] = p.collectDependencies(fun.Indices[0], pkg.TypesInfo, imports, varPool)
+		fun.Indices[0], _ = p.collectDependencies(fun.Indices[0], pkg.TypesInfo, imports, varPool)
 	default:
 		return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
 	}
@@ -413,16 +414,18 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 		return fmt.Errorf("parse provider type: %w", err)
 	}
 
-	// Collect dependencies from provider expression
-	arg = p.collectDependencies(arg, pkg.TypesInfo, imports, varPool)
+	// Collect dependencies from provider expression and get referenced imports
+	var referencedImports map[string]*Import
+	arg, referencedImports = p.collectDependencies(arg, pkg.TypesInfo, imports, varPool)
 
 	build.Providers = append(build.Providers, &ProviderSpec{
-		ASTExpr:       arg,
-		Type:          ProviderTypeFunction,
-		Provides:      provides,
-		Requires:      requires,
-		IsReturnError: isReturnError,
-		IsAsync:       isAsync,
+		ASTExpr:           arg,
+		Type:              ProviderTypeFunction,
+		Provides:          provides,
+		Requires:          requires,
+		IsReturnError:     isReturnError,
+		IsAsync:           isAsync,
+		ReferencedImports: referencedImports,
 	})
 
 	return nil
@@ -542,8 +545,9 @@ func (p *Parser) getVarDecl(pkg *packages.Package, obj *types.Var) ast.Expr {
 	return nil
 }
 
-// collectDependencies extracts package dependencies from an AST expression
-func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, imports map[string]*Import, varPool *VarPool) ast.Expr {
+// collectDependencies extracts package dependencies from an AST expression and returns both the modified expression and referenced imports
+func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, imports map[string]*Import, varPool *VarPool) (ast.Expr, map[string]*Import) {
+	referencedImports := make(map[string]*Import)
 	ast.Inspect(expr, func(n ast.Node) bool {
 		ident, ok := n.(*ast.Ident)
 		if !ok {
@@ -571,22 +575,25 @@ func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, import
 		pkgPath := imported.Path()
 		if imp, ok := imports[pkgPath]; ok {
 			ident.Name = imp.Name
-			// Mark import as used since we're referencing it in the AST
-			imp.IsUsed = true
+			// Record reference but don't mark as used yet - will be marked during code generation
+			referencedImports[pkgPath] = imp
 		} else {
 			slog.Warn("import not found for package", "package", pkgPath, "identifier", ident.Name)
 
 			// Register the package name to prevent shadowing
 			name := varPool.GetName(ident.Name)
-			imports[pkgPath] = &Import{
+			newImp := &Import{
 				Name:          name,
 				IsDefaultName: name == pkgName.Name(),
-				IsUsed:        true, // Mark as used immediately since we're referencing it
+				IsUsed:        false, // Will be marked during code generation
 			}
+			imports[pkgPath] = newImp
+			referencedImports[pkgPath] = newImp
 		}
 
 		return true
 	})
 
-	return expr
+	return expr, referencedImports
 }
+
