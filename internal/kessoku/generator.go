@@ -88,13 +88,13 @@ func detectAsyncChains(injector *Injector) bool {
 }
 
 // generateAsyncInitialization creates errgroup and variable declarations for async execution
-func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, imports map[string]Import) ([]ast.Stmt, error) {
+func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
 
 	// Add errgroup import
 	if _, exists := imports[errgroupPkgPath]; !exists {
 		name := varPool.GetName(errgroupPkgName)
-		imports[errgroupPkgPath] = Import{
+		imports[errgroupPkgPath] = &Import{
 			Name:          name,
 			IsDefaultName: errgroupPkgName == name,
 		}
@@ -168,7 +168,7 @@ func generateErrGroupDeclaration(hasCtx bool) *ast.AssignStmt {
 }
 
 // generateVariableSpecs creates variable declarations for async access
-func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imports map[string]Import) ([]ast.Spec, error) {
+func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Spec, error) {
 	var specs []ast.Spec
 
 	for _, param := range injector.Vars {
@@ -359,7 +359,7 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 }
 
 // generateStmts generates statements with parallel execution support using errgroup
-func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map[string]Import) ([]ast.Stmt, error) {
+func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map[string]*Import) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
 
 	hasAsyncChains := detectAsyncChains(injector)

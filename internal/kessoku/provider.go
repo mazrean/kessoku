@@ -16,9 +16,10 @@ type Package struct {
 type Import struct {
 	Name          string
 	IsDefaultName bool
+	IsUsed        bool
 }
 
-func importSpec(imp Import, path string) *ast.ImportSpec {
+func importSpec(imp *Import, path string) *ast.ImportSpec {
 	if imp.IsDefaultName {
 		return &ast.ImportSpec{
 			Path: &ast.BasicLit{
@@ -38,7 +39,7 @@ func importSpec(imp Import, path string) *ast.ImportSpec {
 }
 
 type MetaData struct {
-	Imports map[string]Import
+	Imports map[string]*Import
 	Package Package
 }
 

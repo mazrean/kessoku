@@ -15,8 +15,7 @@ import (
 )
 
 // createASTTypeExpr creates an AST type expression from a types.Type and updates existingImports
-func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[string]Import) (ast.Expr, error) {
-
+func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[string]*Import) (ast.Expr, error) {
 	switch typ := t.(type) {
 	case *types.Basic:
 		return ast.NewIdent(typ.Name()), nil
@@ -42,7 +41,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 				pkgName = imp.Name
 			} else {
 				newPkgName := varPool.GetName(pkgName)
-				imports[pkgPath] = Import{
+				imports[pkgPath] = &Import{
 					Name:          newPkgName,
 					IsDefaultName: newPkgName == pkgName,
 				}
@@ -68,7 +67,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 				pkgName = imp.Name
 			} else {
 				newPkgName := varPool.GetName(pkgName)
-				imports[pkgPath] = Import{
+				imports[pkgPath] = &Import{
 					Name:          newPkgName,
 					IsDefaultName: newPkgName == pkgName,
 				}
@@ -537,7 +536,7 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 		contextPkgName = imp.Name
 	} else {
 		newPkgName := varPool.GetName(contextPkgName)
-		metaData.Imports[contextPkgPath] = Import{
+		metaData.Imports[contextPkgPath] = &Import{
 			Name:          newPkgName,
 			IsDefaultName: newPkgName == contextPkgName,
 		}
