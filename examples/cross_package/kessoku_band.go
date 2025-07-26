@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"github.com/mazrean/kessoku"
 	"github.com/mazrean/kessoku/examples/cross_package/providers"
 )

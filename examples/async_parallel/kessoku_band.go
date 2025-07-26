@@ -4,10 +4,8 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"github.com/mazrean/kessoku"
 	"golang.org/x/sync/errgroup"
-	"time"
 )
 
 func InitializeApp(ctx context.Context) (*App, error) {

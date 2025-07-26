@@ -46,6 +46,8 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 					IsDefaultName: newPkgName == pkgName,
 				}
 			}
+			// Mark import as used since we're generating a type reference to it
+			MarkImportUsed(imports, pkgPath)
 
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(pkgName),
@@ -72,6 +74,8 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 					IsDefaultName: newPkgName == pkgName,
 				}
 			}
+			// Mark import as used since we're generating a type reference to it
+			MarkImportUsed(imports, pkgPath)
 
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(pkgName),
@@ -542,6 +546,8 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 		}
 		contextPkgName = newPkgName
 	}
+	// Mark context import as used since we're injecting context.Context
+	MarkImportUsed(metaData.Imports, contextPkgPath)
 
 	// Create AST expression for context.Context
 	contextExpr := &ast.SelectorExpr{

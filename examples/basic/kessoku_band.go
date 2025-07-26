@@ -2,15 +2,7 @@
 
 package main
 
-import (
-	"context"
-	"database/sql"
-	"fmt"
-	"github.com/mazrean/kessoku"
-	"log/slog"
-	"net/http"
-	"strconv"
-)
+import "github.com/mazrean/kessoku"
 
 func InitializeApp() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()

@@ -20,6 +20,9 @@ type Import struct {
 }
 
 func importSpec(imp *Import, path string) *ast.ImportSpec {
+	// Mark import as used when generating import specification
+	imp.IsUsed = true
+	
 	if imp.IsDefaultName {
 		return &ast.ImportSpec{
 			Path: &ast.BasicLit{
@@ -36,6 +39,24 @@ func importSpec(imp *Import, path string) *ast.ImportSpec {
 			Value: strconv.Quote(path),
 		},
 	}
+}
+
+// MarkImportUsed marks an import as used if it exists in the imports map
+func MarkImportUsed(imports map[string]*Import, pkgPath string) {
+	if imp, exists := imports[pkgPath]; exists {
+		imp.IsUsed = true
+	}
+}
+
+// GetUsedImports returns only the imports that are marked as used
+func GetUsedImports(imports map[string]*Import) map[string]*Import {
+	used := make(map[string]*Import)
+	for path, imp := range imports {
+		if imp.IsUsed {
+			used[path] = imp
+		}
+	}
+	return used
 }
 
 type MetaData struct {

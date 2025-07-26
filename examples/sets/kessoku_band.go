@@ -2,11 +2,7 @@
 
 package main
 
-import (
-	"fmt"
-	"github.com/mazrean/kessoku"
-	"log"
-)
+import "github.com/mazrean/kessoku"
 
 func InitializeAppBasic() (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()

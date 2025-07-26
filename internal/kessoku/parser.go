@@ -571,6 +571,8 @@ func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, import
 		pkgPath := imported.Path()
 		if imp, ok := imports[pkgPath]; ok {
 			ident.Name = imp.Name
+			// Mark import as used since we're referencing it in the AST
+			imp.IsUsed = true
 		} else {
 			slog.Warn("import not found for package", "package", pkgPath, "identifier", ident.Name)
 
@@ -579,6 +581,7 @@ func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, import
 			imports[pkgPath] = &Import{
 				Name:          name,
 				IsDefaultName: name == pkgName.Name(),
+				IsUsed:        true, // Mark as used immediately since we're referencing it
 			}
 		}
 

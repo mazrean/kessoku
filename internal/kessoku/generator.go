@@ -34,9 +34,10 @@ func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Inj
 		funcDecls = append(funcDecls, funcDecl)
 	}
 
-	// Generate import declaration first
-	importSpecs := make([]*ast.ImportSpec, 0, len(metaData.Imports))
-	for path, imp := range metaData.Imports {
+	// Generate import declarations only for used imports
+	usedImports := GetUsedImports(metaData.Imports)
+	importSpecs := make([]*ast.ImportSpec, 0, len(usedImports))
+	for path, imp := range usedImports {
 		importSpecs = append(importSpecs, importSpec(imp, path))
 	}
 	slices.SortFunc(importSpecs, func(a, b *ast.ImportSpec) int {
@@ -91,7 +92,7 @@ func detectAsyncChains(injector *Injector) bool {
 func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
 
-	// Add errgroup import
+	// Add errgroup import and mark it as used
 	if _, exists := imports[errgroupPkgPath]; !exists {
 		name := varPool.GetName(errgroupPkgName)
 		imports[errgroupPkgPath] = &Import{
@@ -99,6 +100,8 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 			IsDefaultName: errgroupPkgName == name,
 		}
 	}
+	// Mark errgroup as used since we'll generate code that references it
+	MarkImportUsed(imports, errgroupPkgPath)
 
 	// Check if context is available
 	hasCtx := false
