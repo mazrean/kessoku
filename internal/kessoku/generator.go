@@ -93,15 +93,16 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 	var stmts []ast.Stmt
 
 	// Add errgroup import and mark it as used
-	if _, exists := imports[errgroupPkgPath]; !exists {
+	if imp, exists := imports[errgroupPkgPath]; exists {
+		imp.IsUsed = true
+	} else {
 		name := varPool.GetName(errgroupPkgName)
 		imports[errgroupPkgPath] = &Import{
 			Name:          name,
 			IsDefaultName: errgroupPkgName == name,
+			IsUsed:        true,
 		}
 	}
-	// Mark errgroup as used since we'll generate code that references it
-	MarkImportUsed(imports, errgroupPkgPath)
 
 	// Check if context is available
 	hasCtx := false

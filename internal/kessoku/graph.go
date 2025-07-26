@@ -39,15 +39,15 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 			// Check if package is already imported
 			if imp, exists := imports[pkgPath]; exists {
 				pkgName = imp.Name
+				imp.IsUsed = true
 			} else {
 				newPkgName := varPool.GetName(pkgName)
 				imports[pkgPath] = &Import{
 					Name:          newPkgName,
 					IsDefaultName: newPkgName == pkgName,
+					IsUsed:        true,
 				}
 			}
-			// Mark import as used since we're generating a type reference to it
-			MarkImportUsed(imports, pkgPath)
 
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(pkgName),
@@ -67,15 +67,15 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 			// Check if package is already imported
 			if imp, exists := imports[pkgPath]; exists {
 				pkgName = imp.Name
+				imp.IsUsed = true
 			} else {
 				newPkgName := varPool.GetName(pkgName)
 				imports[pkgPath] = &Import{
 					Name:          newPkgName,
 					IsDefaultName: newPkgName == pkgName,
+					IsUsed:        true,
 				}
 			}
-			// Mark import as used since we're generating a type reference to it
-			MarkImportUsed(imports, pkgPath)
 
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(pkgName),
@@ -538,16 +538,16 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 	contextPkgName := contextPkgName
 	if imp, exists := metaData.Imports[contextPkgPath]; exists {
 		contextPkgName = imp.Name
+		imp.IsUsed = true
 	} else {
 		newPkgName := varPool.GetName(contextPkgName)
 		metaData.Imports[contextPkgPath] = &Import{
 			Name:          newPkgName,
 			IsDefaultName: newPkgName == contextPkgName,
+			IsUsed:        true,
 		}
 		contextPkgName = newPkgName
 	}
-	// Mark context import as used since we're injecting context.Context
-	MarkImportUsed(metaData.Imports, contextPkgPath)
 
 	// Create AST expression for context.Context
 	contextExpr := &ast.SelectorExpr{
