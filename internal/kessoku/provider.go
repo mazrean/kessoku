@@ -48,6 +48,26 @@ func MarkImportUsed(imports map[string]*Import, pkgPath string) {
 	}
 }
 
+// MarkImportsUsedFromProviders marks imports as used based on providers that are actually used
+func MarkImportsUsedFromProviders(providers []*ProviderSpec) {
+	for _, provider := range providers {
+		for _, imp := range provider.ReferencedImports {
+			imp.IsUsed = true
+		}
+	}
+}
+
+// MarkImportsUsedFromStatements marks imports as used based on statements that are actually used  
+func MarkImportsUsedFromStatements(stmts []InjectorStmt) {
+	for _, stmt := range stmts {
+		if providerStmt, ok := stmt.(*InjectorProviderCallStmt); ok {
+			for _, imp := range providerStmt.ReferencedImports {
+				imp.IsUsed = true
+			}
+		}
+	}
+}
+
 // GetUsedImports returns only the imports that are marked as used
 func GetUsedImports(imports map[string]*Import) map[string]*Import {
 	used := make(map[string]*Import)
@@ -74,12 +94,13 @@ const (
 
 // ProviderSpec represents a provider specification from annotations.
 type ProviderSpec struct {
-	ASTExpr       ast.Expr
-	Type          ProviderType
-	Provides      [][]types.Type
-	Requires      []types.Type
-	IsReturnError bool
-	IsAsync       bool
+	ASTExpr           ast.Expr
+	Type              ProviderType
+	Provides          [][]types.Type
+	Requires          []types.Type
+	IsReturnError     bool
+	IsAsync           bool
+	ReferencedImports map[string]*Import // Package paths to Import structs this provider references
 }
 
 type Return struct {
@@ -171,9 +192,10 @@ type InjectorCallArgument struct {
 }
 
 type InjectorProviderCallStmt struct {
-	Provider  *ProviderSpec
-	Arguments []*InjectorCallArgument
-	Returns   []*InjectorParam
+	Provider          *ProviderSpec
+	Arguments         []*InjectorCallArgument
+	Returns           []*InjectorParam
+	ReferencedImports map[string]*Import // Package paths to Import structs this statement references
 }
 
 func (stmt *InjectorProviderCallStmt) HasAsync() bool {
