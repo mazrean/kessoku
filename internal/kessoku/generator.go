@@ -34,17 +34,6 @@ func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Inj
 		funcDecls = append(funcDecls, funcDecl)
 	}
 
-	// Mark imports as used based on generated statements from all injectors
-	for _, injector := range injectors {
-		MarkImportsUsedFromStatements(injector.Stmts)
-		// Mark imports used by injector arguments
-		MarkImportsUsedFromArguments(injector.Args)
-		// Mark imports used by injector parameters (return types)
-		if injector.Return != nil && injector.Return.Param != nil {
-			MarkImportsUsedFromParams([]*InjectorParam{injector.Return.Param})
-		}
-	}
-	
 	// Generate import declarations only for used imports
 	usedImports := GetUsedImports(metaData.Imports)
 	importSpecs := make([]*ast.ImportSpec, 0, len(usedImports))
@@ -92,8 +81,21 @@ func isContextType(t types.Type) bool {
 func detectAsyncChains(injector *Injector) bool {
 	for _, stmt := range injector.Stmts {
 		// Check if the ChainStmt actually contains async providers
-		if _, ok := stmt.(*InjectorChainStmt); ok {
-			return true
+		if chainStmt, ok := stmt.(*InjectorChainStmt); ok {
+			// Check if any statement in the chain is async
+			for _, subStmt := range chainStmt.Statements {
+				if providerStmt, ok := subStmt.(*InjectorProviderCallStmt); ok {
+					if providerStmt.Provider.IsAsync {
+						return true
+					}
+				}
+			}
+		}
+		// Check if any provider call statement has async providers
+		if providerStmt, ok := stmt.(*InjectorProviderCallStmt); ok {
+			if providerStmt.Provider.IsAsync {
+				return true
+			}
 		}
 	}
 	return false
@@ -190,6 +192,11 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imp
 		paramName := param.Name(varPool)
 		if paramName == "_" {
 			continue
+		}
+
+		// Mark imports used by this var-defined parameter as used
+		for _, imp := range param.ReferencedImports {
+			imp.IsUsed = true
 		}
 
 		typeExpr, err := createASTTypeExpr(pkg, param.Type(), varPool, imports)
@@ -300,6 +307,10 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 	// Add parameters
 	for _, arg := range injector.Args {
 		if arg != nil && arg.ASTTypeExpr != nil && arg.Param != nil {
+			// Mark imports used by argument types as used since they appear in function signature
+			for _, imp := range arg.Param.ReferencedImports {
+				imp.IsUsed = true
+			}
 			paramFields = append(paramFields, &ast.Field{
 				Names: []*ast.Ident{ast.NewIdent(arg.Param.Name(varPool))},
 				Type:  arg.ASTTypeExpr,
@@ -310,6 +321,12 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 	// Return type - will be set in Results field
 	resultsFields := make([]*ast.Field, 0, maxInjectorReturnValues)
 	if injector.Return != nil && injector.Return.Return != nil && injector.Return.Return.ASTTypeExpr != nil {
+		// Mark imports used by return types as used since they appear in function signature
+		if injector.Return.Param != nil {
+			for _, imp := range injector.Return.Param.ReferencedImports {
+				imp.IsUsed = true
+			}
+		}
 		resultsFields = append(resultsFields, &ast.Field{
 			Type: injector.Return.Return.ASTTypeExpr,
 		})
@@ -504,6 +521,10 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 		if closeStmt != nil {
 			stmts = append(stmts, closeStmt)
 		}
+	}
+
+	for _, reference := range stmt.Provider.ReferencedImports {
+		reference.IsUsed = true // Mark imports used by this provider as used
 	}
 
 	return stmts, nil

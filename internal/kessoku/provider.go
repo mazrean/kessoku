@@ -41,47 +41,6 @@ func importSpec(imp *Import, path string) *ast.ImportSpec {
 	}
 }
 
-// MarkImportsUsedFromParams marks imports as used based on InjectorParams
-func MarkImportsUsedFromParams(params []*InjectorParam) {
-	for _, param := range params {
-		for _, imp := range param.ReferencedImports {
-			imp.IsUsed = true
-		}
-	}
-}
-
-// MarkImportsUsedFromArguments marks imports as used based on InjectorArguments
-func MarkImportsUsedFromArguments(args []*InjectorArgument) {
-	for _, arg := range args {
-		for _, imp := range arg.Param.ReferencedImports {
-			imp.IsUsed = true
-		}
-	}
-}
-
-// MarkImportsUsedFromStatements marks imports as used based on statements that are actually used
-func MarkImportsUsedFromStatements(stmts []InjectorStmt) {
-	for _, stmt := range stmts {
-		if providerStmt, ok := stmt.(*InjectorProviderCallStmt); ok {
-			for _, imp := range providerStmt.Provider.ReferencedImports {
-				imp.IsUsed = true
-			}
-			// Mark imports used by arguments
-			for _, arg := range providerStmt.Arguments {
-				for _, imp := range arg.Param.ReferencedImports {
-					imp.IsUsed = true
-				}
-			}
-			// Mark imports used by return parameters
-			for _, returnParam := range providerStmt.Returns {
-				for _, imp := range returnParam.ReferencedImports {
-					imp.IsUsed = true
-				}
-			}
-		}
-	}
-}
-
 // GetUsedImports returns only the imports that are marked as used
 func GetUsedImports(imports map[string]*Import) map[string]*Import {
 	used := make(map[string]*Import)
@@ -150,12 +109,12 @@ func NewInjectorParam(ts []types.Type, isArg bool) *InjectorParam {
 // NewInjectorParamWithImports creates a new InjectorParam and collects imports from the types
 func NewInjectorParamWithImports(ts []types.Type, isArg bool, pkg string, imports map[string]*Import, varPool *VarPool) *InjectorParam {
 	referencedImports := make(map[string]*Import)
-	
+
 	// Collect imports from all types
 	for _, t := range ts {
 		collectImportsFromType(t, pkg, imports, referencedImports, varPool)
 	}
-	
+
 	return &InjectorParam{
 		types:             ts,
 		isArg:             isArg,
