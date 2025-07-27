@@ -15,13 +15,12 @@ import (
 )
 
 // createASTTypeExpr creates an AST type expression from a types.Type and updates existingImports
-func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImports map[string]*ast.ImportSpec) (ast.Expr, error) {
-
+func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[string]*Import) (ast.Expr, error) {
 	switch typ := t.(type) {
 	case *types.Basic:
 		return ast.NewIdent(typ.Name()), nil
 	case *types.Pointer:
-		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("pointer element: %w", err)
 		}
@@ -38,28 +37,23 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 			pkgName := objPkg.Name()
 
 			// Check if package is already imported
-			if existingSpec, exists := existingImports[pkgPath]; exists {
-				// Use existing package name (could be an alias)
-				if existingSpec.Name != nil {
-					pkgName = existingSpec.Name.Name
-				}
+			if imp, exists := imports[pkgPath]; exists {
+				pkgName = imp.Name
 			} else {
-				// Add new import if not already imported
-				existingImports[pkgPath] = &ast.ImportSpec{
-					Path: &ast.BasicLit{
-						Kind:  token.STRING,
-						Value: fmt.Sprintf("\"%s\"", pkgPath),
-					},
+				newPkgName := varPool.GetName(pkgName)
+				imports[pkgPath] = &Import{
+					Name:          newPkgName,
+					IsDefaultName: newPkgName == pkgName,
+					IsUsed:        false, // Will be marked during code generation
 				}
 			}
 
-			varPool.Register(pkgName)
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(pkgName),
 				Sel: ast.NewIdent(name),
 			}, nil
 		}
-		varPool.Register(name)
+
 		return ast.NewIdent(name), nil
 	case *types.Alias:
 		name := typ.Obj().Name()
@@ -70,31 +64,26 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 			pkgName := objPkg.Name()
 
 			// Check if package is already imported
-			if existingSpec, exists := existingImports[pkgPath]; exists {
-				// Use existing package name (could be an alias)
-				if existingSpec.Name != nil {
-					pkgName = existingSpec.Name.Name
-				}
+			if imp, exists := imports[pkgPath]; exists {
+				pkgName = imp.Name
 			} else {
-				// Add new import if not already imported
-				existingImports[pkgPath] = &ast.ImportSpec{
-					Path: &ast.BasicLit{
-						Kind:  token.STRING,
-						Value: fmt.Sprintf("\"%s\"", pkgPath),
-					},
+				newPkgName := varPool.GetName(pkgName)
+				imports[pkgPath] = &Import{
+					Name:          newPkgName,
+					IsDefaultName: newPkgName == pkgName,
+					IsUsed:        false, // Will be marked during code generation
 				}
 			}
 
-			varPool.Register(pkgName)
 			return &ast.SelectorExpr{
 				X:   ast.NewIdent(pkgName),
 				Sel: ast.NewIdent(name),
 			}, nil
 		}
-		varPool.Register(name)
+
 		return ast.NewIdent(name), nil
 	case *types.Slice:
-		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("slice element: %w", err)
 		}
@@ -103,7 +92,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 			Elt: expr,
 		}, nil
 	case *types.Array:
-		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("array element: %w", err)
 		}
@@ -116,11 +105,11 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 			Elt: expr,
 		}, nil
 	case *types.Map:
-		keyExpr, err := createASTTypeExpr(pkg, typ.Key(), varPool, existingImports)
+		keyExpr, err := createASTTypeExpr(pkg, typ.Key(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("map key: %w", err)
 		}
-		valueExpr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
+		valueExpr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("map value: %w", err)
 		}
@@ -132,7 +121,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 	case *types.Interface:
 		methodFields := make([]*ast.Field, 0, typ.NumMethods())
 		for method := range typ.Methods() {
-			expr, err := createASTTypeExpr(pkg, method.Signature(), varPool, existingImports)
+			expr, err := createASTTypeExpr(pkg, method.Signature(), varPool, imports)
 			if err != nil {
 				return nil, fmt.Errorf("method signature: %w", err)
 			}
@@ -157,7 +146,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 		case types.RecvOnly:
 			dir = ast.RECV
 		}
-		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, existingImports)
+		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("chan element: %w", err)
 		}
@@ -169,7 +158,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 	case *types.Signature:
 		funcFields := make([]*ast.Field, 0, typ.Params().Len())
 		for i := 0; i < typ.Params().Len(); i++ {
-			expr, err := createASTTypeExpr(pkg, typ.Params().At(i).Type(), varPool, existingImports)
+			expr, err := createASTTypeExpr(pkg, typ.Params().At(i).Type(), varPool, imports)
 			if err != nil {
 				return nil, fmt.Errorf("param %d: %w", i, err)
 			}
@@ -180,7 +169,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 		}
 		resultsFields := make([]*ast.Field, 0, typ.Results().Len())
 		for i := 0; i < typ.Results().Len(); i++ {
-			expr, err := createASTTypeExpr(pkg, typ.Results().At(i).Type(), varPool, existingImports)
+			expr, err := createASTTypeExpr(pkg, typ.Results().At(i).Type(), varPool, imports)
 			if err != nil {
 				return nil, fmt.Errorf("result %d: %w", i, err)
 			}
@@ -200,7 +189,7 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, existingImpor
 	case *types.Struct:
 		fields := make([]*ast.Field, 0, typ.NumFields())
 		for i := 0; i < typ.NumFields(); i++ {
-			expr, err := createASTTypeExpr(pkg, typ.Field(i).Type(), varPool, existingImports)
+			expr, err := createASTTypeExpr(pkg, typ.Field(i).Type(), varPool, imports)
 			if err != nil {
 				return nil, fmt.Errorf("field %d: %w", i, err)
 			}
@@ -459,7 +448,7 @@ func (e *CycleError) Error() string {
 func (g *Graph) detectCycles() error {
 	colors := make(map[*node]nodeColor)
 	parent := make(map[*node]*node)
-	
+
 	// Initialize all nodes as white (unvisited)
 	for _, n := range g.nodes {
 		colors[n] = white
@@ -505,7 +494,7 @@ func (g *Graph) dfsCycleDetection(node *node, colors map[*node]nodeColor, parent
 // buildCyclePath builds the cycle path from the detected back edge
 func (g *Graph) buildCyclePath(cycleStart, cycleEnd *node, parent map[*node]*node) []*node {
 	var cycle []*node
-	
+
 	// Start from the cycle end and work backwards to find the cycle
 	current := cycleEnd
 	for current != cycleStart {
@@ -516,10 +505,10 @@ func (g *Graph) buildCyclePath(cycleStart, cycleEnd *node, parent map[*node]*nod
 			break
 		}
 	}
-	
+
 	// Add the cycle start to complete the cycle
 	cycle = append([]*node{cycleStart}, cycle...)
-	
+
 	return cycle
 }
 
@@ -540,31 +529,35 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 	}
 
 	// Create context.Context type
-	contextPkg := types.NewPackage("context", "context")
-	contextObj := types.NewTypeName(0, contextPkg, "Context", nil)
+	contextPkg := types.NewPackage(contextPkgPath, contextPkgName)
+	contextObj := types.NewTypeName(0, contextPkg, contextTypeName, nil)
 	contextType := types.NewNamed(contextObj, types.NewInterfaceType([]*types.Func{}, nil), nil)
+
+	contextPkgName := contextPkgName
+	if imp, exists := metaData.Imports[contextPkgPath]; exists {
+		contextPkgName = imp.Name
+	} else {
+		newPkgName := varPool.GetName(contextPkgName)
+		metaData.Imports[contextPkgPath] = &Import{
+			Name:          newPkgName,
+			IsDefaultName: newPkgName == contextPkgName,
+			IsUsed:        false, // Will be marked during code generation
+		}
+		contextPkgName = newPkgName
+	}
+	// Mark context import as used since we're injecting context.Context
+	if imp, exists := metaData.Imports[contextPkgPath]; exists {
+		imp.IsUsed = true
+	}
 
 	// Create AST expression for context.Context
 	contextExpr := &ast.SelectorExpr{
-		X:   ast.NewIdent("context"),
-		Sel: ast.NewIdent("Context"),
+		X:   ast.NewIdent(contextPkgName),
+		Sel: ast.NewIdent(contextTypeName),
 	}
-
-	// Add context import if not already present
-	if _, exists := metaData.Imports["context"]; !exists {
-		metaData.Imports["context"] = &ast.ImportSpec{
-			Path: &ast.BasicLit{
-				Kind:  token.STRING,
-				Value: `"context"`,
-			},
-		}
-	}
-
-	// Register context package name to prevent shadowing
-	varPool.Register("context")
 
 	// Create context parameter
-	contextParam := NewInjectorParam([]types.Type{contextType}, true)
+	contextParam := NewInjectorParamWithImports([]types.Type{contextType}, true, metaData.Package.Path, metaData.Imports, varPool)
 	// errgroup.WithContext(ctx) requires context.Context as the first argument
 	contextParam.Ref(false)
 
@@ -603,17 +596,12 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 		IsReturnError: g.isReturnError(),
 	}
 
-	if injector.IsReturnError {
-		varPool.Register("err")
-		varPool.Register("error")
-	}
-
 	maxAnchainSize := g.findMaximumAntichainSize()
 	pools := make([][]*node, maxAnchainSize)
 
 	initialProvidedNodes := make(map[*node]struct{})
 	for _, n := range g.nodes {
-		if len(g.reverseEdges[n]) == 0 {
+		if n.providerSpec == nil {
 			initialProvidedNodes[n] = struct{}{}
 		}
 	}
@@ -640,7 +628,7 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 			providedNodes = initialProvidedNodes
 			poolIdx = -1 // Arguments are not in any pool
 
-			param := NewInjectorParam([]types.Type{n.arg.Type}, true)
+			param := NewInjectorParamWithImports([]types.Type{n.arg.Type}, true, metaData.Package.Path, metaData.Imports, varPool)
 			injector.Params = append(injector.Params, param)
 			returnValues = append(returnValues, param)
 
@@ -654,10 +642,11 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 			pools[poolIdx] = append(pools[poolIdx], n)
 
 			providedNodes = poolProvidedNodes[poolIdx]
+			poolProvidedNodes[poolIdx][n] = struct{}{}
 
 			returnValues = make([]*InjectorParam, 0, len(n.providerSpec.Provides))
 			for _, types := range n.providerSpec.Provides {
-				param := NewInjectorParam(types, false)
+				param := NewInjectorParamWithImports(types, false, metaData.Package.Path, metaData.Imports, varPool)
 				injector.Params = append(injector.Params, param)
 				injector.Vars = append(injector.Vars, param)
 				returnValues = append(returnValues, param)
@@ -675,12 +664,6 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 
 		// Mark current node as provided before processing edges
 		providedNodes[n] = struct{}{}
-
-		// Update pool's provided nodes if this is a provider node
-		if n.providerSpec != nil {
-			poolProvidedNodes[poolIdx][n] = struct{}{}
-		}
-
 		nodeProvidedNodes[n] = maps.Clone(providedNodes)
 
 		if n == g.returnValue.node {
@@ -848,45 +831,20 @@ func (g *Graph) findOptimalPool(n *node, pools [][]*node, poolProvidedNodes []ma
 		return 0
 	}
 
-	// For sync-only cases, use a single pool (pool 0) to maintain dependency order
-	if !n.providerSpec.IsAsync {
-		// Check if there are any async providers in the whole graph
-		hasAsyncProviders := false
-		for _, node := range g.nodes {
-			if node.providerSpec != nil && node.providerSpec.IsAsync {
-				hasAsyncProviders = true
-				break
-			}
-		}
-
-		// If no async providers exist, use pool 0 for all sync providers
-		if !hasAsyncProviders {
-			return 0
-		}
-	}
-
-	emptyPools := make([]int, 0)
-	maxProvidedPools := make([]int, 0)
-	for i, pool := range pools {
-		if len(pool) == 0 {
-			emptyPools = append(emptyPools, i)
-		} else {
-			maxProvidedPools = append(maxProvidedPools, i)
-		}
-	}
-	if len(maxProvidedPools) == 0 {
-		return 0
-	}
-
 	dependencies := g.reverseEdges[n]
 
 	maxProvidedCount := 0
+	maxProvidedPools := make([]int, 0)
 	for i, providedNodeMap := range poolProvidedNodes {
 		providedCount := 0
 		for _, dependency := range dependencies {
 			if _, ok := providedNodeMap[dependency]; ok {
 				providedCount++
 			}
+		}
+
+		if !n.providerSpec.IsAsync && len(pools[i]) == 0 {
+			continue
 		}
 
 		switch {
@@ -898,23 +856,46 @@ func (g *Graph) findOptimalPool(n *node, pools [][]*node, poolProvidedNodes []ma
 		}
 	}
 
-	if n.providerSpec.IsAsync {
-		if maxProvidedCount == len(dependencies) {
-			for _, poolIdx := range maxProvidedPools {
-				if len(pools[poolIdx]) != 0 && slices.Contains(dependencies, pools[poolIdx][len(pools[poolIdx])-1]) {
+	if len(maxProvidedPools) == 0 {
+		return 0
+	}
+
+	if maxProvidedCount == len(dependencies) {
+	POOL_LOOP:
+		for _, poolIdx := range maxProvidedPools {
+			if !n.providerSpec.IsAsync {
+				return poolIdx
+			}
+
+			for i := range pools[poolIdx] {
+				nd := pools[poolIdx][len(pools[poolIdx])-1-i]
+				if slices.Contains(dependencies, nd) {
 					return poolIdx
 				}
+				if nd.providerSpec.IsAsync {
+					continue POOL_LOOP
+				}
+			}
+			if poolIdx == 0 {
+				return 0
 			}
 		}
+	}
 
-		if len(emptyPools) > 0 {
-			return emptyPools[0]
+	if n.providerSpec.IsAsync {
+		for i, pool := range pools {
+			if len(pool) == 0 {
+				return i
+			}
 		}
 	}
 
 	minSize := math.MaxInt
 	minSizePool := 0
 	for _, poolIdx := range maxProvidedPools {
+		if !n.providerSpec.IsAsync && len(pools[poolIdx]) == 0 {
+			continue
+		}
 		if len(pools[poolIdx]) < minSize {
 			minSize = len(pools[poolIdx])
 			minSizePool = poolIdx

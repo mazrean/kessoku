@@ -34,10 +34,11 @@ func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Inj
 		funcDecls = append(funcDecls, funcDecl)
 	}
 
-	// Generate import declaration first
-	importSpecs := make([]*ast.ImportSpec, 0, len(metaData.Imports))
-	for _, importSpec := range metaData.Imports {
-		importSpecs = append(importSpecs, importSpec)
+	// Generate import declarations only for used imports
+	usedImports := GetUsedImports(metaData.Imports)
+	importSpecs := make([]*ast.ImportSpec, 0, len(usedImports))
+	for path, imp := range usedImports {
+		importSpecs = append(importSpecs, importSpec(imp, path))
 	}
 	slices.SortFunc(importSpecs, func(a, b *ast.ImportSpec) int {
 		return strings.Compare(a.Path.Value, b.Path.Value)
@@ -69,7 +70,7 @@ func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Inj
 func isContextType(t types.Type) bool {
 	if named, ok := t.(*types.Named); ok {
 		if obj := named.Obj(); obj != nil && obj.Pkg() != nil {
-			return obj.Pkg().Path() == "context" && obj.Name() == "Context"
+			return obj.Pkg().Path() == contextPkgPath && obj.Name() == contextTypeName
 		}
 	}
 
@@ -79,15 +80,21 @@ func isContextType(t types.Type) bool {
 // detectAsyncChains determines if the injector contains async provider chains
 func detectAsyncChains(injector *Injector) bool {
 	for _, stmt := range injector.Stmts {
-		if stmt.HasAsync() {
-			return true
-		}
 		// Check if the ChainStmt actually contains async providers
 		if chainStmt, ok := stmt.(*InjectorChainStmt); ok {
+			// Check if any statement in the chain is async
 			for _, subStmt := range chainStmt.Statements {
-				if subStmt.HasAsync() {
-					return true
+				if providerStmt, ok := subStmt.(*InjectorProviderCallStmt); ok {
+					if providerStmt.Provider.IsAsync {
+						return true
+					}
 				}
+			}
+		}
+		// Check if any provider call statement has async providers
+		if providerStmt, ok := stmt.(*InjectorProviderCallStmt); ok {
+			if providerStmt.Provider.IsAsync {
+				return true
 			}
 		}
 	}
@@ -95,15 +102,19 @@ func detectAsyncChains(injector *Injector) bool {
 }
 
 // generateAsyncInitialization creates errgroup and variable declarations for async execution
-func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, existingImports map[string]*ast.ImportSpec) ([]ast.Stmt, error) {
+func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
 
-	// Add errgroup import
-	existingImports["golang.org/x/sync/errgroup"] = &ast.ImportSpec{
-		Path: &ast.BasicLit{
-			Kind:  token.STRING,
-			Value: `"golang.org/x/sync/errgroup"`,
-		},
+	// Add errgroup import and mark it as used
+	if imp, exists := imports[errgroupPkgPath]; exists {
+		imp.IsUsed = true // Mark as used since we're generating errgroup code
+	} else {
+		name := varPool.GetName(errgroupPkgName)
+		imports[errgroupPkgPath] = &Import{
+			Name:          name,
+			IsDefaultName: errgroupPkgName == name,
+			IsUsed:        true, // Mark as used since we're generating errgroup code
+		}
 	}
 
 	// Check if context is available
@@ -116,7 +127,7 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 	}
 
 	// Generate variable declarations for async access
-	varSpecs, err := generateVariableSpecs(pkg, injector, varPool, existingImports)
+	varSpecs, err := generateVariableSpecs(pkg, injector, varPool, imports)
 	if err != nil {
 		return nil, fmt.Errorf("generate variable declarations: %w", err)
 	}
@@ -174,7 +185,7 @@ func generateErrGroupDeclaration(hasCtx bool) *ast.AssignStmt {
 }
 
 // generateVariableSpecs creates variable declarations for async access
-func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, existingImports map[string]*ast.ImportSpec) ([]ast.Spec, error) {
+func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Spec, error) {
 	var specs []ast.Spec
 
 	for _, param := range injector.Vars {
@@ -183,7 +194,12 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, exi
 			continue
 		}
 
-		typeExpr, err := createASTTypeExpr(pkg, param.Type(), varPool, existingImports)
+		// Mark imports used by this var-defined parameter as used
+		for _, imp := range param.ReferencedImports {
+			imp.IsUsed = true
+		}
+
+		typeExpr, err := createASTTypeExpr(pkg, param.Type(), varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("create AST type expression for %s: %w", paramName, err)
 		}
@@ -219,10 +235,12 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, exi
 // generateAsyncWaitStatements creates errgroup wait statements
 func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
 	if injector.IsReturnError {
+		errIdent := ast.NewIdent("err")
+
 		return []ast.Stmt{
 			&ast.IfStmt{
 				Init: &ast.AssignStmt{
-					Lhs: []ast.Expr{ast.NewIdent("err")},
+					Lhs: []ast.Expr{errIdent},
 					Tok: token.DEFINE,
 					Rhs: []ast.Expr{
 						&ast.CallExpr{
@@ -234,7 +252,7 @@ func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
 					},
 				},
 				Cond: &ast.BinaryExpr{
-					X:  ast.NewIdent("err"),
+					X:  errIdent,
 					Op: token.NEQ,
 					Y:  ast.NewIdent("nil"),
 				},
@@ -243,7 +261,7 @@ func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
 						&ast.ReturnStmt{
 							Results: []ast.Expr{
 								ast.NewIdent("nil"),
-								ast.NewIdent("err"),
+								errIdent,
 							},
 						},
 					},
@@ -289,6 +307,10 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 	// Add parameters
 	for _, arg := range injector.Args {
 		if arg != nil && arg.ASTTypeExpr != nil && arg.Param != nil {
+			// Mark imports used by argument types as used since they appear in function signature
+			for _, imp := range arg.Param.ReferencedImports {
+				imp.IsUsed = true
+			}
 			paramFields = append(paramFields, &ast.Field{
 				Names: []*ast.Ident{ast.NewIdent(arg.Param.Name(varPool))},
 				Type:  arg.ASTTypeExpr,
@@ -299,6 +321,12 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 	// Return type - will be set in Results field
 	resultsFields := make([]*ast.Field, 0, maxInjectorReturnValues)
 	if injector.Return != nil && injector.Return.Return != nil && injector.Return.Return.ASTTypeExpr != nil {
+		// Mark imports used by return types as used since they appear in function signature
+		if injector.Return.Param != nil {
+			for _, imp := range injector.Return.Param.ReferencedImports {
+				imp.IsUsed = true
+			}
+		}
 		resultsFields = append(resultsFields, &ast.Field{
 			Type: injector.Return.Return.ASTTypeExpr,
 		})
@@ -363,14 +391,14 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 }
 
 // generateStmts generates statements with parallel execution support using errgroup
-func generateStmts(varPool *VarPool, pkg string, injector *Injector, existingImports map[string]*ast.ImportSpec) ([]ast.Stmt, error) {
+func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map[string]*Import) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
 
 	hasAsyncChains := detectAsyncChains(injector)
 
 	// Initialize async components if needed
 	if hasAsyncChains {
-		asyncStmts, err := generateAsyncInitialization(pkg, injector, varPool, existingImports)
+		asyncStmts, err := generateAsyncInitialization(pkg, injector, varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("generate async initialization: %w", err)
 		}
@@ -411,22 +439,6 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, existingImp
 		}
 	}
 
-	for _, stmt := range injector.Stmts {
-		if callStmt, ok := stmt.(*InjectorProviderCallStmt); ok && callStmt.Provider.IsReturnError {
-			stmts = append(stmts, &ast.DeclStmt{
-				Decl: &ast.GenDecl{
-					Tok: token.VAR,
-					Specs: []ast.Spec{
-						&ast.ValueSpec{
-							Names: []*ast.Ident{ast.NewIdent("err")},
-							Type:  ast.NewIdent("error"),
-						},
-					},
-				},
-			})
-		}
-	}
-
 	// Process statements and collect completion channels
 	for _, stmt := range injector.Stmts {
 		newStmts, _ := stmt.Stmt(varPool, injector, returnErrStmts)
@@ -459,12 +471,8 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, existingImp
 func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) ([]ast.Stmt, []string) {
 	var stmts []ast.Stmt
 
-	hasAsyncChains := detectAsyncChains(injector)
-
-	lhs := stmt.buildLhsExpressions(varPool)
-	args := stmt.buildArguments(varPool)
-
 	// Add channel synchronization for async scenarios
+	hasAsyncChains := detectAsyncChains(injector)
 	if hasAsyncChains {
 		waitStmt := stmt.generateChannelWaitStatement(varPool, injector, returnErrStmts)
 		if waitStmt != nil {
@@ -473,16 +481,38 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 	}
 
 	// Generate provider function call
+	args := stmt.buildArguments(varPool)
 	rhs := stmt.buildProviderCall(args)
 
 	// Generate assignment statement
+	lhs := stmt.buildLhsExpressions(varPool)
+
+	var errorHandleStmt ast.Stmt
+	if stmt.Provider.IsReturnError {
+		errIdentName := varPool.GetName("err")
+		errIdent := ast.NewIdent(errIdentName)
+		lhs = append(lhs, errIdent)
+
+		stmts = append(stmts, &ast.DeclStmt{
+			Decl: &ast.GenDecl{
+				Tok: token.VAR,
+				Specs: []ast.Spec{
+					&ast.ValueSpec{
+						Names: []*ast.Ident{errIdent},
+						Type:  ast.NewIdent("error"),
+					},
+				},
+			},
+		})
+
+		errorHandleStmt = stmt.buildErrorHandlingStatement(errIdent, returnErrStmts)
+	}
+
 	assignStmt := stmt.buildAssignmentStatement(lhs, rhs, hasAsyncChains)
 	stmts = append(stmts, assignStmt)
 
-	// Add error handling if needed
-	if stmt.Provider.IsReturnError {
-		errorStmt := stmt.buildErrorHandlingStatement(returnErrStmts)
-		stmts = append(stmts, errorStmt)
+	if errorHandleStmt != nil {
+		stmts = append(stmts, errorHandleStmt)
 	}
 
 	// Add channel cleanup for async scenarios
@@ -491,6 +521,10 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 		if closeStmt != nil {
 			stmts = append(stmts, closeStmt)
 		}
+	}
+
+	for _, reference := range stmt.Provider.ReferencedImports {
+		reference.IsUsed = true // Mark imports used by this provider as used
 	}
 
 	return stmts, nil
@@ -634,32 +668,7 @@ func chainReturnErrStmts(errExpr ast.Expr) []ast.Stmt {
 
 func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ func(ast.Expr) []ast.Stmt) ([]ast.Stmt, []string) {
 	var imports []string
-
-	isReturnError := false
-	for _, chainStmt := range stmt.Statements {
-		if providerCall, ok := chainStmt.(*InjectorProviderCallStmt); ok {
-			isReturnError = providerCall.Provider.IsReturnError
-			if providerCall.Provider.IsReturnError {
-				break
-			}
-		}
-	}
-
 	var stmts []ast.Stmt
-
-	if isReturnError {
-		stmts = append(stmts, &ast.DeclStmt{
-			Decl: &ast.GenDecl{
-				Tok: token.VAR,
-				Specs: []ast.Spec{
-					&ast.ValueSpec{
-						Names: []*ast.Ident{ast.NewIdent("err")},
-						Type:  &ast.Ident{Name: "error"},
-					},
-				},
-			},
-		})
-	}
 
 	// Generate statements for this chain
 	for _, chainStmt := range stmt.Statements {
@@ -716,11 +725,6 @@ func (stmt *InjectorProviderCallStmt) buildLhsExpressions(varPool *VarPool) []as
 		}
 	}
 
-	// Add error parameter if provider returns error
-	if stmt.Provider.IsReturnError {
-		lhs = append(lhs, ast.NewIdent("err"))
-	}
-
 	return lhs
 }
 
@@ -766,19 +770,19 @@ func (stmt *InjectorProviderCallStmt) buildAssignmentStatement(lhs, rhs []ast.Ex
 }
 
 // buildErrorHandlingStatement builds error handling statements
-func (stmt *InjectorProviderCallStmt) buildErrorHandlingStatement(returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
+func (stmt *InjectorProviderCallStmt) buildErrorHandlingStatement(errIdent *ast.Ident, returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
 	if returnErrStmts == nil {
 		return &ast.EmptyStmt{}
 	}
 
 	return &ast.IfStmt{
 		Cond: &ast.BinaryExpr{
-			X:  ast.NewIdent("err"),
+			X:  errIdent,
 			Op: token.NEQ,
 			Y:  ast.NewIdent("nil"),
 		},
 		Body: &ast.BlockStmt{
-			List: returnErrStmts(ast.NewIdent("err")),
+			List: returnErrStmts(errIdent),
 		},
 	}
 }

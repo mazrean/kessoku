@@ -12,36 +12,34 @@ type VarPool struct {
 }
 
 func NewVarPool() *VarPool {
+	vars := make(map[string]int, len(goPredeclaredIdentifiers)+len(goReservedKeywords))
+	for _, id := range goPredeclaredIdentifiers {
+		vars[id] = 1
+	}
+	for _, id := range goReservedKeywords {
+		vars[id] = 1
+	}
+
 	return &VarPool{
-		vars: make(map[string]int),
+		vars: vars,
 	}
 }
 
-// Register registers an existing name to prevent variable shadowing
-func (p *VarPool) Register(name string) {
-	if name == "" || name == "_" {
-		return
+func (p *VarPool) GetName(baseName string) string {
+	count := p.vars[baseName]
+	p.vars[baseName] = count + 1
+
+	if count == 0 {
+		return baseName
 	}
-	// Set the count to at least 1 so the name won't be used without a suffix
-	if count, ok := p.vars[name]; !ok || count == 0 {
-		p.vars[name] = 1
-	}
+
+	return fmt.Sprintf("%s%d", baseName, count-1)
 }
 
 func (p *VarPool) Get(t types.Type) string {
 	name := p.getBaseName(t)
 
-	count, ok := p.vars[name]
-	if !ok {
-		count = 0
-	}
-	p.vars[name] = count + 1
-
-	if count == 0 {
-		return name
-	}
-
-	return fmt.Sprintf("%s%d", name, count-1)
+	return p.GetName(name)
 }
 
 func (p *VarPool) GetChannel(t types.Type) string {
@@ -58,15 +56,6 @@ func (p *VarPool) GetChannel(t types.Type) string {
 	}
 
 	return fmt.Sprintf("%s%d", name, count-1)
-}
-
-// goReservedKeywords contains Go reserved keywords that cannot be used as variable names
-var goReservedKeywords = map[string]bool{
-	"break": true, "default": true, "func": true, "interface": true, "select": true,
-	"case": true, "defer": true, "go": true, "map": true, "struct": true,
-	"chan": true, "else": true, "goto": true, "package": true, "switch": true,
-	"const": true, "fallthrough": true, "if": true, "range": true, "type": true,
-	"continue": true, "for": true, "import": true, "return": true, "var": true,
 }
 
 // getTypeBaseName extracts a base name from a type for argument naming
@@ -111,11 +100,6 @@ func (p *VarPool) getBaseName(t types.Type) string {
 		}
 	default:
 		baseName = "val"
-	}
-
-	// Check if the base name is a Go reserved keyword
-	if goReservedKeywords[baseName] {
-		return baseName + "Value"
 	}
 
 	return baseName

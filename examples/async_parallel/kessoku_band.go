@@ -14,31 +14,24 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		cacheService          *CacheService
 		cacheServiceCh        = make(chan struct{})
 		messagingService      *MessagingService
-		messagingServiceCh    = make(chan struct{})
 		userService           *UserService
 		notificationService   *NotificationService
 		notificationServiceCh = make(chan struct{})
 		app                   *App
 	)
 	eg, ctx := errgroup.WithContext(ctx)
-	var err error
 	eg.Go(func() error {
 		cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
 		close(cacheServiceCh)
-		select {
-		case <-messagingServiceCh:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		notificationService = kessoku.Provide(NewNotificationService).Fn()(messagingService)
-		close(notificationServiceCh)
 		return nil
 	})
 	eg.Go(func() error {
 		messagingService = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()()
-		close(messagingServiceCh)
+		notificationService = kessoku.Provide(NewNotificationService).Fn()(messagingService)
+		close(notificationServiceCh)
 		return nil
 	})
+	var err error
 	databaseService, err = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
 	if err != nil {
 		var zero *App

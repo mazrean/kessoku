@@ -3,7 +3,6 @@ package kessoku
 import (
 	"errors"
 	"go/ast"
-	"go/token"
 	"go/types"
 	"testing"
 )
@@ -209,7 +208,7 @@ func TestNewGraph(t *testing.T) {
 					Name: "test",
 					Path: "test",
 				},
-				Imports: make(map[string]*ast.ImportSpec),
+				Imports: make(map[string]*Import),
 			}
 
 			graph, err := NewGraph(metaData, tt.build, NewVarPool())
@@ -348,7 +347,7 @@ func TestNewGraphMultiTypeProvider(t *testing.T) {
 					Name: "test",
 					Path: "test",
 				},
-				Imports: make(map[string]*ast.ImportSpec),
+				Imports: make(map[string]*Import),
 			}
 			varPool := NewVarPool()
 
@@ -510,7 +509,7 @@ func TestCreateASTTypeExpr(t *testing.T) {
 			t.Parallel()
 
 			varPool := NewVarPool()
-			existingImports := make(map[string]*ast.ImportSpec)
+			existingImports := make(map[string]*Import)
 			expr, err := createASTTypeExpr(tt.pkg, tt.typeExpr, varPool, existingImports)
 
 			if tt.shouldError {
@@ -568,7 +567,7 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 					Name: "main",
 					Path: "main",
 				},
-				Imports: make(map[string]*ast.ImportSpec),
+				Imports: make(map[string]*Import),
 			},
 			dependencyType:  types.Typ[types.String],
 			expectError:     false,
@@ -581,7 +580,7 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 					Name: "main",
 					Path: "main",
 				},
-				Imports: make(map[string]*ast.ImportSpec),
+				Imports: make(map[string]*Import),
 			},
 			dependencyType: func() types.Type {
 				pkg := types.NewPackage("fmt", "fmt")
@@ -598,7 +597,7 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 					Name: "main",
 					Path: "main",
 				},
-				Imports: make(map[string]*ast.ImportSpec),
+				Imports: make(map[string]*Import),
 			},
 			dependencyType: func() types.Type {
 				pkg := types.NewPackage("context", "context")
@@ -615,12 +614,11 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 					Name: "main",
 					Path: "main",
 				},
-				Imports: map[string]*ast.ImportSpec{
+				Imports: map[string]*Import{
 					"fmt": {
-						Path: &ast.BasicLit{
-							Kind:  token.STRING,
-							Value: `"fmt"`,
-						},
+						Name:          "fmt",
+						IsDefaultName: true,
+						IsUsed:        false,
 					},
 				},
 			},
@@ -639,7 +637,7 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 					Name: "main",
 					Path: "main",
 				},
-				Imports: make(map[string]*ast.ImportSpec),
+				Imports: make(map[string]*Import),
 			},
 			dependencyType:  types.NewPointer(types.Typ[types.Int]),
 			expectError:     false,
@@ -1230,7 +1228,7 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 					Name: "main",
 					Path: "main",
 				},
-				Imports: make(map[string]*ast.ImportSpec),
+				Imports: make(map[string]*Import),
 			}
 
 			graph, err := NewGraph(metaData, tt.build, NewVarPool())
@@ -1465,7 +1463,7 @@ func TestGraph_DetectCycles(t *testing.T) {
 					Name: "test",
 					Path: "test",
 				},
-				Imports: make(map[string]*ast.ImportSpec),
+				Imports: make(map[string]*Import),
 			}
 
 			graph, err := NewGraph(metaData, tt.build, NewVarPool())
