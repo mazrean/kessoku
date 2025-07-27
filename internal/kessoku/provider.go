@@ -68,12 +68,12 @@ const (
 // ProviderSpec represents a provider specification from annotations.
 type ProviderSpec struct {
 	ASTExpr           ast.Expr
+	ReferencedImports map[string]*Import
 	Type              ProviderType
 	Provides          [][]types.Type
 	Requires          []types.Type
 	IsReturnError     bool
 	IsAsync           bool
-	ReferencedImports map[string]*Import // Package paths to Import structs this provider references
 }
 
 type Return struct {
@@ -89,13 +89,13 @@ type BuildDirective struct {
 }
 
 type InjectorParam struct {
+	ReferencedImports map[string]*Import
 	name              string
 	channelName       string
 	types             []types.Type
 	refCounter        int
 	withChannel       bool
 	isArg             bool
-	ReferencedImports map[string]*Import // Package paths to Import structs this parameter references
 }
 
 func NewInjectorParam(ts []types.Type, isArg bool) *InjectorParam {
