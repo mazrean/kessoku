@@ -196,7 +196,7 @@ sudo apk add --allow-untrusted kessoku_amd64.apk
 
 ## vs Alternatives
 
-| | Kessoku | google/wire | uber/fx |
+| | Kessoku | google/wire | uber-go/dig |
 |---|---------|-------------|---------|
 | **Startup Speed** | Parallel | Sequential | Sequential + runtime |
 | **Learning Curve** | Minimal | Minimal | Steep |
