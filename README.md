@@ -7,7 +7,6 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/mazrean/kessoku.svg)](https://pkg.go.dev/github.com/mazrean/kessoku)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mazrean/kessoku)
 [![codecov](https://codecov.io/gh/mazrean/kessoku/branch/main/graph/badge.svg)](https://codecov.io/gh/mazrean/kessoku)
-<a href="https://flatt.tech/oss/gmo/trampoline" target="_blank"><img src="https://flatt.tech/assets/images/badges/gmo-oss.svg" height="24px"/></a>
 
 **Kessoku is a compile-time dependency injection library for Go that speeds up application startup through parallel dependency injection.** Unlike traditional DI frameworks that initialize services sequentially, Kessoku automatically executes independent providers in parallel, dramatically reducing startup time for applications with multiple slow services. Built as a powerful alternative to google/wire, it generates optimized code at compile time with zero runtime overhead.
 
@@ -206,6 +205,12 @@ sudo apk add --allow-untrusted kessoku_amd64.apk
 **Choose Kessoku if:** You have multiple slow services (DB, cache, APIs) and startup time matters  
 **Choose google/wire if:** You want maximum simplicity and startup speed isn't critical  
 **Choose uber/fx if:** You need complex lifecycle management and don't mind runtime overhead
+
+## Supports
+
+This project receives support from GMO FlattSecurity's “GMO Open Source Developer Support Program” and regularly conducts security assessments using “Takumi byGMO.”
+
+<a href="https://flatt.tech/oss/gmo/trampoline" target="_blank"><img src="https://flatt.tech/assets/images/badges/gmo-oss.svg" height="24px"/></a>
 
 ## License
 [MIT License](./LICENSE)
