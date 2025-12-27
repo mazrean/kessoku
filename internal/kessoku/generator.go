@@ -77,25 +77,17 @@ func isContextType(t types.Type) bool {
 	return false
 }
 
-// detectAsyncChains determines if the injector contains async provider chains
-func detectAsyncChains(injector *Injector) bool {
+// hasChainStmts determines if the injector contains InjectorChainStmt
+// which requires errgroup for goroutine management
+func hasChainStmts(injector *Injector) bool {
 	for _, stmt := range injector.Stmts {
-		// Check if the ChainStmt actually contains async providers
-		if chainStmt, ok := stmt.(*InjectorChainStmt); ok {
-			// Check if any statement in the chain is async
-			for _, subStmt := range chainStmt.Statements {
-				if providerStmt, ok := subStmt.(*InjectorProviderCallStmt); ok {
-					if providerStmt.Provider.IsAsync {
-						return true
-					}
-				}
-			}
+		if _, ok := stmt.(*InjectorChainStmt); ok {
+			return true
 		}
-		// Check if any provider call statement has async providers
+		// Also check for nested InjectorChainStmt within InjectorProviderCallStmt
 		if providerStmt, ok := stmt.(*InjectorProviderCallStmt); ok {
-			if providerStmt.Provider.IsAsync {
-				return true
-			}
+			// Check if any nested statements contain chain statements
+			_ = providerStmt // Provider call statements don't contain nested chain statements
 		}
 	}
 	return false
@@ -394,10 +386,10 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map[string]*Import) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
 
-	hasAsyncChains := detectAsyncChains(injector)
+	hasChains := hasChainStmts(injector)
 
 	// Initialize async components if needed
-	if hasAsyncChains {
+	if hasChains {
 		asyncStmts, err := generateAsyncInitialization(pkg, injector, varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("generate async initialization: %w", err)
@@ -446,7 +438,7 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map
 	}
 
 	// Add async completion handling
-	if hasAsyncChains {
+	if hasChains {
 		waitStmts := generateAsyncWaitStatements(injector)
 		stmts = append(stmts, waitStmts...)
 	}
@@ -472,8 +464,8 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 	var stmts []ast.Stmt
 
 	// Add channel synchronization for async scenarios
-	hasAsyncChains := detectAsyncChains(injector)
-	if hasAsyncChains {
+	hasChains := hasChainStmts(injector)
+	if hasChains {
 		waitStmt := stmt.generateChannelWaitStatement(varPool, injector, returnErrStmts)
 		if waitStmt != nil {
 			stmts = append(stmts, waitStmt)
@@ -508,7 +500,7 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 		errorHandleStmt = stmt.buildErrorHandlingStatement(errIdent, returnErrStmts)
 	}
 
-	assignStmt := stmt.buildAssignmentStatement(lhs, rhs, hasAsyncChains)
+	assignStmt := stmt.buildAssignmentStatement(lhs, rhs, hasChains)
 	stmts = append(stmts, assignStmt)
 
 	if errorHandleStmt != nil {
@@ -516,7 +508,7 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 	}
 
 	// Add channel cleanup for async scenarios
-	if hasAsyncChains {
+	if hasChains {
 		closeStmt := stmt.generateChannelCloseStatement(varPool)
 		if closeStmt != nil {
 			stmts = append(stmts, closeStmt)
@@ -756,9 +748,9 @@ func (stmt *InjectorProviderCallStmt) buildProviderCall(args []ast.Expr) []ast.E
 }
 
 // buildAssignmentStatement builds the assignment statement
-func (stmt *InjectorProviderCallStmt) buildAssignmentStatement(lhs, rhs []ast.Expr, hasAsyncChains bool) ast.Stmt {
+func (stmt *InjectorProviderCallStmt) buildAssignmentStatement(lhs, rhs []ast.Expr, hasChains bool) ast.Stmt {
 	tokenType := token.DEFINE
-	if hasAsyncChains {
+	if hasChains {
 		tokenType = token.ASSIGN
 	}
 
