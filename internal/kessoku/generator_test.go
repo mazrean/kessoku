@@ -1265,7 +1265,7 @@ func TestGenerateVariableSpecs(t *testing.T) {
 	}
 }
 
-func TestDetectAsyncChains(t *testing.T) {
+func TestHasChainStmts(t *testing.T) {
 	t.Parallel()
 
 	configType, serviceType, _ := createTestTypes()
@@ -1297,7 +1297,7 @@ func TestDetectAsyncChains(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "async provider call",
+			name: "async provider call without chain",
 			injector: &Injector{
 				Stmts: []InjectorStmt{
 					&InjectorProviderCallStmt{
@@ -1308,7 +1308,7 @@ func TestDetectAsyncChains(t *testing.T) {
 					},
 				},
 			},
-			expected: true,
+			expected: false, // No InjectorChainStmt, so no errgroup needed
 		},
 		{
 			name: "chain with sync providers",
@@ -1326,7 +1326,7 @@ func TestDetectAsyncChains(t *testing.T) {
 					},
 				},
 			},
-			expected: false,
+			expected: true, // InjectorChainStmt exists, errgroup needed
 		},
 		{
 			name: "chain with async provider",
@@ -1388,9 +1388,9 @@ func TestDetectAsyncChains(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := detectAsyncChains(tt.injector)
+			result := hasChainStmts(tt.injector)
 			if result != tt.expected {
-				t.Errorf("detectAsyncChains() = %v, want %v", result, tt.expected)
+				t.Errorf("hasChainStmts() = %v, want %v", result, tt.expected)
 			}
 		})
 	}
