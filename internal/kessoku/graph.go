@@ -528,14 +528,45 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 		return nil
 	}
 
+	// Check if context.Context already exists in arguments
+	var existingContextArg *InjectorArgument
+	existingContextIdx := -1
+	for i, arg := range injector.Args {
+		if isContextType(arg.Type) {
+			existingContextArg = arg
+			existingContextIdx = i
+			break
+		}
+	}
+
+	// If context.Context already exists, move it to the first position
+	if existingContextArg != nil {
+		if existingContextIdx > 0 {
+			// Move existing context argument to the first position in Args only
+			// Note: We don't modify Params order - we use arg.Param directly
+			injector.Args = append(injector.Args[:existingContextIdx], injector.Args[existingContextIdx+1:]...)
+			injector.Args = append([]*InjectorArgument{existingContextArg}, injector.Args...)
+		}
+		// errgroup.WithContext(ctx) requires context.Context as the first argument
+		// Use the Param from the argument directly, not from Params slice
+		existingContextArg.Param.Ref(false)
+
+		// Mark context import as used
+		if imp, exists := metaData.Imports[contextPkgPath]; exists {
+			imp.IsUsed = true
+		}
+
+		return nil
+	}
+
 	// Create context.Context type
 	contextPkg := types.NewPackage(contextPkgPath, contextPkgName)
 	contextObj := types.NewTypeName(0, contextPkg, contextTypeName, nil)
 	contextType := types.NewNamed(contextObj, types.NewInterfaceType([]*types.Func{}, nil), nil)
 
-	contextPkgName := contextPkgName
+	ctxPkgName := contextPkgName
 	if imp, exists := metaData.Imports[contextPkgPath]; exists {
-		contextPkgName = imp.Name
+		ctxPkgName = imp.Name
 	} else {
 		newPkgName := varPool.GetName(contextPkgName)
 		metaData.Imports[contextPkgPath] = &Import{
@@ -543,7 +574,7 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 			IsDefaultName: newPkgName == contextPkgName,
 			IsUsed:        false, // Will be marked during code generation
 		}
-		contextPkgName = newPkgName
+		ctxPkgName = newPkgName
 	}
 	// Mark context import as used since we're injecting context.Context
 	if imp, exists := metaData.Imports[contextPkgPath]; exists {
@@ -552,7 +583,7 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 
 	// Create AST expression for context.Context
 	contextExpr := &ast.SelectorExpr{
-		X:   ast.NewIdent(contextPkgName),
+		X:   ast.NewIdent(ctxPkgName),
 		Sel: ast.NewIdent(contextTypeName),
 	}
 
