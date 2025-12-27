@@ -1,0 +1,32 @@
+[tools]
+node = "24.12.0"
+"npm:@anthropic-ai/claude-code" = "2.0.74"
+
+python = "3.14.2"
+uv = "0.9.18"
+"pipx:oraios/serena" = "v0.1.4"
+"pipx:github/spec-kit" = "v0.0.90"
+
+go = "1.25.5"
+"go:golang.org/x/tools/gopls" = "0.21.0"
+
+[tasks.worktree]
+run = '''
+create_worktree() {
+    local branch_name=$1
+    
+    # メインリポジトリのディレクトリを取得
+    local git_common=$(git rev-parse --git-common-dir)
+    local main_repo=$(dirname "$git_common")
+    
+    # worktreesディレクトリを作成
+    local new_worktree="${main_repo}/.worktrees/${branch_name}"
+    mkdir -p "$new_worktree"
+    
+    git worktree add -b "$branch_name" "$new_worktree"
+    echo "✓ worktreeを作成しました: $new_worktree"
+    code "$new_worktree"
+}
+create_worktree $1
+'''
+description = "Create and checkout a new git worktree"
