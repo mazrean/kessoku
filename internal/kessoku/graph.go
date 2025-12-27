@@ -568,10 +568,10 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 	if imp, exists := metaData.Imports[contextPkgPath]; exists {
 		ctxPkgName = imp.Name
 	} else {
-		newPkgName := varPool.GetName(contextPkgName)
+		newPkgName := varPool.GetName(ctxPkgName)
 		metaData.Imports[contextPkgPath] = &Import{
 			Name:          newPkgName,
-			IsDefaultName: newPkgName == contextPkgName,
+			IsDefaultName: newPkgName == ctxPkgName,
 			IsUsed:        false, // Will be marked during code generation
 		}
 		ctxPkgName = newPkgName

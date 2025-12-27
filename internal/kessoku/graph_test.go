@@ -1322,8 +1322,8 @@ func TestGraph_Build_ContextInjection_NoDuplicates(t *testing.T) {
 	tests := []struct {
 		build             *BuildDirective
 		name              string
-		expectedArgsCount int
 		expectedArgTypes  []string
+		expectedArgsCount int
 	}{
 		{
 			name: "async provider with context.Context arg - should not duplicate",
@@ -1403,7 +1403,7 @@ func TestGraph_Build_ContextInjection_NoDuplicates(t *testing.T) {
 					},
 				},
 			},
-			expectedArgsCount: 2, // Should have int and context.Context
+			expectedArgsCount: 2,                                  // Should have int and context.Context
 			expectedArgTypes:  []string{"context.Context", "int"}, // context should be first
 		},
 	}
