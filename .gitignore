@@ -1,6 +1,9 @@
 /dist
 /bin
 /.vscode
+/.serena/cache
+/.claude
+/.specify
 
 # Example binaries
 examples/*/async_parallel
