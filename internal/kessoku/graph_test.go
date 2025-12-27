@@ -1313,6 +1313,151 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 	}
 }
 
+func TestGraph_Build_ContextInjection_NoDuplicates(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, intType := createTestTypes()
+	contextType := createContextType()
+
+	tests := []struct {
+		build             *BuildDirective
+		name              string
+		expectedArgTypes  []string
+		expectedArgsCount int
+	}{
+		{
+			name: "async provider with context.Context arg - should not duplicate",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{configType}},
+						Requires:      []types.Type{contextType}, // Provider requires context.Context
+						IsReturnError: false,
+						IsAsync:       true, // Async provider
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{serviceType}},
+						Requires:      []types.Type{configType},
+						IsReturnError: false,
+						IsAsync:       false,
+					},
+				},
+			},
+			expectedArgsCount: 1, // Should have only one context.Context
+			expectedArgTypes:  []string{"context.Context"},
+		},
+		{
+			name: "multiple async providers with context.Context arg - should not duplicate",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{configType}},
+						Requires:      []types.Type{contextType}, // Provider requires context.Context
+						IsReturnError: false,
+						IsAsync:       true, // Async provider
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{serviceType}},
+						Requires:      []types.Type{configType, contextType}, // Also requires context.Context
+						IsReturnError: false,
+						IsAsync:       true,
+					},
+				},
+			},
+			expectedArgsCount: 1, // Should have only one context.Context
+			expectedArgTypes:  []string{"context.Context"},
+		},
+		{
+			name: "context.Context with other args - should reorder correctly",
+			build: &BuildDirective{
+				InjectorName: "InitializeService",
+				Return: &Return{
+					Type: serviceType,
+				},
+				Providers: []*ProviderSpec{
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{configType}},
+						Requires:      []types.Type{intType, contextType}, // int comes before context
+						IsReturnError: false,
+						IsAsync:       true, // Async provider
+					},
+					{
+						Type:          ProviderTypeFunction,
+						Provides:      [][]types.Type{{serviceType}},
+						Requires:      []types.Type{configType},
+						IsReturnError: false,
+						IsAsync:       false,
+					},
+				},
+			},
+			expectedArgsCount: 2,                                  // Should have int and context.Context
+			expectedArgTypes:  []string{"context.Context", "int"}, // context should be first
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			metaData := &MetaData{
+				Package: Package{
+					Name: "main",
+					Path: "main",
+				},
+				Imports: make(map[string]*Import),
+			}
+
+			graph, err := NewGraph(metaData, tt.build, NewVarPool())
+			if err != nil {
+				t.Fatalf("Failed to create graph: %v", err)
+			}
+
+			injector, err := graph.Build(metaData, NewVarPool())
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if injector == nil {
+				t.Fatal("Expected injector but got nil")
+			}
+
+			// Check arguments count
+			if len(injector.Args) != tt.expectedArgsCount {
+				t.Errorf("Expected %d arguments, got %d", tt.expectedArgsCount, len(injector.Args))
+				for i, arg := range injector.Args {
+					t.Logf("  Arg %d: %s", i, arg.Type.String())
+				}
+				return
+			}
+
+			// Check argument types
+			for i, expectedType := range tt.expectedArgTypes {
+				if i >= len(injector.Args) {
+					t.Errorf("Missing expected argument at position %d (type: %s)", i, expectedType)
+					continue
+				}
+				actualType := injector.Args[i].Type.String()
+				if actualType != expectedType {
+					t.Errorf("Argument %d: expected type %s, got %s", i, expectedType, actualType)
+				}
+			}
+		})
+	}
+}
+
 func TestGraph_DetectCycles(t *testing.T) {
 	t.Parallel()
 
