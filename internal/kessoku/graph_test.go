@@ -696,23 +696,18 @@ func TestAutoAddMissingDependencies(t *testing.T) {
 	}
 }
 
-func TestGraph_BuildPoolStmts(t *testing.T) {
+func TestGraph_BuildPoolStmtsSimple(t *testing.T) {
 	t.Parallel()
 
 	configType, _, intType := createTestTypes()
 
 	tests := []struct {
 		setupGraph             func() *Graph
-		poolDependencyMap      map[*node][]int
-		nodeProvidedNodes      map[*node]map[*node]struct{}
 		name                   string
 		pool                   []*node
-		pools                  [][]*node
-		visited                []bool
 		expectedStmtsMin       int
 		expectError            bool
 		expectProviderCallStmt bool
-		expectChainStmt        bool
 	}{
 		{
 			name: "empty pool",
@@ -723,14 +718,9 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 				}
 			},
 			pool:                   []*node{},
-			pools:                  [][]*node{},
-			visited:                []bool{},
-			poolDependencyMap:      make(map[*node][]int),
-			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
 			expectedStmtsMin:       0,
 			expectError:            false,
 			expectProviderCallStmt: false,
-			expectChainStmt:        false,
 		},
 		{
 			name: "pool with argument node only",
@@ -750,14 +740,9 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 					providerSpec: nil, // This is the key - argument nodes have nil providerSpec
 				},
 			},
-			pools:                  [][]*node{},
-			visited:                []bool{},
-			poolDependencyMap:      make(map[*node][]int),
-			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
 			expectedStmtsMin:       0, // argument nodes are skipped
 			expectError:            false,
 			expectProviderCallStmt: false,
-			expectChainStmt:        false,
 		},
 		{
 			name: "pool with provider node",
@@ -779,14 +764,9 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 					returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 				},
 			},
-			pools:                  [][]*node{},
-			visited:                []bool{},
-			poolDependencyMap:      make(map[*node][]int),
-			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
 			expectedStmtsMin:       1,
 			expectError:            false,
 			expectProviderCallStmt: true,
-			expectChainStmt:        false,
 		},
 		{
 			name: "mixed pool with argument and provider nodes",
@@ -822,14 +802,9 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 					returnValues: []*InjectorParam{NewInjectorParam([]types.Type{configType}, false)},
 				},
 			},
-			pools:                  [][]*node{},
-			visited:                []bool{},
-			poolDependencyMap:      make(map[*node][]int),
-			nodeProvidedNodes:      make(map[*node]map[*node]struct{}),
 			expectedStmtsMin:       1, // Only the provider node generates a statement
 			expectError:            false,
 			expectProviderCallStmt: true,
-			expectChainStmt:        false,
 		},
 	}
 
@@ -839,13 +814,7 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 
 			graph := tt.setupGraph()
 
-			stmts, err := graph.buildPoolStmts(
-				tt.pool,
-				tt.pools,
-				tt.visited,
-				tt.poolDependencyMap,
-				tt.nodeProvidedNodes,
-			)
+			stmts, err := graph.buildPoolStmtsSimple(tt.pool)
 
 			if tt.expectError {
 				if err == nil {
@@ -865,14 +834,10 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 
 			// Check statement types
 			hasProviderCall := false
-			hasChain := false
 
 			for _, stmt := range stmts {
-				switch stmt.(type) {
-				case *InjectorProviderCallStmt:
+				if _, ok := stmt.(*InjectorProviderCallStmt); ok {
 					hasProviderCall = true
-				case *InjectorChainStmt:
-					hasChain = true
 				}
 			}
 
@@ -880,16 +845,8 @@ func TestGraph_BuildPoolStmts(t *testing.T) {
 				t.Error("Expected at least one InjectorProviderCallStmt")
 			}
 
-			if tt.expectChainStmt && !hasChain {
-				t.Error("Expected at least one InjectorChainStmt")
-			}
-
 			if !tt.expectProviderCallStmt && hasProviderCall {
 				t.Error("Did not expect InjectorProviderCallStmt but found one")
-			}
-
-			if !tt.expectChainStmt && hasChain {
-				t.Error("Did not expect InjectorChainStmt but found one")
 			}
 		})
 	}
@@ -1087,6 +1044,158 @@ func TestGraph_BuildStmts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGraph_BuildStmts_ChainedDependencies tests that providers depending on multiple
+// parallel providers are correctly processed. This is a regression test for a bug where
+// providers depending on multiple parallel async providers were not being generated.
+func TestGraph_BuildStmts_ChainedDependencies(t *testing.T) {
+	t.Parallel()
+
+	// Create test types simulating the user's case:
+	// - diskType: provided by NewDiskWithDI (async, no deps)
+	// - blobType: provided by CreateBlobClientsWithDI (async, no deps)
+	// - cacheType: provided by NewGitHubActionsCacheWithDI (async, depends on disk and blob)
+	// - backendType: provided by NewConbinedBackend (async, depends on cache)
+	// - gocicaType: provided by NewGocica (sync, depends on backend)
+	// - processType: provided by NewProcessWithOptions (sync, depends on gocica)
+	diskType := types.NewNamed(
+		types.NewTypeName(0, nil, "Disk", nil),
+		types.NewStruct(nil, nil),
+		nil,
+	)
+	blobType := types.NewNamed(
+		types.NewTypeName(0, nil, "BlobClients", nil),
+		types.NewStruct(nil, nil),
+		nil,
+	)
+	cacheType := types.NewNamed(
+		types.NewTypeName(0, nil, "GitHubActionsCache", nil),
+		types.NewStruct(nil, nil),
+		nil,
+	)
+	backendType := types.NewNamed(
+		types.NewTypeName(0, nil, "Backend", nil),
+		types.NewStruct(nil, nil),
+		nil,
+	)
+	gocicaType := types.NewNamed(
+		types.NewTypeName(0, nil, "Gocica", nil),
+		types.NewStruct(nil, nil),
+		nil,
+	)
+	processType := types.NewNamed(
+		types.NewTypeName(0, nil, "Process", nil),
+		types.NewStruct(nil, nil),
+		nil,
+	)
+
+	build := &BuildDirective{
+		InjectorName: "InitializeProcess",
+		Return: &Return{
+			Type: processType,
+		},
+		Providers: []*ProviderSpec{
+			{
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{diskType}},
+				Requires:      []types.Type{},
+				IsReturnError: true,
+				IsAsync:       true,
+			},
+			{
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{blobType}},
+				Requires:      []types.Type{},
+				IsReturnError: true,
+				IsAsync:       true,
+			},
+			{
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{cacheType}},
+				Requires:      []types.Type{diskType, blobType}, // Depends on BOTH disk and blob
+				IsReturnError: true,
+				IsAsync:       true,
+			},
+			{
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{backendType}},
+				Requires:      []types.Type{cacheType},
+				IsReturnError: true,
+				IsAsync:       true,
+			},
+			{
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{gocicaType}},
+				Requires:      []types.Type{backendType},
+				IsReturnError: false,
+				IsAsync:       false,
+			},
+			{
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{processType}},
+				Requires:      []types.Type{gocicaType},
+				IsReturnError: false,
+				IsAsync:       false,
+			},
+		},
+	}
+
+	metaData := &MetaData{
+		Package: Package{
+			Name: "main",
+			Path: "main",
+		},
+		Imports: make(map[string]*Import),
+	}
+
+	graph, err := NewGraph(metaData, build, NewVarPool())
+	if err != nil {
+		t.Fatalf("Failed to create graph: %v", err)
+	}
+
+	injector, err := graph.Build(metaData, NewVarPool())
+	if err != nil {
+		t.Fatalf("Failed to build injector: %v", err)
+	}
+
+	// Count total provider calls (should be 6 - one for each provider)
+	providerCallCount := countProviderCalls(injector.Stmts)
+	if providerCallCount != 6 {
+		t.Errorf("Expected 6 provider calls, got %d", providerCallCount)
+		t.Logf("Statements: %+v", injector.Stmts)
+	}
+
+	// Count chain statements (async providers should be in chains)
+	chainCount := countChainStmts(injector.Stmts)
+	if chainCount < 1 {
+		t.Errorf("Expected at least 1 chain statement for async providers, got %d", chainCount)
+	}
+}
+
+// countProviderCalls recursively counts all InjectorProviderCallStmt in the statements
+func countProviderCalls(stmts []InjectorStmt) int {
+	count := 0
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *InjectorProviderCallStmt:
+			count++
+		case *InjectorChainStmt:
+			count += countProviderCalls(s.Statements)
+		}
+	}
+	return count
+}
+
+// countChainStmts counts the number of InjectorChainStmt at the top level
+func countChainStmts(stmts []InjectorStmt) int {
+	count := 0
+	for _, stmt := range stmts {
+		if _, ok := stmt.(*InjectorChainStmt); ok {
+			count++
+		}
+	}
+	return count
 }
 
 func TestGraph_Build_ContextInjection(t *testing.T) {

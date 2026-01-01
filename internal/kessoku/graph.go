@@ -942,17 +942,8 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 		visited[i] = len(pool) == 0
 	}
 
-	poolDependencyMap := make(map[*node][]int, len(pools))
-	for i, pool := range pools {
-		if visited[i] {
-			continue
-		}
-
-		firstNode := pool[0]
-		for _, dependency := range g.reverseEdges[firstNode] {
-			poolDependencyMap[dependency] = append(poolDependencyMap[dependency], i)
-		}
-	}
+	// Track all processed nodes across all pools
+	processedNodes := maps.Clone(initialProvidedNodes)
 
 	// Find all pools that can start immediately
 	initialPoolIdxs := make([]int, 0, len(pools))
@@ -996,9 +987,14 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 		visited[syncPoolIdx] = true
 
 		var err error
-		parentStmts, err = g.buildPoolStmts(pools[syncPoolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
+		parentStmts, err = g.buildPoolStmtsSimple(pools[syncPoolIdx])
 		if err != nil {
 			return nil, fmt.Errorf("build sync pool statements: %w", err)
+		}
+
+		// Add all nodes from this pool to processedNodes
+		for _, n := range pools[syncPoolIdx] {
+			processedNodes[n] = struct{}{}
 		}
 	} else {
 		// If no sync pool, just start with the first available async pool
@@ -1006,9 +1002,14 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 		visited[parentPoolIdx] = true
 
 		var err error
-		parentStmts, err = g.buildPoolStmts(pools[parentPoolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
+		parentStmts, err = g.buildPoolStmtsSimple(pools[parentPoolIdx])
 		if err != nil {
 			return nil, fmt.Errorf("build first async pool statements: %w", err)
+		}
+
+		// Add all nodes from this pool to processedNodes
+		for _, n := range pools[parentPoolIdx] {
+			processedNodes[n] = struct{}{}
 		}
 	}
 
@@ -1019,7 +1020,7 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 		}
 
 		visited[poolIdx] = true
-		subStmts, err := g.buildPoolStmts(pools[poolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
+		subStmts, err := g.buildPoolStmtsSimple(pools[poolIdx])
 		if err != nil {
 			return nil, fmt.Errorf("build async pool statements: %w", err)
 		}
@@ -1027,6 +1028,59 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 		stmts = append(stmts, &InjectorChainStmt{
 			Statements: subStmts,
 		})
+
+		// Add all nodes from this pool to processedNodes
+		for _, n := range pools[poolIdx] {
+			processedNodes[n] = struct{}{}
+		}
+	}
+
+	// Now process dependent pools iteratively until no more pools can be processed
+	for {
+		newPoolProcessed := false
+
+		for poolIdx, pool := range pools {
+			if visited[poolIdx] || len(pool) == 0 {
+				continue
+			}
+
+			firstNode := pool[0]
+			allDependenciesSatisfied := true
+			for _, dependency := range g.reverseEdges[firstNode] {
+				if _, ok := processedNodes[dependency]; !ok {
+					allDependenciesSatisfied = false
+					break
+				}
+			}
+
+			if allDependenciesSatisfied {
+				visited[poolIdx] = true
+				newPoolProcessed = true
+
+				subStmts, err := g.buildPoolStmtsSimple(pool)
+				if err != nil {
+					return nil, fmt.Errorf("build dependent pool statements: %w", err)
+				}
+
+				// Async pools go into chain statements, sync pools go into parent statements
+				if pool[0].providerSpec.IsAsync {
+					stmts = append(stmts, &InjectorChainStmt{
+						Statements: subStmts,
+					})
+				} else {
+					parentStmts = append(parentStmts, subStmts...)
+				}
+
+				// Add all nodes from this pool to processedNodes
+				for _, n := range pool {
+					processedNodes[n] = struct{}{}
+				}
+			}
+		}
+
+		if !newPoolProcessed {
+			break
+		}
 	}
 
 	stmts = append(stmts, parentStmts...)
@@ -1034,7 +1088,8 @@ func (g *Graph) buildStmts(pools [][]*node, nodeProvidedNodes map[*node]map[*nod
 	return stmts, nil
 }
 
-func (g *Graph) buildPoolStmts(pool []*node, pools [][]*node, visited []bool, poolDependencyMap map[*node][]int, nodeProvidedNodes map[*node]map[*node]struct{}) ([]InjectorStmt, error) {
+// buildPoolStmtsSimple builds statements for a single pool without recursive dependency processing
+func (g *Graph) buildPoolStmtsSimple(pool []*node) ([]InjectorStmt, error) {
 	stmts := make([]InjectorStmt, 0, len(pool))
 
 	for _, n := range pool {
@@ -1048,38 +1103,6 @@ func (g *Graph) buildPoolStmts(pool []*node, pools [][]*node, visited []bool, po
 			Arguments: n.providerArgs,
 			Returns:   n.returnValues,
 		})
-
-		// Check if this node's execution enables any dependency pools to start
-		for _, poolIdx := range poolDependencyMap[n] {
-			if visited[poolIdx] {
-				continue
-			}
-
-			firstNode := pools[poolIdx][0]
-			// Check if all dependencies of the pool's first node are now satisfied
-			// After executing node n, check if all dependencies are available
-			currentProvidedNodes := maps.Clone(nodeProvidedNodes[n])
-			currentProvidedNodes[n] = struct{}{} // Add the just-executed node
-
-			allDependenciesSatisfied := true
-			for _, dependency := range g.reverseEdges[firstNode] {
-				if _, ok := currentProvidedNodes[dependency]; !ok {
-					allDependenciesSatisfied = false
-					break
-				}
-			}
-
-			if allDependenciesSatisfied {
-				visited[poolIdx] = true
-				subStmts, err := g.buildPoolStmts(pools[poolIdx], pools, visited, poolDependencyMap, nodeProvidedNodes)
-				if err != nil {
-					return nil, fmt.Errorf("build pool statements: %w", err)
-				}
-				stmts = append(stmts, &InjectorChainStmt{
-					Statements: subStmts,
-				})
-			}
-		}
 	}
 
 	return stmts, nil
