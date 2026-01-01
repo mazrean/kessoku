@@ -272,7 +272,20 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 	}
 
 	fnProviderMap := make(map[string]*fnProvider)
+	declOrder := 0
+
+	// First pass: Process non-struct providers and assign DeclOrder
+	var structProviders []*ProviderSpec
 	for _, provider := range build.Providers {
+		// Skip struct providers in first pass - they are processed in second pass
+		if provider.Type == ProviderTypeStruct {
+			structProviders = append(structProviders, provider)
+			continue
+		}
+
+		provider.DeclOrder = declOrder
+		declOrder++
+
 		for groupIndex, typeGroup := range provider.Provides {
 			for typeIndex, t := range typeGroup {
 				if t == nil {
@@ -296,6 +309,44 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 					returnIndex: groupIndex,
 				}
 			}
+		}
+	}
+
+	// Second pass: Expand struct providers into synthetic field accessor providers
+	for _, structProvider := range structProviders {
+		if structProvider.StructType == nil {
+			return nil, fmt.Errorf("struct provider has nil StructType")
+		}
+
+		// Find the provider that provides this struct type
+		structTypeKey := structProvider.StructType.String()
+		if _, ok := fnProviderMap[structTypeKey]; !ok {
+			return nil, fmt.Errorf("no provider for struct type %s", structTypeKey)
+		}
+
+		// Create synthetic field accessor providers for each exported field
+		for _, field := range structProvider.StructFields {
+			fieldProvider := &ProviderSpec{
+				Type:        ProviderTypeFieldAccess,
+				SourceField: field,
+				StructType:  structProvider.StructType,
+				Provides:    [][]types.Type{{field.Type}},
+				Requires:    []types.Type{structProvider.StructType},
+				DeclOrder:   declOrder,
+			}
+			declOrder++
+
+			fieldTypeKey := field.Type.String()
+			if _, ok := fnProviderMap[fieldTypeKey]; ok {
+				return nil, fmt.Errorf("multiple providers provide %s (field %s conflicts with existing provider)", fieldTypeKey, field.Name)
+			}
+
+			fnProviderMap[fieldTypeKey] = &fnProvider{
+				provider:    fieldProvider,
+				returnIndex: 0,
+			}
+			// Add to build.Providers so it's included in graph processing
+			build.Providers = append(build.Providers, fieldProvider)
 		}
 	}
 
@@ -1098,11 +1149,29 @@ func (g *Graph) buildPoolStmtsSimple(pool []*node) ([]InjectorStmt, error) {
 			continue
 		}
 
-		stmts = append(stmts, &InjectorProviderCallStmt{
-			Provider:  n.providerSpec,
-			Arguments: n.providerArgs,
-			Returns:   n.returnValues,
-		})
+		// Handle field access providers differently
+		if n.providerSpec.Type == ProviderTypeFieldAccess {
+			// For field access, we need the struct param (from arguments) and the return param
+			if len(n.providerArgs) == 0 {
+				continue // Should not happen, but be safe
+			}
+			structArg := n.providerArgs[0]
+			var returnParam *InjectorParam
+			if len(n.returnValues) > 0 {
+				returnParam = n.returnValues[0]
+			}
+			stmts = append(stmts, &InjectorFieldAccessStmt{
+				StructParam: structArg.Param,
+				Field:       n.providerSpec.SourceField,
+				ReturnParam: returnParam,
+			})
+		} else {
+			stmts = append(stmts, &InjectorProviderCallStmt{
+				Provider:  n.providerSpec,
+				Arguments: n.providerArgs,
+				Returns:   n.returnValues,
+			})
+		}
 	}
 
 	return stmts, nil

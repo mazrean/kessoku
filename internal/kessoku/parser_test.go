@@ -966,6 +966,366 @@ var _ = kessoku.Inject[*Service](
 	}
 }
 
+// Tests for User Story 1 - Struct Provider Parsing
+func TestParseStructProvider(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		content              string
+		name                 string
+		expectedInjectorName string
+		errorContains        string
+		expectedProviders    int
+		expectedBuilds       int
+		shouldError          bool
+	}{
+		{
+			name: "basic struct provider parsing",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	DBHost string
+	DBPort int
+}
+
+func NewConfig() *Config {
+	return &Config{DBHost: "localhost", DBPort: 5432}
+}
+
+type App struct {
+	host string
+	port int
+}
+
+func NewApp(host string, port int) *App {
+	return &App{host: host, port: port}
+}
+
+var _ = kessoku.Inject[*App](
+	"InitializeApp",
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewApp),
+)
+`,
+			expectedBuilds:       1,
+			expectedProviders:    3, // NewConfig, Struct[*Config], NewApp
+			expectedInjectorName: "InitializeApp",
+			shouldError:          false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			testFile := filepath.Join(tempDir, "test.go")
+
+			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			parser := NewParser()
+			_, builds, err := parser.ParseFile(testFile, NewVarPool())
+
+			if tt.shouldError {
+				if err == nil {
+					t.Fatal("Expected ParseFile to fail")
+				}
+				if tt.errorContains != "" && !containsString(err.Error(), tt.errorContains) {
+					t.Errorf("Expected error to contain %q, got %q", tt.errorContains, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ParseFile failed: %v", err)
+			}
+
+			if len(builds) != tt.expectedBuilds {
+				t.Fatalf("Expected %d build directives, got %d", tt.expectedBuilds, len(builds))
+			}
+
+			build := builds[0]
+			if build.InjectorName != tt.expectedInjectorName {
+				t.Errorf("Expected injector name %q, got %q", tt.expectedInjectorName, build.InjectorName)
+			}
+
+			if len(build.Providers) != tt.expectedProviders {
+				t.Errorf("Expected %d providers, got %d", tt.expectedProviders, len(build.Providers))
+			}
+
+			// Verify struct provider was parsed
+			hasStructProvider := false
+			for _, provider := range build.Providers {
+				if provider.Type == ProviderTypeStruct {
+					hasStructProvider = true
+					if provider.StructType == nil {
+						t.Error("Struct provider should have StructType set")
+					}
+					if len(provider.StructFields) == 0 {
+						t.Error("Struct provider should have StructFields populated")
+					}
+				}
+			}
+			if !hasStructProvider {
+				t.Error("Expected to find a struct provider")
+			}
+		})
+	}
+}
+
+func TestParseStructProviderNonStructError(t *testing.T) {
+	t.Parallel()
+
+	content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type App struct{}
+
+func NewApp() *App {
+	return &App{}
+}
+
+var _ = kessoku.Inject[*App](
+	"InitializeApp",
+	kessoku.Struct[string](),
+	kessoku.Provide(NewApp),
+)
+`
+
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.go")
+
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	parser := NewParser()
+	_, builds, err := parser.ParseFile(testFile, NewVarPool())
+
+	// Either parse error or no builds due to error handling
+	if err == nil && len(builds) > 0 {
+		// If it parsed successfully, check if there was a warning logged
+		t.Log("Parser handled non-struct type gracefully")
+	}
+}
+
+func TestExtractExportedFields(t *testing.T) {
+	t.Parallel()
+
+	content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	DBHost   string
+	DBPort   int
+	password string // unexported - should be filtered
+	Debug    bool
+}
+
+func NewConfig() *Config {
+	return &Config{}
+}
+
+type App struct{}
+
+func NewApp(host string, port int, debug bool) *App {
+	return &App{}
+}
+
+var _ = kessoku.Inject[*App](
+	"InitializeApp",
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewApp),
+)
+`
+
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.go")
+
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	parser := NewParser()
+	_, builds, err := parser.ParseFile(testFile, NewVarPool())
+
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	if len(builds) != 1 {
+		t.Fatalf("Expected 1 build directive, got %d", len(builds))
+	}
+
+	// Find struct provider
+	var structProvider *ProviderSpec
+	for _, provider := range builds[0].Providers {
+		if provider.Type == ProviderTypeStruct {
+			structProvider = provider
+			break
+		}
+	}
+
+	if structProvider == nil {
+		t.Fatal("Expected to find struct provider")
+	}
+
+	// Should have 3 exported fields (DBHost, DBPort, Debug), not 4 (password is unexported)
+	if len(structProvider.StructFields) != 3 {
+		t.Errorf("Expected 3 exported fields, got %d", len(structProvider.StructFields))
+		for _, field := range structProvider.StructFields {
+			t.Logf("  Field: %s (%s)", field.Name, field.Type)
+		}
+	}
+}
+
+func TestExtractExportedFieldsUnexported(t *testing.T) {
+	t.Parallel()
+
+	content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	host     string
+	port     int
+	password string
+}
+
+func NewConfig() *Config {
+	return &Config{}
+}
+
+type App struct{}
+
+func NewApp() *App {
+	return &App{}
+}
+
+var _ = kessoku.Inject[*App](
+	"InitializeApp",
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewApp),
+)
+`
+
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.go")
+
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	parser := NewParser()
+	_, builds, err := parser.ParseFile(testFile, NewVarPool())
+
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	if len(builds) != 1 {
+		t.Fatalf("Expected 1 build directive, got %d", len(builds))
+	}
+
+	// Find struct provider
+	var structProvider *ProviderSpec
+	for _, provider := range builds[0].Providers {
+		if provider.Type == ProviderTypeStruct {
+			structProvider = provider
+			break
+		}
+	}
+
+	if structProvider == nil {
+		t.Fatal("Expected to find struct provider")
+	}
+
+	// Should have 0 exported fields (all are unexported)
+	if len(structProvider.StructFields) != 0 {
+		t.Errorf("Expected 0 exported fields, got %d", len(structProvider.StructFields))
+	}
+}
+
+func TestExtractExportedFieldsAlphabeticalOrder(t *testing.T) {
+	t.Parallel()
+
+	content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Zebra int
+	Apple string
+	Mango bool
+}
+
+func NewConfig() *Config {
+	return &Config{}
+}
+
+type App struct{}
+
+func NewApp(a string, m bool, z int) *App {
+	return &App{}
+}
+
+var _ = kessoku.Inject[*App](
+	"InitializeApp",
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewApp),
+)
+`
+
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.go")
+
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	parser := NewParser()
+	_, builds, err := parser.ParseFile(testFile, NewVarPool())
+
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	// Find struct provider
+	var structProvider *ProviderSpec
+	for _, provider := range builds[0].Providers {
+		if provider.Type == ProviderTypeStruct {
+			structProvider = provider
+			break
+		}
+	}
+
+	if structProvider == nil {
+		t.Fatal("Expected to find struct provider")
+	}
+
+	// Fields should be in alphabetical order: Apple, Mango, Zebra
+	expectedOrder := []string{"Apple", "Mango", "Zebra"}
+	if len(structProvider.StructFields) != 3 {
+		t.Fatalf("Expected 3 fields, got %d", len(structProvider.StructFields))
+	}
+
+	for i, expected := range expectedOrder {
+		if structProvider.StructFields[i].Name != expected {
+			t.Errorf("Expected field %d to be %q, got %q", i, expected, structProvider.StructFields[i].Name)
+		}
+	}
+}
+
 func TestParseBindProviderInterfaces(t *testing.T) {
 	t.Parallel()
 

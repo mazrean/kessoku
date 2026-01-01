@@ -61,17 +61,31 @@ type MetaData struct {
 type ProviderType string
 
 const (
-	ProviderTypeFunction ProviderType = "function"
-	ProviderTypeArg      ProviderType = "arg"
+	ProviderTypeFunction    ProviderType = "function"
+	ProviderTypeArg         ProviderType = "arg"
+	ProviderTypeStruct      ProviderType = "struct"
+	ProviderTypeFieldAccess ProviderType = "field_access"
 )
+
+// StructFieldSpec represents a field extracted from a struct for dependency injection.
+type StructFieldSpec struct {
+	Type      types.Type // Field type (e.g., string) - used for dependency matching
+	Name      string     // Field name (e.g., "DBHost") - used in generated code
+	Index     int        // Original field index in struct - preserved for proper access
+	Anonymous bool       // True for embedded fields - affects naming
+}
 
 // ProviderSpec represents a provider specification from annotations.
 type ProviderSpec struct {
 	ASTExpr           ast.Expr
+	StructType        types.Type
 	ReferencedImports map[string]*Import
+	SourceField       *StructFieldSpec
 	Type              ProviderType
 	Provides          [][]types.Type
 	Requires          []types.Type
+	StructFields      []*StructFieldSpec
+	DeclOrder         int
 	IsReturnError     bool
 	IsAsync           bool
 }
@@ -274,6 +288,57 @@ func (stmt *InjectorChainStmt) HasAsync() bool {
 			return true
 		}
 	}
+	return false
+}
+
+// InjectorFieldAccessStmt represents field extraction from a struct instance.
+// Implements InjectorStmt interface.
+type InjectorFieldAccessStmt struct {
+	StructParam *InjectorParam   // The struct instance parameter
+	Field       *StructFieldSpec // The field to extract
+	ReturnParam *InjectorParam   // The result parameter
+}
+
+// Stmt generates: fieldVar := structVar.FieldName (or = when predeclared in async builds)
+func (stmt *InjectorFieldAccessStmt) Stmt(varPool *VarPool, _ *Injector, _ func(errExpr ast.Expr) []ast.Stmt) ([]ast.Stmt, []string) {
+	// Determine if we need to use = instead of := (when variables are predeclared in async builds)
+	useAssign := stmt.ReturnParam.WithChannel()
+
+	tokenType := token.DEFINE
+	if useAssign {
+		tokenType = token.ASSIGN
+	}
+
+	var stmts []ast.Stmt
+
+	// Generate the field access assignment: fieldVar := structVar.FieldName (or = for async)
+	stmts = append(stmts, &ast.AssignStmt{
+		Lhs: []ast.Expr{ast.NewIdent(stmt.ReturnParam.Name(varPool))},
+		Tok: tokenType,
+		Rhs: []ast.Expr{
+			&ast.SelectorExpr{
+				X:   ast.NewIdent(stmt.StructParam.Name(varPool)),
+				Sel: ast.NewIdent(stmt.Field.Name),
+			},
+		},
+	})
+
+	// If this parameter has a channel (for async coordination), close it
+	if stmt.ReturnParam.WithChannel() {
+		channelName := stmt.ReturnParam.ChannelName(varPool)
+		stmts = append(stmts, &ast.ExprStmt{
+			X: &ast.CallExpr{
+				Fun:  ast.NewIdent("close"),
+				Args: []ast.Expr{ast.NewIdent(channelName)},
+			},
+		})
+	}
+
+	return stmts, nil
+}
+
+// HasAsync returns false - field access is always synchronous
+func (stmt *InjectorFieldAccessStmt) HasAsync() bool {
 	return false
 }
 

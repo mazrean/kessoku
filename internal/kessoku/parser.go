@@ -10,6 +10,7 @@ import (
 	"go/types"
 	"log/slog"
 	"path/filepath"
+	"sort"
 	"strconv"
 
 	"golang.org/x/tools/go/ast/astutil"
@@ -409,7 +410,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 		return nil
 	}
 
-	requires, provides, isReturnError, isAsync, err := p.parseProviderType(pkg, providerType, varPool)
+	result, err := p.parseProviderType(pkg, providerType, varPool)
 	if err != nil {
 		return fmt.Errorf("parse provider type: %w", err)
 	}
@@ -418,29 +419,65 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 	var referencedImports map[string]*Import
 	arg, referencedImports = p.collectDependencies(arg, pkg.TypesInfo, imports, varPool)
 
-	build.Providers = append(build.Providers, &ProviderSpec{
-		ASTExpr:           arg,
-		Type:              ProviderTypeFunction,
-		Provides:          provides,
-		Requires:          requires,
-		IsReturnError:     isReturnError,
-		IsAsync:           isAsync,
-		ReferencedImports: referencedImports,
-	})
+	// Check if this is a struct provider (even if wrapped in Async/Bind)
+	if result.IsStruct {
+		// Handle struct provider
+		if result.StructType == nil {
+			return fmt.Errorf("structProvider requires a struct type argument")
+		}
+
+		// Extract exported fields from the struct type - fail fast on error
+		fields, err := extractExportedFields(result.StructType)
+		if err != nil {
+			return fmt.Errorf("failed to extract fields from struct %s: %w", result.StructType, err)
+		}
+
+		build.Providers = append(build.Providers, &ProviderSpec{
+			ASTExpr:           arg,
+			Type:              ProviderTypeStruct,
+			StructType:        result.StructType,
+			StructFields:      fields,
+			Provides:          result.Provides,
+			Requires:          result.Requires,
+			IsReturnError:     result.IsReturnError,
+			IsAsync:           result.IsAsync,
+			ReferencedImports: referencedImports,
+		})
+	} else {
+		build.Providers = append(build.Providers, &ProviderSpec{
+			ASTExpr:           arg,
+			Type:              ProviderTypeFunction,
+			Provides:          result.Provides,
+			Requires:          result.Requires,
+			IsReturnError:     result.IsReturnError,
+			IsAsync:           result.IsAsync,
+			ReferencedImports: referencedImports,
+		})
+	}
 
 	return nil
 }
 
-func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Type, varPool *VarPool) ([]types.Type, [][]types.Type, bool, bool, error) {
+// parseProviderTypeResult holds the result of parsing a provider type.
+type parseProviderTypeResult struct {
+	StructType    types.Type
+	Requires      []types.Type
+	Provides      [][]types.Type
+	IsReturnError bool
+	IsAsync       bool
+	IsStruct      bool
+}
+
+func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Type, varPool *VarPool) (*parseProviderTypeResult, error) {
 	named, ok := providerType.(*types.Named)
 	if !ok {
 		slog.Debug("providerType is not a named type", "providerType", providerType)
-		return nil, nil, false, false, fmt.Errorf("provider type is not a named type")
+		return nil, fmt.Errorf("provider type is not a named type")
 	}
 
 	typeArgs := named.TypeArgs()
 	if typeArgs == nil {
-		return nil, nil, false, false, fmt.Errorf("provider type has no type arguments")
+		return nil, fmt.Errorf("provider type has no type arguments")
 	}
 
 	switch named.Obj().Name() {
@@ -454,46 +491,49 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 
 		intrfcType, ok := interfaceType.Underlying().(*types.Interface)
 		if !ok {
-			return nil, nil, false, false, fmt.Errorf("bind type argument is not an interface: %s", interfaceType)
+			return nil, fmt.Errorf("bind type argument is not an interface: %s", interfaceType)
 		}
 
-		requires, provides, isReturnError, isAsync, err := p.parseProviderType(pkg, internalProviderType, varPool)
+		result, err := p.parseProviderType(pkg, internalProviderType, varPool)
 		if err != nil {
-			return nil, nil, false, false, fmt.Errorf("parse internal provider type: %w", err)
+			return nil, fmt.Errorf("parse internal provider type: %w", err)
 		}
 
-		for i, provide := range provides {
+		for i, provide := range result.Provides {
 			for _, providedType := range provide {
 				if types.Implements(providedType, intrfcType) {
 					// If the provided type is the interface type, we can skip it
-					provides[i] = append(provides[i], interfaceType)
+					result.Provides[i] = append(result.Provides[i], interfaceType)
 					break
 				}
 			}
 		}
 
-		return requires, provides, isReturnError, isAsync, nil
+		// Propagate struct info through bind wrapper
+		return result, nil
 	case "asyncProvider":
 		if typeArgs.Len() < asyncProviderMinTypeArgs {
-			return nil, nil, false, false, fmt.Errorf("asyncProvider requires at least 2 type arguments")
+			return nil, fmt.Errorf("asyncProvider requires at least 2 type arguments")
 		}
 		internalProviderType := typeArgs.At(1)
 
-		requires, provides, isReturnError, _, err := p.parseProviderType(pkg, internalProviderType, varPool)
+		result, err := p.parseProviderType(pkg, internalProviderType, varPool)
 		if err != nil {
-			return nil, nil, false, false, fmt.Errorf("parse internal provider type: %w", err)
+			return nil, fmt.Errorf("parse internal provider type: %w", err)
 		}
 
-		return requires, provides, isReturnError, true, nil
+		// Mark as async but propagate struct info
+		result.IsAsync = true
+		return result, nil
 	case "fnProvider":
 		if typeArgs.Len() < 1 {
-			return nil, nil, false, false, fmt.Errorf("fnProvider requires at least 1 type argument")
+			return nil, fmt.Errorf("fnProvider requires at least 1 type argument")
 		}
 
 		providerFnSig, ok := typeArgs.At(0).(*types.Signature)
 		if !ok || providerFnSig == nil {
 			slog.Debug("fnType is nil", "providerType", providerType)
-			return nil, nil, false, false, fmt.Errorf("fnProvider type argument is not a function signature")
+			return nil, fmt.Errorf("fnProvider type argument is not a function signature")
 		}
 
 		requires := make([]types.Type, 0, providerFnSig.Params().Len())
@@ -512,13 +552,76 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 			provides = append(provides, []types.Type{providerFnSig.Results().At(i).Type()})
 		}
 
-		// Check if this is a bindProvider or asyncProvider
-		isAsync := false
+		return &parseProviderTypeResult{
+			Requires:      requires,
+			Provides:      provides,
+			IsReturnError: isReturnError,
+			IsAsync:       false,
+			IsStruct:      false,
+		}, nil
+	case "structProvider":
+		if typeArgs.Len() < 1 {
+			return nil, fmt.Errorf("structProvider requires 1 type argument")
+		}
 
-		return requires, provides, isReturnError, isAsync, nil
+		structType := typeArgs.At(0)
+
+		// The struct provider requires the struct type and provides the struct type
+		return &parseProviderTypeResult{
+			Requires:      []types.Type{structType},
+			Provides:      [][]types.Type{{structType}},
+			IsReturnError: false,
+			IsAsync:       false,
+			IsStruct:      true,
+			StructType:    structType,
+		}, nil
 	}
 
-	return nil, nil, false, false, errors.New("no valid provider function found")
+	return nil, errors.New("no valid provider function found")
+}
+
+// extractExportedFields extracts exported fields from a struct type.
+// Fields are returned in alphabetical order by name for deterministic output.
+// Unexported fields are ignored.
+func extractExportedFields(t types.Type) ([]*StructFieldSpec, error) {
+	// Dereference pointer type if needed
+	underlying := t
+	if ptr, ok := t.(*types.Pointer); ok {
+		underlying = ptr.Elem()
+	}
+
+	// Get underlying struct type
+	var structType *types.Struct
+	switch u := underlying.Underlying().(type) {
+	case *types.Struct:
+		structType = u
+	default:
+		return nil, fmt.Errorf("not a struct type: %s", t)
+	}
+
+	// Collect exported fields
+	var fields []*StructFieldSpec
+	for i := 0; i < structType.NumFields(); i++ {
+		field := structType.Field(i)
+		// Skip unexported fields
+		if !field.Exported() {
+			continue
+		}
+
+		fields = append(fields, &StructFieldSpec{
+			Type:      field.Type(),
+			Name:      field.Name(),
+			Index:     i,
+			Anonymous: field.Anonymous(),
+		})
+	}
+
+	// Sort fields alphabetically by name for deterministic output
+	sort.Slice(fields, func(i, j int) bool {
+		return fields[i].Name < fields[j].Name
+	})
+
+	return fields, nil
 }
 
 func (p *Parser) getVarDecl(pkg *packages.Package, obj *types.Var) ast.Expr {
