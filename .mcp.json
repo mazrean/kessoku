@@ -6,6 +6,12 @@
       "args": ["start-mcp-server", "--context", "ide-assistant"],
       "env": {}
     },
+    "codex": {
+      "type": "stdio",
+      "command": "codex",
+      "args": ["mcp-server"],
+      "env": {}
+    },
     "gopls": {
       "type": "stdio",
       "command": "gopls",

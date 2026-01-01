@@ -135,6 +135,11 @@ Run `go generate` or `go tool kessoku` to generate `*_band.go` files with depend
 
 ## Development Guidelines
 
+### Development Methodology
+
+- Follow t-wada's TDD (Test-Driven Development) approach
+- Make one commit per completed task
+
 ### Git Commit Rules
 - Always create git commits at appropriate granular units for code changes
 - Each commit should represent a logical, atomic change
@@ -161,3 +166,10 @@ Run `go generate` or `go tool kessoku` to generate `*_band.go` files with depend
   - Project description or overview needs updating
 - Keep documentation in sync with actual implementation
 - Documentation updates should be part of the same commit as the related code changes
+
+## Active Technologies
+- Go 1.24+ + github.com/alecthomas/kong (CLI), golang.org/x/tools/go/packages (AST analysis) (001-struct-annotation)
+- N/A (code generation tool) (001-struct-annotation)
+
+## Recent Changes
+- 001-struct-annotation: Added Go 1.24+ + github.com/alecthomas/kong (CLI), golang.org/x/tools/go/packages (AST analysis)
