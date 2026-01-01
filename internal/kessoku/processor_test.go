@@ -228,6 +228,435 @@ func invalid syntax here {
 			expectedGeneratedFiles: []string{},
 			shouldError:            true,
 		},
+		{
+			name: "struct provider field expansion",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	DBHost string
+	DBPort int
+}
+
+func NewConfig() *Config {
+	return &Config{DBHost: "localhost", DBPort: 5432}
+}
+
+type Database struct {
+	host string
+	port int
+}
+
+func NewDatabase(host string, port int) *Database {
+	return &Database{host: host, port: port}
+}
+
+var _ = kessoku.Inject[*Database](
+	"InitializeDatabase",
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewDatabase),
+)
+`,
+				},
+			},
+			expectedGeneratedFiles: []string{"test_band.go"},
+			shouldError:            false,
+		},
+		{
+			name: "struct different field types",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type CustomType struct {
+	Value string
+}
+
+type Config struct {
+	Host   string
+	Port   int
+	Custom *CustomType
+}
+
+func NewConfig() *Config {
+	return &Config{Host: "localhost", Port: 5432, Custom: &CustomType{Value: "test"}}
+}
+
+type Service struct {
+	host   string
+	port   int
+	custom *CustomType
+}
+
+func NewService(host string, port int, custom *CustomType) *Service {
+	return &Service{host: host, port: port, custom: custom}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewService),
+)
+`,
+				},
+			},
+			expectedGeneratedFiles: []string{"test_band.go"},
+			shouldError:            false,
+		},
+		{
+			name: "struct pointer and value fields",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Logger struct {
+	Level string
+}
+
+type Config struct {
+	Host   string
+	Logger *Logger
+}
+
+func NewConfig() *Config {
+	return &Config{Host: "localhost", Logger: &Logger{Level: "info"}}
+}
+
+type Service struct {
+	host   string
+	logger *Logger
+}
+
+func NewService(host string, logger *Logger) *Service {
+	return &Service{host: host, logger: logger}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewService),
+)
+`,
+				},
+			},
+			expectedGeneratedFiles: []string{"test_band.go"},
+			shouldError:            false,
+		},
+		{
+			name: "struct with async provider",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	DBHost string
+	DBPort int
+}
+
+func NewConfig() *Config {
+	return &Config{DBHost: "localhost", DBPort: 5432}
+}
+
+type Database struct {
+	host string
+	port int
+}
+
+func NewDatabase(host string, port int) *Database {
+	return &Database{host: host, port: port}
+}
+
+var _ = kessoku.Inject[*Database](
+	"InitializeDatabase",
+	kessoku.Async(kessoku.Provide(NewConfig)),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewDatabase),
+)
+`,
+				},
+			},
+			expectedGeneratedFiles: []string{"test_band.go"},
+			shouldError:            false,
+		},
+		{
+			name: "struct inside set",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	DBHost string
+	DBPort int
+}
+
+func NewConfig() *Config {
+	return &Config{DBHost: "localhost", DBPort: 5432}
+}
+
+type Database struct {
+	host string
+	port int
+}
+
+func NewDatabase(host string, port int) *Database {
+	return &Database{host: host, port: port}
+}
+
+var ConfigSet = kessoku.Set(
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+)
+
+var _ = kessoku.Inject[*Database](
+	"InitializeDatabase",
+	ConfigSet,
+	kessoku.Provide(NewDatabase),
+)
+`,
+				},
+			},
+			expectedGeneratedFiles: []string{"test_band.go"},
+			shouldError:            false,
+		},
+	{
+			name: "struct embedded value type",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type BaseConfig struct {
+	Debug bool
+}
+
+type Config struct {
+	BaseConfig
+	Name string
+}
+
+func NewConfig() *Config {
+	return &Config{BaseConfig: BaseConfig{Debug: true}, Name: "test"}
+}
+
+type Service struct {
+	base BaseConfig
+	name string
+}
+
+func NewService(base BaseConfig, name string) *Service {
+	return &Service{base: base, name: name}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewService),
+)
+`,
+				},
+			},
+			expectedGeneratedFiles: []string{"test_band.go"},
+			shouldError:            false,
+		},
+		{
+			name: "struct embedded pointer type",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Logger struct {
+	Level string
+}
+
+type Config struct {
+	*Logger
+	Name string
+}
+
+func NewConfig() *Config {
+	return &Config{Logger: &Logger{Level: "info"}, Name: "test"}
+}
+
+type Service struct {
+	logger *Logger
+	name   string
+}
+
+func NewService(logger *Logger, name string) *Service {
+	return &Service{logger: logger, name: name}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewService),
+)
+`,
+				},
+			},
+			expectedGeneratedFiles: []string{"test_band.go"},
+			shouldError:            false,
+		},
+		{
+			name: "async wrapped struct provider",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Host string
+	Port int
+}
+
+func NewConfig() *Config {
+	return &Config{Host: "localhost", Port: 5432}
+}
+
+type Database struct {
+	host string
+	port int
+}
+
+func NewDatabase(host string, port int) *Database {
+	return &Database{host: host, port: port}
+}
+
+var _ = kessoku.Inject[*Database](
+	"InitializeDatabase",
+	kessoku.Provide(NewConfig),
+	kessoku.Async(kessoku.Struct[*Config]()),
+	kessoku.Provide(NewDatabase),
+)
+`,
+				},
+			},
+			expectedGeneratedFiles: []string{"test_band.go"},
+			shouldError:            false,
+		},
+		{
+			name: "async struct provider with dependent async provider",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Host string
+	Port int
+}
+
+func NewConfig() *Config {
+	return &Config{Host: "localhost", Port: 5432}
+}
+
+type Database struct {
+	host string
+	port int
+}
+
+func NewDatabase(host string, port int) *Database {
+	return &Database{host: host, port: port}
+}
+
+type Service struct {
+	db *Database
+}
+
+func NewService(db *Database) *Service {
+	return &Service{db: db}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	kessoku.Async(kessoku.Provide(NewConfig)),
+	kessoku.Async(kessoku.Struct[*Config]()),
+	kessoku.Async(kessoku.Provide(NewDatabase)),
+	kessoku.Provide(NewService),
+)
+`,
+				},
+			},
+			expectedGeneratedFiles: []string{"test_band.go"},
+			shouldError:            false,
+		},
+		{
+			name: "bind wrapped struct provider",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type ConfigProvider interface {
+	GetHost() string
+}
+
+type Config struct {
+	Host string
+	Port int
+}
+
+func (c *Config) GetHost() string {
+	return c.Host
+}
+
+func NewConfig() *Config {
+	return &Config{Host: "localhost", Port: 5432}
+}
+
+type Database struct {
+	host string
+	port int
+}
+
+func NewDatabase(host string, port int) *Database {
+	return &Database{host: host, port: port}
+}
+
+var _ = kessoku.Inject[*Database](
+	"InitializeDatabase",
+	kessoku.Provide(NewConfig),
+	kessoku.Bind[ConfigProvider](kessoku.Struct[*Config]()),
+	kessoku.Provide(NewDatabase),
+)
+`,
+				},
+			},
+			expectedGeneratedFiles: []string{"test_band.go"},
+			shouldError:            false,
+		},
 	}
 
 	for _, tt := range tests {

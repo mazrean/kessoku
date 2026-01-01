@@ -174,3 +174,45 @@ func (s set) provide() {}
 func Set(providers ...provider) set {
 	return set{}
 }
+
+// structProvider marks a struct type for field expansion.
+// When used in an Inject declaration, all exported fields of T
+// become available as individual dependencies.
+type structProvider[T any] struct{}
+
+// provide implements the provider interface.
+func (s structProvider[T]) provide() {}
+
+// Fn returns a dummy function for type compatibility with funcProvider.
+// This allows structProvider to be wrapped with Async and Bind.
+// The returned function is never actually called - the code generator
+// recognizes structProvider and handles field expansion at compile time.
+func (s structProvider[T]) Fn() func() T {
+	return func() T {
+		var zero T
+		return zero
+	}
+}
+
+// Struct returns a provider that expands all exported fields of T
+// as individual dependencies for injection.
+//
+// T must be a struct type or pointer to struct type.
+// All exported fields of T become available as injectable dependencies.
+// Unexported fields are ignored.
+//
+// The struct type T must be provided by another provider in the same
+// Inject call (e.g., via Provide). Struct only expands fields; it does
+// not create the struct instance.
+//
+// Example:
+//
+//	var _ = kessoku.Inject[*App](
+//	    "InitializeApp",
+//	    kessoku.Provide(NewConfig),     // Provides *Config
+//	    kessoku.Struct[*Config](),      // Expands Config fields
+//	    kessoku.Provide(NewApp),
+//	)
+func Struct[T any]() structProvider[T] {
+	return structProvider[T]{}
+}
