@@ -4,6 +4,4 @@ import (
 	"github.com/mazrean/kessoku"
 )
 
-func InitializeApp() (*App, error) {
-	return kessoku.Inject[*App](kessoku.Provide(NewDB), kessoku.Provide(NewApp))
-}
+var _ = kessoku.Inject[*App]("InitializeApp", kessoku.Provide(NewDB), kessoku.Provide(NewApp))

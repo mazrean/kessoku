@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"bytes"
+	"fmt"
 	"go/ast"
 	"go/format"
 	"go/token"
@@ -179,10 +180,16 @@ func (w *Writer) valueToExpr(kv *KessokuValue) ast.Expr {
 	}
 }
 
-// injectToDecl converts a KessokuInject to a function declaration.
-func (w *Writer) injectToDecl(ki *KessokuInject) *ast.FuncDecl {
-	// Build kessoku.Inject[T](...) call
-	var args []ast.Expr
+// injectToDecl converts a KessokuInject to a variable declaration.
+// kessoku.Inject is used as: var _ = kessoku.Inject[T]("FuncName", providers...)
+func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
+	// Build arguments: first is the function name as string, then providers
+	args := []ast.Expr{
+		&ast.BasicLit{
+			Kind:  token.STRING,
+			Value: fmt.Sprintf("%q", ki.FuncName),
+		},
+	}
 	for _, elem := range ki.Elements {
 		args = append(args, w.patternToExpr(elem))
 	}
@@ -201,29 +208,14 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.FuncDecl {
 		Args: args,
 	}
 
-	// Build return statement
-	var returnStmt *ast.ReturnStmt
-	if ki.HasError {
-		// return kessoku.Inject[T](...)
-		returnStmt = &ast.ReturnStmt{
-			Results: []ast.Expr{injectCall},
-		}
-	} else {
-		// return kessoku.Inject[T](...), nil  -- if original had error return
-		// or just: return kessoku.Inject[T](...)
-		returnStmt = &ast.ReturnStmt{
-			Results: []ast.Expr{injectCall},
-		}
-	}
-
-	// Copy the original function signature but replace body
-	funcDecl := &ast.FuncDecl{
-		Name: ast.NewIdent(ki.FuncName),
-		Type: ki.FuncDecl.Type,
-		Body: &ast.BlockStmt{
-			List: []ast.Stmt{returnStmt},
+	// Build var _ = kessoku.Inject[T]("FuncName", ...)
+	return &ast.GenDecl{
+		Tok: token.VAR,
+		Specs: []ast.Spec{
+			&ast.ValueSpec{
+				Names:  []*ast.Ident{ast.NewIdent("_")},
+				Values: []ast.Expr{injectCall},
+			},
 		},
 	}
-
-	return funcDecl
 }

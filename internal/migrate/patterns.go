@@ -130,8 +130,8 @@ func (*WireFieldsOf) wirePattern() {}
 type WireProviderFunc struct {
 	Expr ast.Expr
 	Func *types.Func
-	baseWirePattern
 	Name string
+	baseWirePattern
 }
 
 func (*WireProviderFunc) wirePattern() {}
@@ -139,8 +139,8 @@ func (*WireProviderFunc) wirePattern() {}
 // WireSetRef represents a reference to another provider set variable.
 type WireSetRef struct {
 	Expr ast.Expr
-	baseWirePattern
 	Name string
+	baseWirePattern
 }
 
 func (*WireSetRef) wirePattern() {}
