@@ -95,11 +95,17 @@ func (w *Writer) exprWithPos(expr ast.Expr, pos token.Pos) ast.Expr {
 	}
 }
 
+// goGenerateComment is the go:generate directive added to generated files.
+const goGenerateComment = "//go:generate go tool kessoku $GOFILE\n\n"
+
 // Write writes the merged output to the specified file.
 func (w *Writer) Write(output *MergedOutput, path string) error {
 	file := w.buildFile(output)
 
 	var buf bytes.Buffer
+
+	// Add go:generate comment at the top
+	buf.WriteString(goGenerateComment)
 
 	// Create a FileSet with proper line information for formatting
 	fset := token.NewFileSet()

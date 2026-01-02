@@ -1,3 +1,5 @@
+//go:generate go tool kessoku $GOFILE
+
 package ec004_multiple_newset
 
 import (

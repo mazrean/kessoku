@@ -1,3 +1,5 @@
+//go:generate go tool kessoku $GOFILE
+
 package basic
 
 import (
