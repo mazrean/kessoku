@@ -4,5 +4,10 @@ import (
 	"github.com/mazrean/kessoku"
 )
 
-var FooSet = kessoku.Set(kessoku.Provide(NewFoo))
-var AllSet = kessoku.Set(FooSet, kessoku.Provide(NewBar))
+var FooSet = kessoku.Set(
+	kessoku.Provide(NewFoo),
+)
+var AllSet = kessoku.Set(
+	FooSet,
+	kessoku.Provide(NewBar),
+)

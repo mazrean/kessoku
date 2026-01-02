@@ -65,6 +65,36 @@ func (w *Writer) typeToExpr(t types.Type) ast.Expr {
 	return typeToExpr(t)
 }
 
+// exprWithPos rebuilds an expression with the given position.
+// This ensures proper line formatting in the generated output.
+func (w *Writer) exprWithPos(expr ast.Expr, pos token.Pos) ast.Expr {
+	if expr == nil {
+		return nil
+	}
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return &ast.Ident{NamePos: pos, Name: e.Name}
+	case *ast.SelectorExpr:
+		return &ast.SelectorExpr{
+			X:   w.exprWithPos(e.X, pos),
+			Sel: &ast.Ident{NamePos: pos, Name: e.Sel.Name},
+		}
+	case *ast.BasicLit:
+		return &ast.BasicLit{ValuePos: pos, Kind: e.Kind, Value: e.Value}
+	case *ast.UnaryExpr:
+		return &ast.UnaryExpr{OpPos: pos, Op: e.Op, X: w.exprWithPos(e.X, pos)}
+	case *ast.CompositeLit:
+		return &ast.CompositeLit{
+			Type:   e.Type,
+			Lbrace: pos,
+			Elts:   e.Elts,
+			Rbrace: e.Rbrace,
+		}
+	default:
+		return expr
+	}
+}
+
 // Write writes the merged output to the specified file.
 func (w *Writer) Write(output *MergedOutput, path string) error {
 	file := w.buildFile(output)
@@ -160,16 +190,23 @@ func (w *Writer) PatternToDecl(p KessokuPattern) ast.Decl {
 	}
 }
 
-// setToDecl converts a KessokuSet to a variable declaration.
+// setToDecl converts a KessokuSet to a variable declaration with proper line breaks.
 func (w *Writer) setToDecl(ks *KessokuSet) *ast.GenDecl {
-	// Build kessoku.Set call
+	// Build arguments with positions on different lines for proper formatting
+	// FileSet has lines at offsets 0, lineOffsetBytes, 2*lineOffsetBytes, etc.
 	var args []ast.Expr
-	for _, elem := range ks.Elements {
-		expr := w.patternToExpr(elem)
+	for i, elem := range ks.Elements {
+		pos := token.Pos((firstArgLine + i) * lineOffsetBytes)
+		expr := w.patternToExprWithPos(elem, pos)
 		if expr == nil {
-			expr = ast.NewIdent("nil")
+			expr = &ast.Ident{NamePos: pos, Name: "nil"}
 		}
 		args = append(args, expr)
+	}
+
+	lastLine := firstArgLine + len(ks.Elements) - 1
+	if len(ks.Elements) == 0 {
+		lastLine = firstArgLine
 	}
 
 	setCall := &ast.CallExpr{
@@ -177,7 +214,9 @@ func (w *Writer) setToDecl(ks *KessokuSet) *ast.GenDecl {
 			X:   ast.NewIdent("kessoku"),
 			Sel: ast.NewIdent("Set"),
 		},
-		Args: args,
+		Lparen: token.Pos(lineOffsetBytes), // line 1
+		Args:   args,
+		Rparen: token.Pos((lastLine + 1) * lineOffsetBytes), // closing line
 	}
 
 	return &ast.GenDecl{
@@ -333,12 +372,9 @@ func (w *Writer) patternToExprWithPos(p KessokuPattern, pos token.Pos) ast.Expr 
 	}
 	switch kp := p.(type) {
 	case *KessokuProvide:
-		funcExpr := kp.FuncExpr
+		funcExpr := w.exprWithPos(kp.FuncExpr, pos)
 		if funcExpr == nil {
 			funcExpr = &ast.Ident{NamePos: pos, Name: "nil"}
-		} else if ident, ok := funcExpr.(*ast.Ident); ok {
-			// Set position on the function expression if it's an identifier
-			funcExpr = &ast.Ident{NamePos: pos, Name: ident.Name}
 		}
 		return &ast.CallExpr{
 			Fun: &ast.SelectorExpr{
@@ -375,9 +411,9 @@ func (w *Writer) patternToExprWithPos(p KessokuPattern, pos token.Pos) ast.Expr 
 			Args:   []ast.Expr{providerExpr},
 		}
 	case *KessokuValue:
-		expr := kp.Expr
+		expr := w.exprWithPos(kp.Expr, pos)
 		if expr == nil {
-			expr = ast.NewIdent("nil")
+			expr = &ast.Ident{NamePos: pos, Name: "nil"}
 		}
 		return &ast.CallExpr{
 			Fun: &ast.SelectorExpr{
@@ -394,7 +430,7 @@ func (w *Writer) patternToExprWithPos(p KessokuPattern, pos token.Pos) ast.Expr 
 		if kp.Expr == nil {
 			return &ast.Ident{NamePos: pos, Name: "nil"}
 		}
-		return kp.Expr
+		return w.exprWithPos(kp.Expr, pos)
 	default:
 		return &ast.Ident{NamePos: pos, Name: "nil"}
 	}

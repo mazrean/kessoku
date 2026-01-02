@@ -4,4 +4,6 @@ import (
 	"github.com/mazrean/kessoku"
 )
 
-var SuperSet = kessoku.Set(kessoku.Provide(NewFoo))
+var SuperSet = kessoku.Set(
+	kessoku.Provide(NewFoo),
+)
