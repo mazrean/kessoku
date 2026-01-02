@@ -201,8 +201,32 @@ Already using google/wire? Kessoku provides a migration tool to convert your wir
 ### Quick Migration
 
 ```bash
+# on wire config directory
 go tool kessoku migrate
+
+# or specify wire config directory with patterns
+go tool kessoku migrate ./pkg/wire -o kessoku.go
 ```
+
+<details>
+<summary>Advanced Migration Options</summary>
+
+```text
+Usage: kessoku migrate [<patterns> ...] [flags]
+
+Migrate wire config to kessoku
+
+Arguments:
+  [<patterns> ...]    Go package patterns to migrate
+
+Flags:
+  -h, --help                   Show context-sensitive help.
+  -l, --log-level="info"       Log level
+  -v, --version                Show version and exit.
+
+  -o, --output="kessoku.go"    Output file path
+```
+</details>
 
 ### Example
 
