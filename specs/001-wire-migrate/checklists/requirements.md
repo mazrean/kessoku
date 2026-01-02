@@ -1,7 +1,7 @@
-# Specification Quality Checklist: Struct Annotation for Field Expansion
+# Specification Quality Checklist: Wire to Kessoku Migration Tool
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
-**Created**: 2026-01-01
+**Created**: 2026-01-02
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -33,5 +33,10 @@
 
 - All checklist items pass validation
 - Specification is ready for `/speckit.clarify` or `/speckit.plan`
-- The spec assumes struct instance is provided separately via `kessoku.Provide`
-- Type conflict handling follows existing kessoku patterns
+- The spec covers all wire patterns specified in the user request:
+  - NewSet -> Set
+  - Bind -> Bind
+  - Value -> Value
+  - InterfaceValue -> Bind + Value
+  - Struct (all fields) -> Struct
+  - Struct (specific fields) / FieldsOf -> Provide + anonymous function

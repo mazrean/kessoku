@@ -10,6 +10,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/mazrean/kessoku/internal/pkg/collection"
 )
@@ -486,13 +487,14 @@ func (e *CycleError) Error() string {
 	}
 
 	// Build the cycle path: TypeA -> TypeB -> TypeC -> TypeA
-	cyclePath := providerTypes[0]
+	var cyclePath strings.Builder
+	cyclePath.WriteString(providerTypes[0])
 	for i := 1; i < len(providerTypes); i++ {
-		cyclePath += fmt.Sprintf(" -> %s", providerTypes[i])
+		cyclePath.WriteString(fmt.Sprintf(" -> %s", providerTypes[i]))
 	}
-	cyclePath += fmt.Sprintf(" -> %s", providerTypes[0])
+	cyclePath.WriteString(fmt.Sprintf(" -> %s", providerTypes[0]))
 
-	return fmt.Sprintf("circular dependency detected: %s", cyclePath)
+	return fmt.Sprintf("circular dependency detected: %s", cyclePath.String())
 }
 
 // detectCycles detects cycles in the dependency graph using DFS

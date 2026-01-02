@@ -28,6 +28,6 @@ func (db *Database) Close() error {
 }
 
 // Query executes a query.
-func (db *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
+func (db *Database) Query(query string, args ...any) (*sql.Rows, error) {
 	return db.conn.QueryContext(context.Background(), query, args...)
 }

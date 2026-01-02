@@ -23,8 +23,6 @@ func InitializeComplexApp(ctx context.Context) *App {
 		app                 *App
 	)
 	eg, ctx := errgroup.WithContext(ctx)
-	config = kessoku.Provide(NewConfig).Fn()()
-	close(configCh)
 	eg.Go(func() error {
 		select {
 		case <-configCh:
@@ -47,6 +45,8 @@ func InitializeComplexApp(ctx context.Context) *App {
 		close(sessionServiceCh)
 		return nil
 	})
+	config = kessoku.Provide(NewConfig).Fn()()
+	close(configCh)
 	messagingService = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(config)
 	for _, ch := range []<-chan struct{}{userServiceCh, sessionServiceCh} {
 		<-ch

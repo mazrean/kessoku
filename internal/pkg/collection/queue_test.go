@@ -511,9 +511,8 @@ func TestQueue_TypeSafety(t *testing.T) {
 // Benchmark tests
 func BenchmarkQueue_Push(b *testing.B) {
 	q := NewQueue[int]()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		q.Push(i)
 	}
 }
@@ -534,9 +533,8 @@ func BenchmarkQueue_Pop(b *testing.B) {
 
 func BenchmarkQueue_PushPop(b *testing.B) {
 	q := NewQueue[int]()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		q.Push(i)
 		q.Pop()
 	}
@@ -546,7 +544,7 @@ func BenchmarkQueue_Iter(b *testing.B) {
 	q := NewQueue[int]()
 
 	// Pre-populate queue
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		q.Push(i)
 	}
 

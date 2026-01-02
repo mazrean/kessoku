@@ -188,22 +188,22 @@ func collectImportsFromType(t types.Type, pkg string, imports map[string]*Import
 		collectImportsFromType(typ.Elem(), pkg, imports, referencedImports, varPool)
 	case *types.Signature:
 		if params := typ.Params(); params != nil {
-			for i := 0; i < params.Len(); i++ {
-				collectImportsFromType(params.At(i).Type(), pkg, imports, referencedImports, varPool)
+			for v := range params.Variables() {
+				collectImportsFromType(v.Type(), pkg, imports, referencedImports, varPool)
 			}
 		}
 		if results := typ.Results(); results != nil {
-			for i := 0; i < results.Len(); i++ {
-				collectImportsFromType(results.At(i).Type(), pkg, imports, referencedImports, varPool)
+			for v := range results.Variables() {
+				collectImportsFromType(v.Type(), pkg, imports, referencedImports, varPool)
 			}
 		}
 	case *types.Struct:
-		for i := 0; i < typ.NumFields(); i++ {
-			collectImportsFromType(typ.Field(i).Type(), pkg, imports, referencedImports, varPool)
+		for field := range typ.Fields() {
+			collectImportsFromType(field.Type(), pkg, imports, referencedImports, varPool)
 		}
 	case *types.Interface:
-		for i := 0; i < typ.NumMethods(); i++ {
-			collectImportsFromType(typ.Method(i).Type(), pkg, imports, referencedImports, varPool)
+		for method := range typ.Methods() {
+			collectImportsFromType(method.Type(), pkg, imports, referencedImports, varPool)
 		}
 	}
 }
