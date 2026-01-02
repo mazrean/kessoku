@@ -194,6 +194,53 @@ sudo apk add --allow-untrusted kessoku_amd64.apk
 
 ---
 
+## Migrating from google/wire
+
+Already using google/wire? Kessoku provides a migration tool to convert your wire configuration files automatically.
+
+### Quick Migration
+
+```bash
+go tool kessoku migrate
+```
+
+### Example
+
+**Before (wire.go):**
+```go
+//go:build wireinject
+
+package main
+
+import "github.com/google/wire"
+
+func InitializeApp() (*App, error) {
+    wire.Build(
+        NewApp,
+        NewPostgresRepo,
+        wire.Bind(new(Repository), new(*PostgresRepo)),
+    )
+    return nil, nil
+}
+```
+
+**After (kessoku.go):**
+```go
+//go:generate go tool kessoku $GOFILE
+
+package main
+
+import "github.com/mazrean/kessoku"
+
+var _ = kessoku.Inject[*App](
+    "InitializeApp",
+    kessoku.Provide(NewApp),
+    kessoku.Bind[Repository](kessoku.Provide(NewPostgresRepo)),
+)
+```
+
+---
+
 ## vs Alternatives
 
 | | Kessoku | google/wire | uber-go/dig |

@@ -25,7 +25,7 @@ go generate ./...                          # Generate DI code via go:generate
 go tool kessoku [files...]                 # Direct codegen for specific files
 
 # Wire migration
-go tool kessoku migrate [wire_files...] -o kessoku.go  # Migrate wire config to kessoku
+go tool kessoku migrate [patterns...] -o kessoku.go    # Migrate wire config to kessoku (default: ./)
 
 # API compatibility check
 go tool tools apicompat github.com/mazrean/kessoku@latest github.com/mazrean/kessoku
@@ -61,13 +61,17 @@ providers   cycles       execution
 ### Wire Migration Tool
 
 The `kessoku migrate` command converts google/wire configuration files to kessoku format.
+It uses the `wireinject` build tag to load wire configuration files (same as wire itself).
 
 ```bash
-# Basic usage
-go tool kessoku migrate wire.go -o kessoku.go
+# Basic usage (migrate current directory)
+go tool kessoku migrate
 
-# Multiple files (merged into single output)
-go tool kessoku migrate wire_a.go wire_b.go -o kessoku.go
+# Migrate specific package
+go tool kessoku migrate ./pkg/di
+
+# Migrate with custom output
+go tool kessoku migrate ./... -o providers.go
 ```
 
 Supported wire patterns:

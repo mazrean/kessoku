@@ -6,18 +6,18 @@
 ## Command Synopsis
 
 ```
-kessoku migrate [flags] <files...>
+kessoku migrate [flags] [patterns...]
 ```
 
 ## Description
 
-Migrate google/wire configuration files to kessoku format. The tool parses wire patterns and generates equivalent kessoku code.
+Migrate google/wire configuration files to kessoku format. The tool parses wire patterns and generates equivalent kessoku code. It uses the `wireinject` build tag to load wire configuration files (same as wire itself).
 
 ## Arguments
 
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `files` | Yes | One or more wire configuration files to migrate |
+| Argument | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `patterns` | No | `./` | Go package patterns to migrate (e.g., `./`, `./pkg/...`, `example.com/pkg`)
 
 ## Flags
 
@@ -65,7 +65,7 @@ All conversions merged into single output file with:
 ### Info Level Messages
 
 ```
-INFO Migrating wire configuration files=[wire.go]
+INFO Migrating wire configuration patterns=[./]
 INFO Generated kessoku configuration output=kessoku.go
 ```
 
@@ -92,17 +92,20 @@ ERROR Name collision identifier=FooSet files=[a.go b.go]
 ### Basic Migration
 
 ```bash
-# Migrate single file
-kessoku migrate wire.go
+# Migrate current directory (default)
+kessoku migrate
+
+# Migrate specific package
+kessoku migrate ./pkg/di
+
+# Migrate all packages recursively
+kessoku migrate ./...
 
 # Migrate with custom output
-kessoku migrate -o providers.go wire.go
-
-# Migrate multiple files
-kessoku migrate wire_db.go wire_services.go
+kessoku migrate -o providers.go ./pkg/di
 
 # Verbose output
-kessoku migrate -l debug wire.go
+kessoku migrate -l debug ./...
 ```
 
 ### Expected Transformations
