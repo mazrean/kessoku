@@ -11,6 +11,5 @@ var DBSet = kessoku.Set(
 var ServiceSet = kessoku.Set(
 	kessoku.Provide(NewService),
 	kessoku.Bind[Logger](kessoku.Provide(NewConsoleLogger)),
-	kessoku.Provide(NewConsoleLogger),
 	DBSet,
 )

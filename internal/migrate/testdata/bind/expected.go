@@ -5,6 +5,5 @@ import (
 )
 
 var RepoSet = kessoku.Set(
-	kessoku.Provide(NewPostgresRepo),
 	kessoku.Bind[Repository](kessoku.Provide(NewPostgresRepo)),
 )

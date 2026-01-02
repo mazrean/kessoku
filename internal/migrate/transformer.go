@@ -284,6 +284,10 @@ func (t *Transformer) typeExpr(typ types.Type) ast.Expr {
 
 // transformNewSet transforms wire.NewSet to kessoku.Set.
 func (t *Transformer) transformNewSet(ws *WireNewSet, pkg *types.Package) (*KessokuSet, error) {
+	// First pass: collect all bound implementation types
+	// These are the types for which wire.Bind creates an implicit provider
+	boundTypes := t.collectBoundTypes(ws.Elements)
+
 	var elements []KessokuPattern
 
 	for _, elem := range ws.Elements {
@@ -311,6 +315,11 @@ func (t *Transformer) transformNewSet(ws *WireNewSet, pkg *types.Package) (*Kess
 		case *WireFieldsOf:
 			elements = append(elements, t.transformFieldsOf(we, pkg))
 		case *WireProviderFunc:
+			// Skip provider if its output type is already bound via wire.Bind
+			// (wire.Bind creates an implicit provider for the implementation type)
+			if t.isProviderBound(we, boundTypes) {
+				continue
+			}
 			elements = append(elements, t.transformProviderFunc(we))
 		case *WireSetRef:
 			elements = append(elements, t.transformSetRef(we))
@@ -322,6 +331,50 @@ func (t *Transformer) transformNewSet(ws *WireNewSet, pkg *types.Package) (*Kess
 		Elements:  elements,
 		SourcePos: ws.Pos,
 	}, nil
+}
+
+// collectBoundTypes collects all implementation types from WireBind elements.
+func (t *Transformer) collectBoundTypes(elements []WirePattern) map[string]bool {
+	boundTypes := make(map[string]bool)
+	for _, elem := range elements {
+		switch we := elem.(type) {
+		case *WireBind:
+			// wire.Bind(new(Interface), new(*Impl)) -> Implementation is **Impl
+			// We need to unwrap one level to get *Impl which matches the provider return type
+			implType := we.Implementation
+			if ptr, ok := implType.(*types.Pointer); ok {
+				implType = ptr.Elem()
+			}
+			boundTypes[implType.String()] = true
+		case *WireNewSet:
+			// Recursively collect from nested sets
+			for k, v := range t.collectBoundTypes(we.Elements) {
+				boundTypes[k] = v
+			}
+		}
+	}
+	return boundTypes
+}
+
+// isProviderBound checks if a provider function's output type is bound via wire.Bind.
+func (t *Transformer) isProviderBound(wf *WireProviderFunc, boundTypes map[string]bool) bool {
+	if wf.Func == nil {
+		return false
+	}
+
+	sig, ok := wf.Func.Type().(*types.Signature)
+	if !ok {
+		return false
+	}
+
+	results := sig.Results()
+	if results.Len() == 0 {
+		return false
+	}
+
+	// Check if the first return type is in the bound types
+	returnType := results.At(0).Type()
+	return boundTypes[returnType.String()]
 }
 
 // transformProviderFunc transforms a provider function to kessoku.Provide.
