@@ -9,6 +9,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/mazrean/kessoku/internal/kessoku"
+	"github.com/mazrean/kessoku/internal/migrate"
 )
 
 var (
@@ -17,19 +18,22 @@ var (
 	date    = "unknown"
 )
 
-type Config struct {
+// CLI is the root command configuration with subcommands.
+type CLI struct {
 	LogLevel string           `kong:"short='l',help='Log level',enum='debug,info,warn,error',default='info'"`
-	Files    []string         `kong:"arg,help='Go files to process'"`
+	Generate GenerateCmd      `kong:"cmd,default='withargs',help='Generate DI code (default)'"`
+	Migrate  MigrateCmd       `kong:"cmd,help='Migrate wire config to kessoku'"`
 	Version  kong.VersionFlag `kong:"short='v',help='Show version and exit.'"`
 }
 
-func (c *Config) Run() error {
-	// Setup slog with TextHandler
-	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: parseLogLevel(c.LogLevel),
-	})
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
+// GenerateCmd is the default command for generating DI code.
+type GenerateCmd struct {
+	Files []string `kong:"arg,help='Go files to process'"`
+}
+
+// Run executes the generate command.
+func (c *GenerateCmd) Run(cli *CLI) error {
+	setupLogger(cli.LogLevel)
 
 	if len(c.Files) == 0 {
 		return fmt.Errorf("no files specified")
@@ -41,8 +45,24 @@ func (c *Config) Run() error {
 	return processor.ProcessFiles(c.Files)
 }
 
+// MigrateCmd is the command for migrating wire files to kessoku format.
+type MigrateCmd struct {
+	Output string   `kong:"short='o',default='kessoku.go',help='Output file path'"`
+	Files  []string `kong:"arg,required,help='Wire files to migrate'"`
+}
+
+// Run executes the migrate command.
+func (c *MigrateCmd) Run(cli *CLI) error {
+	setupLogger(cli.LogLevel)
+
+	slog.Info("Migrating wire configuration", "files", c.Files)
+
+	migrator := migrate.NewMigrator()
+	return migrator.MigrateFiles(c.Files, c.Output)
+}
+
 func Run() error {
-	var cli Config
+	var cli CLI
 	kongCtx := kong.Parse(&cli,
 		kong.Name("kessoku"),
 		kong.Description("A dependency injection code generator for Go, similar to google/wire"),
@@ -55,7 +75,15 @@ func Run() error {
 		},
 	)
 
-	return kongCtx.Run()
+	return kongCtx.Run(&cli)
+}
+
+func setupLogger(level string) {
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: parseLogLevel(level),
+	})
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
 }
 
 func parseLogLevel(level string) slog.Level {

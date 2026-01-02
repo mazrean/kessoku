@@ -24,6 +24,9 @@ go tool tools lint ./...
 go generate ./...                          # Generate DI code via go:generate
 go tool kessoku [files...]                 # Direct codegen for specific files
 
+# Wire migration
+go tool kessoku migrate [wire_files...] -o kessoku.go  # Migrate wire config to kessoku
+
 # API compatibility check
 go tool tools apicompat github.com/mazrean/kessoku@latest github.com/mazrean/kessoku
 
@@ -55,11 +58,35 @@ providers   cycles       execution
 2. **Graph**: Constructs dependency DAG, detects cycles, computes parallel execution pools
 3. **Generator**: Emits `*_band.go` files with optimized injector functions
 
+### Wire Migration Tool
+
+The `kessoku migrate` command converts google/wire configuration files to kessoku format.
+
+```bash
+# Basic usage
+go tool kessoku migrate wire.go -o kessoku.go
+
+# Multiple files (merged into single output)
+go tool kessoku migrate wire_a.go wire_b.go -o kessoku.go
+```
+
+Supported wire patterns:
+- `wire.NewSet(providers...)` → `kessoku.Set(providers...)`
+- `wire.Bind(new(Interface), new(Impl))` → `kessoku.Bind[Interface]()`
+- `wire.Value(v)` → `kessoku.Value(v)`
+- `wire.InterfaceValue(new(I), v)` → `kessoku.Bind[I](kessoku.Value(v))`
+- `wire.Struct(new(T), "Field1", "Field2")` → `kessoku.Provide(func(f1, f2) *T { ... })`
+- `wire.FieldsOf(new(T), "F1", "F2")` → `kessoku.Provide(func(t *T) (T1, T2) { ... })`
+- Set references (e.g., `wire.NewSet(OtherSet, ...)`) are preserved
+
+Migration tool location: `internal/migrate/`
+
 ### Key Code Locations
 
 - `annotation.go`: Public API (`Inject`, `Provide`, `Async`, `Bind`, `Value`, `Set`, `Struct`)
 - `internal/kessoku/provider.go`: Core data structures (`ProviderSpec`, `Injector`, `InjectorStmt`)
 - `internal/config/`: CLI configuration and orchestration
+- `internal/migrate/`: Wire to Kessoku migration tool
 
 ## Development Guidelines
 
@@ -77,3 +104,10 @@ providers   cycles       execution
 - Update CLAUDE.md when architecture or commands change
 - Update README.md when user-facing features change
 - Documentation updates should be part of the same commit as related code changes
+
+## Active Technologies
+- Go 1.24+ + github.com/alecthomas/kong (CLI), golang.org/x/tools (AST parsing, type checking) (001-wire-migrate)
+- N/A (file-based input/output, no persistent storage) (001-wire-migrate)
+
+## Recent Changes
+- 001-wire-migrate: Added Go 1.24+ + github.com/alecthomas/kong (CLI), golang.org/x/tools (AST parsing, type checking)
