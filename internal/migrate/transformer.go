@@ -438,6 +438,9 @@ func (t *Transformer) transformBuild(wb *WireBuild, pkg *types.Package) (*Kessok
 		SourcePos:  wb.Pos,
 	}
 
+	// First pass: collect all bound implementation types
+	boundTypes := t.collectBoundTypes(wb.Elements)
+
 	// Transform elements (same as NewSet elements)
 	for _, elem := range wb.Elements {
 		switch we := elem.(type) {
@@ -463,6 +466,10 @@ func (t *Transformer) transformBuild(wb *WireBuild, pkg *types.Package) (*Kessok
 		case *WireFieldsOf:
 			inject.Elements = append(inject.Elements, t.transformFieldsOf(we, pkg))
 		case *WireProviderFunc:
+			// Skip provider if its output type is already bound via wire.Bind
+			if t.isProviderBound(we, boundTypes) {
+				continue
+			}
 			inject.Elements = append(inject.Elements, t.transformProviderFunc(we))
 		case *WireSetRef:
 			inject.Elements = append(inject.Elements, t.transformSetRef(we))
