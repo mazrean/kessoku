@@ -8,6 +8,10 @@ import (
 	"unicode"
 )
 
+// maxInjectorReturns is the maximum number of return values for an injector function.
+// An injector can return at most 2 values: the injected type and optionally an error.
+const maxInjectorReturns = 2
+
 // Transformer converts wire patterns to kessoku patterns.
 type Transformer struct{}
 
@@ -130,18 +134,18 @@ func (t *Transformer) transformBuild(wb *WireBuild, pkg *types.Package) (*Kessok
 			Message: fmt.Sprintf("injector function %q must have at least one return value", wb.FuncName),
 		}
 	}
-	if numReturns > 2 {
+	if numReturns > maxInjectorReturns {
 		return nil, &ParseError{
 			Kind:    ParseErrorMissingConstructor,
 			File:    wb.File,
 			Pos:     wb.Pos,
-			Message: fmt.Sprintf("injector function %q has %d return values, expected 1 or 2", wb.FuncName, numReturns),
+			Message: fmt.Sprintf("injector function %q has %d return values, expected 1 or %d", wb.FuncName, numReturns, maxInjectorReturns),
 		}
 	}
 
 	// For 2-return functions, the second must be error
 	hasError := false
-	if numReturns == 2 {
+	if numReturns == maxInjectorReturns {
 		if !isErrorType(wb.ReturnTypes[1]) {
 			return nil, &ParseError{
 				Kind:    ParseErrorMissingConstructor,

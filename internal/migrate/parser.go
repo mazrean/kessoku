@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+// Constants for wire pattern argument counts.
+const (
+	// wireBindArgCount is the expected number of arguments for wire.Bind.
+	wireBindArgCount = 2
+
+	// wireInterfaceValueArgCount is the expected number of arguments for wire.InterfaceValue.
+	wireInterfaceValueArgCount = 2
+
+	// wireFieldsOfMinArgs is the minimum number of arguments for wire.FieldsOf.
+	wireFieldsOfMinArgs = 2
+)
+
 // Parser extracts wire patterns from Go source files.
 type Parser struct{}
 
@@ -236,7 +248,7 @@ func (p *Parser) parseSetElement(expr ast.Expr, info *types.Info, wireAlias stri
 
 // parseBind parses wire.Bind(new(Interface), new(Impl)) pattern.
 func (p *Parser) parseBind(call *ast.CallExpr, info *types.Info, filePath string) *WireBind {
-	if len(call.Args) != 2 {
+	if len(call.Args) != wireBindArgCount {
 		return nil
 	}
 
@@ -280,7 +292,7 @@ func (p *Parser) parseValue(call *ast.CallExpr, info *types.Info, filePath strin
 
 // parseInterfaceValue parses wire.InterfaceValue(new(Interface), expr) pattern.
 func (p *Parser) parseInterfaceValue(call *ast.CallExpr, info *types.Info, filePath string) *WireInterfaceValue {
-	if len(call.Args) != 2 {
+	if len(call.Args) != wireInterfaceValueArgCount {
 		return nil
 	}
 
@@ -340,7 +352,7 @@ func (p *Parser) parseStruct(call *ast.CallExpr, info *types.Info, filePath stri
 
 // parseFieldsOf parses wire.FieldsOf(new(Type), fields...) pattern.
 func (p *Parser) parseFieldsOf(call *ast.CallExpr, info *types.Info, filePath string) *WireFieldsOf {
-	if len(call.Args) < 2 {
+	if len(call.Args) < wireFieldsOfMinArgs {
 		return nil
 	}
 

@@ -5,8 +5,31 @@ import (
 	"go/ast"
 	"go/format"
 	"go/token"
+	"io/fs"
 	"os"
 	"sort"
+)
+
+// Constants for file generation and formatting.
+const (
+	// filePermissions is the permission mode for generated files.
+	filePermissions fs.FileMode = 0644
+
+	// lineOffsetBytes is the byte offset between lines in the synthetic FileSet.
+	// This ensures each line has a distinct position for proper formatting.
+	lineOffsetBytes = 100
+
+	// maxLines is the maximum number of lines supported in the synthetic FileSet.
+	maxLines = 1000
+
+	// maxFileSize is the maximum size of the synthetic file for position mapping.
+	maxFileSize = 100000
+
+	// firstArgLine is the line number for the first argument in Inject calls.
+	firstArgLine = 2
+
+	// providerStartLine is the starting line number for provider arguments.
+	providerStartLine = 3
 )
 
 // Writer generates kessoku output files.
@@ -26,11 +49,11 @@ func (w *Writer) Write(output *MergedOutput, path string) error {
 	// Create a FileSet with proper line information for formatting
 	fset := token.NewFileSet()
 	// Add a file with enough lines for our positions
-	f := fset.AddFile("output.go", 1, 100000)
-	// Set line offsets: each line is 100 bytes apart to ensure clear line boundaries
-	lines := make([]int, 1000)
+	f := fset.AddFile("output.go", 1, maxFileSize)
+	// Set line offsets: each line is lineOffsetBytes bytes apart to ensure clear line boundaries
+	lines := make([]int, maxLines)
 	for i := range lines {
-		lines[i] = i * 100
+		lines[i] = i * lineOffsetBytes
 	}
 	f.SetLines(lines)
 
@@ -38,7 +61,7 @@ func (w *Writer) Write(output *MergedOutput, path string) error {
 		return err
 	}
 
-	return os.WriteFile(path, buf.Bytes(), 0644)
+	return os.WriteFile(path, buf.Bytes(), filePermissions)
 }
 
 // buildFile builds an AST file from the merged output.
@@ -193,25 +216,22 @@ func (w *Writer) valueToExpr(kv *KessokuValue) ast.Expr {
 // kessoku.Inject is used as: var _ = kessoku.Inject[T]("FuncName", providers...)
 func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 	// Build arguments with positions on different lines for proper formatting
-	// FileSet has lines at offsets 0, 100, 200, 300, etc.
-	// So positions 100, 200, 300 map to lines 1, 2, 3, etc.
-	const lineOffset = 100
-
+	// FileSet has lines at offsets 0, lineOffsetBytes, 2*lineOffsetBytes, etc.
 	args := []ast.Expr{
 		&ast.BasicLit{
-			ValuePos: token.Pos(2 * lineOffset), // line 2
+			ValuePos: token.Pos(firstArgLine * lineOffsetBytes),
 			Kind:     token.STRING,
 			Value:    `"` + ki.FuncName + `"`,
 		},
 	}
 
 	for i, elem := range ki.Elements {
-		pos := token.Pos((3 + i) * lineOffset) // lines 3, 4, 5, ...
+		pos := token.Pos((providerStartLine + i) * lineOffsetBytes)
 		expr := w.patternToExprWithPos(elem, pos)
 		args = append(args, expr)
 	}
 
-	lastLine := 3 + len(ki.Elements) - 1
+	lastLine := providerStartLine + len(ki.Elements) - 1
 
 	// Build type parameter for Inject[T]
 	typeExpr := typeToExpr(ki.ReturnType)
@@ -224,9 +244,9 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 			},
 			Index: typeExpr,
 		},
-		Lparen: token.Pos(1 * lineOffset), // line 1
+		Lparen: token.Pos(lineOffsetBytes), // line 1
 		Args:   args,
-		Rparen: token.Pos((lastLine + 1) * lineOffset), // closing line
+		Rparen: token.Pos((lastLine + 1) * lineOffsetBytes), // closing line
 	}
 
 	// Build var _ = kessoku.Inject[T]("FuncName", ...)

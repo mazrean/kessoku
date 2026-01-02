@@ -58,11 +58,12 @@ func (m *Migrator) MigrateFiles(files []string, outputPath string) error {
 
 		for i, file := range pkg.Syntax {
 			var filePath string
-			if i < len(syntaxFiles) {
+			switch {
+			case i < len(syntaxFiles):
 				filePath = syntaxFiles[i]
-			} else if file.Name != nil {
+			case file.Name != nil:
 				filePath = file.Name.Name + ".go"
-			} else {
+			default:
 				filePath = "unknown.go"
 			}
 			slog.Debug("Processing file", "file", filePath)
