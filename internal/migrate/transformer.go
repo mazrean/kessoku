@@ -523,6 +523,9 @@ func toLowerCamel(s string) string {
 }
 
 func typeToExpr(t types.Type) ast.Expr {
+	if t == nil {
+		return nil
+	}
 	switch typ := t.(type) {
 	case *types.Named:
 		obj := typ.Obj()
@@ -555,6 +558,22 @@ func typeToExpr(t types.Type) ast.Expr {
 		// Named interfaces (io.Reader, etc.) are handled by *types.Named.
 		// For anonymous non-empty interfaces, use any as a fallback.
 		return ast.NewIdent("any")
+	case *types.Array:
+		return &ast.ArrayType{
+			Len: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", typ.Len())},
+			Elt: typeToExpr(typ.Elem()),
+		}
+	case *types.Chan:
+		dir := ast.SEND | ast.RECV
+		switch typ.Dir() {
+		case types.SendRecv:
+			dir = ast.SEND | ast.RECV
+		case types.SendOnly:
+			dir = ast.SEND
+		case types.RecvOnly:
+			dir = ast.RECV
+		}
+		return &ast.ChanType{Dir: dir, Value: typeToExpr(typ.Elem())}
 	default:
 		return ast.NewIdent(t.String())
 	}
