@@ -120,7 +120,7 @@ func (g *WireCodeGenerator) generateRandomFuncType(depth int) string {
 	// Generate params (0-3)
 	numParams := g.rand.Intn(4)
 	params := make([]string, 0, numParams)
-	for i := 0; i < numParams; i++ {
+	for range numParams {
 		if depth < 2 && g.rand.Float32() < 0.3 {
 			params = append(params, g.generateRandomType(depth+1))
 		} else {
@@ -131,7 +131,7 @@ func (g *WireCodeGenerator) generateRandomFuncType(depth int) string {
 	// Generate returns (0-2)
 	numReturns := g.rand.Intn(3)
 	returns := make([]string, 0, numReturns)
-	for i := 0; i < numReturns; i++ {
+	for range numReturns {
 		returns = append(returns, basicTypes[g.rand.Intn(len(basicTypes))])
 	}
 
@@ -162,19 +162,19 @@ func (g *WireCodeGenerator) Generate() string {
 	sb.WriteString("\n")
 	sb.WriteString("\t\"github.com/google/wire\"\n")
 	sb.WriteString(")\n\n")
-	
+
 	// Blank identifier to avoid unused import error
 	sb.WriteString("var _ = context.Background\n\n")
 
 	// Generate types
 	numTypes := g.rand.Intn(5) + 1
-	for i := 0; i < numTypes; i++ {
+	for i := range numTypes {
 		g.generateType(&sb, i)
 	}
 
 	// Generate interfaces
 	numInterfaces := g.rand.Intn(3)
-	for i := 0; i < numInterfaces; i++ {
+	for i := range numInterfaces {
 		g.generateInterface(&sb, i)
 	}
 
@@ -196,7 +196,7 @@ func (g *WireCodeGenerator) generateType(sb *strings.Builder, idx int) {
 	fields := make([]fuzzFieldInfo, 0, numFields)
 	fmt.Fprintf(sb, "type %s struct {\n", name)
 
-	for i := 0; i < numFields; i++ {
+	for i := range numFields {
 		fieldName := fmt.Sprintf("Field%d", i)
 		fieldType := g.generateRandomType(0) // depth 0 for top-level
 		fields = append(fields, fuzzFieldInfo{name: fieldName, typeName: fieldType})
@@ -214,7 +214,7 @@ func (g *WireCodeGenerator) generateInterface(sb *strings.Builder, idx int) {
 	methods := make([]string, 0, numMethods)
 	sb.WriteString(fmt.Sprintf("type %s interface {\n", name))
 
-	for i := 0; i < numMethods; i++ {
+	for i := range numMethods {
 		methodName := fmt.Sprintf("Method%d", i)
 		methods = append(methods, methodName)
 		sb.WriteString(fmt.Sprintf("\t%s() string\n", methodName))
@@ -251,7 +251,7 @@ func (g *WireCodeGenerator) generateProvider(sb *strings.Builder, t fuzzTypeInfo
 
 	// Randomly decide provider complexity
 	providerStyle := g.rand.Intn(5) // 0-4 different styles
-	
+
 	var params []fuzzParamInfo
 	var hasError, hasCleanup bool
 
@@ -321,7 +321,7 @@ func (g *WireCodeGenerator) generateProvider(sb *strings.Builder, t fuzzTypeInfo
 	}
 
 	fmt.Fprintf(sb, "func %s(%s) %s {\n", providerName, strings.Join(paramStrs, ", "), returnType)
-	
+
 	// Build return statement
 	var returnValues []string
 	returnValues = append(returnValues, fmt.Sprintf("&%s{}", t.name))
@@ -807,7 +807,7 @@ func (g *WireCodeGenerator) GenerateWithMalformedPatterns() string {
 	numPatterns := g.rand.Intn(len(malformedPatterns)) + 1
 	usedIndices := make(map[int]bool)
 
-	for i := 0; i < numPatterns; i++ {
+	for range numPatterns {
 		idx := g.rand.Intn(len(malformedPatterns))
 		if !usedIndices[idx] {
 			malformedPatterns[idx](&sb)
