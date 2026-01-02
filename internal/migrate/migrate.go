@@ -208,19 +208,12 @@ func (m *Migrator) mergeResults(results []MigrationResult) (*MergedOutput, error
 		m.writer.SetTypeConverter(typeConverter)
 	}
 
-	// Merge all source imports from all files
-	mergedSourceImports := make(map[string]string)
-	for _, r := range results {
-		for name, path := range r.SourceImports {
-			mergedSourceImports[name] = path
-		}
-	}
-
 	// Collect imports from expressions in patterns (provider functions, values, etc.)
+	// Use each file's own source imports to correctly resolve same-named packages from different files
 	if typeConverter != nil {
 		for _, r := range results {
 			for _, p := range r.Patterns {
-				typeConverter.CollectPatternImports(p, mergedSourceImports)
+				typeConverter.CollectPatternImports(p, r.SourceImports)
 			}
 		}
 	}

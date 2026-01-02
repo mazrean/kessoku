@@ -226,6 +226,61 @@ func TestUnwrapPointer(t *testing.T) {
 	}
 }
 
+func TestTypeConverterAddImportCollision(t *testing.T) {
+	tc := NewTypeConverter(nil)
+
+	// First import: v1 -> path1
+	name1 := tc.AddImport("example.com/api1", "v1")
+	if name1 != "v1" {
+		t.Errorf("AddImport() first call = %q, want %q", name1, "v1")
+	}
+
+	// Same path again should return the same name
+	name1Again := tc.AddImport("example.com/api1", "v1")
+	if name1Again != "v1" {
+		t.Errorf("AddImport() same path = %q, want %q", name1Again, "v1")
+	}
+
+	// Different path with same name should get renamed
+	name2 := tc.AddImport("example.com/api2", "v1")
+	if name2 != "v1_1" {
+		t.Errorf("AddImport() collision = %q, want %q", name2, "v1_1")
+	}
+
+	// Third collision should get v1_2
+	name3 := tc.AddImport("example.com/api3", "v1")
+	if name3 != "v1_2" {
+		t.Errorf("AddImport() second collision = %q, want %q", name3, "v1_2")
+	}
+
+	// Verify imports are correct
+	imports := tc.Imports()
+	if len(imports) != 3 {
+		t.Errorf("Imports() count = %d, want 3", len(imports))
+	}
+
+	importMap := make(map[string]string)
+	for _, imp := range imports {
+		name := imp.Name
+		if name == "" {
+			name = lastPathElement(imp.Path)
+		}
+		importMap[imp.Path] = name
+	}
+
+	expectedImports := map[string]string{
+		"example.com/api1": "v1",
+		"example.com/api2": "v1_1",
+		"example.com/api3": "v1_2",
+	}
+
+	for path, wantName := range expectedImports {
+		if gotName := importMap[path]; gotName != wantName {
+			t.Errorf("import %q has name %q, want %q", path, gotName, wantName)
+		}
+	}
+}
+
 func TestTypeConverterCollectExprImports(t *testing.T) {
 	tests := []struct {
 		name          string

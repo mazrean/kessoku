@@ -15,15 +15,19 @@ const maxInjectorReturns = 2
 // TypeConverter handles conversion of types.Type to ast.Expr with proper package qualifiers.
 // It tracks which imports are needed for external types.
 type TypeConverter struct {
-	currentPkg *types.Package
-	imports    map[string]string // package path -> local name
+	currentPkg   *types.Package
+	imports      map[string]string // package path -> local name
+	usedNames    map[string]string // local name -> package path (for collision detection)
+	nameCounters map[string]int    // base name -> counter for generating unique names
 }
 
 // NewTypeConverter creates a new TypeConverter for the given package.
 func NewTypeConverter(currentPkg *types.Package) *TypeConverter {
 	return &TypeConverter{
-		currentPkg: currentPkg,
-		imports:    make(map[string]string),
+		currentPkg:   currentPkg,
+		imports:      make(map[string]string),
+		usedNames:    make(map[string]string),
+		nameCounters: make(map[string]int),
 	}
 }
 
@@ -42,13 +46,40 @@ func (tc *TypeConverter) Imports() []ImportSpec {
 	return specs
 }
 
-// AddImport adds an import to the collected imports.
-func (tc *TypeConverter) AddImport(path, name string) {
-	tc.imports[path] = name
+// AddImport adds an import to the collected imports, handling name collisions.
+// Returns the actual name to use for this import path.
+func (tc *TypeConverter) AddImport(path, desiredName string) string {
+	// If already imported, return the existing name
+	if existingName, exists := tc.imports[path]; exists {
+		return existingName
+	}
+
+	// Check if the desired name is already used by a different path
+	if existingPath, exists := tc.usedNames[desiredName]; exists && existingPath != path {
+		// Name collision - generate a unique name
+		baseName := desiredName
+		counter := tc.nameCounters[baseName]
+		for {
+			counter++
+			newName := fmt.Sprintf("%s_%d", baseName, counter)
+			if _, used := tc.usedNames[newName]; !used {
+				tc.nameCounters[baseName] = counter
+				tc.imports[path] = newName
+				tc.usedNames[newName] = path
+				return newName
+			}
+		}
+	}
+
+	// No collision - use desired name
+	tc.imports[path] = desiredName
+	tc.usedNames[desiredName] = path
+	return desiredName
 }
 
 // CollectExprImports walks an AST expression and collects package references.
 // It uses sourceImports to map package names to import paths.
+// It also renames package references in the expression if there are name collisions.
 func (tc *TypeConverter) CollectExprImports(expr ast.Expr, sourceImports map[string]string) {
 	if expr == nil {
 		return
@@ -66,7 +97,12 @@ func (tc *TypeConverter) CollectExprImports(expr ast.Expr, sourceImports map[str
 		// Look up the package name in source imports
 		pkgName := ident.Name
 		if importPath, exists := sourceImports[pkgName]; exists {
-			tc.imports[importPath] = pkgName
+			// Add import and get the actual name (may be renamed due to collision)
+			actualName := tc.AddImport(importPath, pkgName)
+			// Update the identifier if it was renamed
+			if actualName != pkgName {
+				ident.Name = actualName
+			}
 		}
 		return true
 	})
