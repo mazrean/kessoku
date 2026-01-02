@@ -137,6 +137,109 @@ type Foo struct{}
 	}
 }
 
+func TestExtractImports(t *testing.T) {
+	p := NewParser()
+
+	tests := []struct {
+		name string
+		src  string
+		want map[string]string
+	}{
+		{
+			name: "no imports",
+			src:  `package test`,
+			want: map[string]string{},
+		},
+		{
+			name: "single import",
+			src: `package test
+import "fmt"
+`,
+			want: map[string]string{"fmt": "fmt"},
+		},
+		{
+			name: "multiple imports",
+			src: `package test
+import (
+	"fmt"
+	"github.com/google/wire"
+	"os"
+)
+`,
+			want: map[string]string{
+				"fmt":  "fmt",
+				"wire": "github.com/google/wire",
+				"os":   "os",
+			},
+		},
+		{
+			name: "aliased import",
+			src: `package test
+import w "github.com/google/wire"
+`,
+			want: map[string]string{"w": "github.com/google/wire"},
+		},
+		{
+			name: "mixed aliased and non-aliased",
+			src: `package test
+import (
+	"fmt"
+	w "github.com/google/wire"
+	k "github.com/mazrean/kessoku"
+)
+`,
+			want: map[string]string{
+				"fmt": "fmt",
+				"w":   "github.com/google/wire",
+				"k":   "github.com/mazrean/kessoku",
+			},
+		},
+		{
+			name: "dot import is skipped",
+			src: `package test
+import . "fmt"
+`,
+			want: map[string]string{},
+		},
+		{
+			name: "blank import is skipped",
+			src: `package test
+import _ "embed"
+`,
+			want: map[string]string{},
+		},
+		{
+			name: "nested package path",
+			src: `package test
+import "github.com/traPtitech/traQ/repository/gorm2/v1"
+`,
+			want: map[string]string{"v1": "github.com/traPtitech/traQ/repository/gorm2/v1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "test.go", tt.src, parser.ImportsOnly)
+			if err != nil {
+				t.Fatalf("failed to parse: %v", err)
+			}
+
+			got := p.ExtractImports(file)
+			if len(got) != len(tt.want) {
+				t.Errorf("ExtractImports() got %d imports, want %d", len(got), len(tt.want))
+			}
+			for name, path := range tt.want {
+				if gotPath, exists := got[name]; !exists {
+					t.Errorf("ExtractImports() missing import %q", name)
+				} else if gotPath != path {
+					t.Errorf("ExtractImports() got path %q for %q, want %q", gotPath, name, path)
+				}
+			}
+		})
+	}
+}
+
 func TestExtractTypeFromNew(t *testing.T) {
 	p := NewParser()
 

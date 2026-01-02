@@ -42,6 +42,26 @@ func (p *Parser) FindWireImport(file *ast.File) string {
 	return ""
 }
 
+// ExtractImports extracts all imports from a file as a map from package name/alias to import path.
+func (p *Parser) ExtractImports(file *ast.File) map[string]string {
+	imports := make(map[string]string)
+	for _, imp := range file.Imports {
+		path := strings.Trim(imp.Path.Value, "\"")
+		var name string
+		if imp.Name != nil {
+			name = imp.Name.Name
+		} else {
+			// Use the last element of the path as the default package name
+			name = lastPathElement(path)
+		}
+		// Skip dot imports and blank imports
+		if name != "." && name != "_" {
+			imports[name] = path
+		}
+	}
+	return imports
+}
+
 // ExtractPatterns extracts wire patterns from the file.
 func (p *Parser) ExtractPatterns(file *ast.File, info *types.Info, wireAlias string, filePath string) ([]WirePattern, []Warning) {
 	var patterns []WirePattern

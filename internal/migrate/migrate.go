@@ -78,6 +78,9 @@ func (m *Migrator) MigrateFiles(files []string, outputPath string) error {
 				continue
 			}
 
+			// Extract source imports for package reference resolution
+			sourceImports := m.parser.ExtractImports(file)
+
 			// Extract patterns
 			patterns, warnings := m.parser.ExtractPatterns(file, pkg.TypesInfo, wireImport, filePath)
 			allWarnings = append(allWarnings, warnings...)
@@ -98,12 +101,13 @@ func (m *Migrator) MigrateFiles(files []string, outputPath string) error {
 			}
 
 			results = append(results, MigrationResult{
-				SourceFile:   filePath,
-				Package:      pkg.Name,
-				TypesPackage: pkg.Types,
-				Imports:      nil, // Imports are computed based on actual usage
-				Patterns:     kessokuPatterns,
-				Warnings:     warnings,
+				SourceFile:    filePath,
+				Package:       pkg.Name,
+				TypesPackage:  pkg.Types,
+				SourceImports: sourceImports,
+				Imports:       nil, // Imports are computed based on actual usage
+				Patterns:      kessokuPatterns,
+				Warnings:      warnings,
 			})
 		}
 	}
@@ -202,6 +206,23 @@ func (m *Migrator) mergeResults(results []MigrationResult) (*MergedOutput, error
 	if results[0].TypesPackage != nil {
 		typeConverter = NewTypeConverter(results[0].TypesPackage)
 		m.writer.SetTypeConverter(typeConverter)
+	}
+
+	// Merge all source imports from all files
+	mergedSourceImports := make(map[string]string)
+	for _, r := range results {
+		for name, path := range r.SourceImports {
+			mergedSourceImports[name] = path
+		}
+	}
+
+	// Collect imports from expressions in patterns (provider functions, values, etc.)
+	if typeConverter != nil {
+		for _, r := range results {
+			for _, p := range r.Patterns {
+				typeConverter.CollectPatternImports(p, mergedSourceImports)
+			}
+		}
 	}
 
 	// Generate declarations

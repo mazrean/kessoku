@@ -42,6 +42,61 @@ func (tc *TypeConverter) Imports() []ImportSpec {
 	return specs
 }
 
+// AddImport adds an import to the collected imports.
+func (tc *TypeConverter) AddImport(path, name string) {
+	tc.imports[path] = name
+}
+
+// CollectExprImports walks an AST expression and collects package references.
+// It uses sourceImports to map package names to import paths.
+func (tc *TypeConverter) CollectExprImports(expr ast.Expr, sourceImports map[string]string) {
+	if expr == nil {
+		return
+	}
+	ast.Inspect(expr, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		// Check if X is an identifier (package reference)
+		ident, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		// Look up the package name in source imports
+		pkgName := ident.Name
+		if importPath, exists := sourceImports[pkgName]; exists {
+			tc.imports[importPath] = pkgName
+		}
+		return true
+	})
+}
+
+// CollectPatternImports collects imports from all expressions in a pattern.
+func (tc *TypeConverter) CollectPatternImports(p KessokuPattern, sourceImports map[string]string) {
+	if p == nil {
+		return
+	}
+	switch kp := p.(type) {
+	case *KessokuSet:
+		for _, elem := range kp.Elements {
+			tc.CollectPatternImports(elem, sourceImports)
+		}
+	case *KessokuProvide:
+		tc.CollectExprImports(kp.FuncExpr, sourceImports)
+	case *KessokuBind:
+		tc.CollectPatternImports(kp.Provider, sourceImports)
+	case *KessokuValue:
+		tc.CollectExprImports(kp.Expr, sourceImports)
+	case *KessokuSetRef:
+		tc.CollectExprImports(kp.Expr, sourceImports)
+	case *KessokuInject:
+		for _, elem := range kp.Elements {
+			tc.CollectPatternImports(elem, sourceImports)
+		}
+	}
+}
+
 // lastPathElement returns the last element of an import path.
 func lastPathElement(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {

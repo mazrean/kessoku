@@ -256,12 +256,13 @@ type ImportSpec struct {
 
 // MigrationResult represents the result of migrating a single file.
 type MigrationResult struct {
-	SourceFile   string
-	Package      string
-	TypesPackage *types.Package
-	Imports      []ImportSpec
-	Patterns     []KessokuPattern
-	Warnings     []Warning
+	SourceFile    string
+	Package       string
+	TypesPackage  *types.Package
+	SourceImports map[string]string // package name (or alias) -> import path
+	Imports       []ImportSpec
+	Patterns      []KessokuPattern
+	Warnings      []Warning
 }
 
 // MergedOutput represents the result of merging multiple file migrations.
