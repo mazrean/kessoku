@@ -24,14 +24,17 @@ func NewMigrator() *Migrator {
 }
 
 // MigrateFiles migrates the specified wire files to kessoku format.
-func (m *Migrator) MigrateFiles(files []string, outputPath string) error {
+// patterns are Go package patterns (e.g., "./", "./pkg/...", "example.com/pkg").
+func (m *Migrator) MigrateFiles(patterns []string, outputPath string) error {
 	// Load packages with type info
+	// Use wireinject build tag to load wire configuration files
 	cfg := &packages.Config{
 		Mode: packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo |
 			packages.NeedName | packages.NeedFiles | packages.NeedImports,
+		BuildFlags: []string{"-tags=wireinject"},
 	}
 
-	pkgs, err := packages.Load(cfg, files...)
+	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
 		return fmt.Errorf("failed to load packages: %w", err)
 	}

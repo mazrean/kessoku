@@ -47,18 +47,18 @@ func (c *GenerateCmd) Run(cli *CLI) error {
 
 // MigrateCmd is the command for migrating wire files to kessoku format.
 type MigrateCmd struct {
-	Output string   `kong:"short='o',default='kessoku.go',help='Output file path'"`
-	Files  []string `kong:"arg,required,help='Wire files to migrate'"`
+	Output   string   `kong:"short='o',default='kessoku.go',help='Output file path'"`
+	Patterns []string `kong:"arg,optional,help='Go package patterns to migrate',default='./'"`
 }
 
 // Run executes the migrate command.
 func (c *MigrateCmd) Run(cli *CLI) error {
 	setupLogger(cli.LogLevel)
 
-	slog.Info("Migrating wire configuration", "files", c.Files)
+	slog.Info("Migrating wire configuration", "patterns", c.Patterns)
 
 	migrator := migrate.NewMigrator()
-	return migrator.MigrateFiles(c.Files, c.Output)
+	return migrator.MigrateFiles(c.Patterns, c.Output)
 }
 
 func Run() error {

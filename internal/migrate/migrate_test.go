@@ -161,6 +161,6 @@ type Foo struct{}
 
 // MigrateCmd is imported from config for testing.
 type MigrateCmd struct {
-	Output string
-	Files  []string
+	Output   string
+	Patterns []string
 }

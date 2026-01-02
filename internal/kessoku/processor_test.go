@@ -437,7 +437,7 @@ var _ = kessoku.Inject[*Database](
 			expectedGeneratedFiles: []string{"test_band.go"},
 			shouldError:            false,
 		},
-	{
+		{
 			name: "struct embedded value type",
 			files: []fileContent{
 				{
