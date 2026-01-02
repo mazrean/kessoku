@@ -1,10 +1,25 @@
 package migrate
 
 import (
+	"bytes"
 	"go/ast"
+	"go/format"
+	"go/token"
 	"go/types"
 	"testing"
 )
+
+// exprToString formats an ast.Expr to its string representation.
+func exprToString(expr ast.Expr) string {
+	if expr == nil {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := format.Node(&buf, token.NewFileSet(), expr); err != nil {
+		return "<format error: " + err.Error() + ">"
+	}
+	return buf.String()
+}
 
 func TestIsErrorType(t *testing.T) {
 	tests := []struct {
@@ -64,70 +79,120 @@ func TestTypeToExpr(t *testing.T) {
 	tests := []struct {
 		typeFunc func() types.Type
 		name     string
-		wantNil  bool
+		wantText string
 	}{
 		{
 			name: "nil type",
 			typeFunc: func() types.Type {
 				return nil
 			},
-			wantNil: true,
+			wantText: "",
 		},
 		{
 			name: "basic int type",
 			typeFunc: func() types.Type {
 				return types.Typ[types.Int]
 			},
-			wantNil: false,
+			wantText: "int",
 		},
 		{
 			name: "basic string type",
 			typeFunc: func() types.Type {
 				return types.Typ[types.String]
 			},
-			wantNil: false,
+			wantText: "string",
 		},
 		{
 			name: "pointer to int",
 			typeFunc: func() types.Type {
 				return types.NewPointer(types.Typ[types.Int])
 			},
-			wantNil: false,
+			wantText: "*int",
 		},
 		{
 			name: "slice of int",
 			typeFunc: func() types.Type {
 				return types.NewSlice(types.Typ[types.Int])
 			},
-			wantNil: false,
+			wantText: "[]int",
 		},
 		{
 			name: "map of string to int",
 			typeFunc: func() types.Type {
 				return types.NewMap(types.Typ[types.String], types.Typ[types.Int])
 			},
-			wantNil: false,
+			wantText: "map[string]int",
 		},
 		{
 			name: "array of 10 int",
 			typeFunc: func() types.Type {
 				return types.NewArray(types.Typ[types.Int], 10)
 			},
-			wantNil: false,
+			wantText: "[10]int",
 		},
 		{
 			name: "channel of int",
 			typeFunc: func() types.Type {
 				return types.NewChan(types.SendRecv, types.Typ[types.Int])
 			},
-			wantNil: false,
+			wantText: "chan int",
 		},
 		{
-			name: "empty interface (any)",
+			name: "empty interface",
 			typeFunc: func() types.Type {
 				return types.NewInterfaceType(nil, nil)
 			},
-			wantNil: false,
+			wantText: "interface {\n}",
+		},
+		{
+			name: "channel SendOnly",
+			typeFunc: func() types.Type {
+				return types.NewChan(types.SendOnly, types.Typ[types.Int])
+			},
+			wantText: "chan<- int",
+		},
+		{
+			name: "channel RecvOnly",
+			typeFunc: func() types.Type {
+				return types.NewChan(types.RecvOnly, types.Typ[types.Int])
+			},
+			wantText: "<-chan int",
+		},
+		{
+			name: "built-in error type",
+			typeFunc: func() types.Type {
+				return types.Universe.Lookup("error").Type()
+			},
+			wantText: "error",
+		},
+		{
+			name: "non-empty interface",
+			typeFunc: func() types.Type {
+				method := types.NewFunc(token.NoPos, nil, "Method", types.NewSignatureType(nil, nil, nil, nil, nil, false))
+				iface := types.NewInterfaceType([]*types.Func{method}, nil)
+				iface.Complete()
+				return iface
+			},
+			wantText: "any",
+		},
+		{
+			name: "tuple type (default case)",
+			typeFunc: func() types.Type {
+				return types.NewTuple(types.NewVar(token.NoPos, nil, "x", types.Typ[types.Int]))
+			},
+			wantText: "(x int)",
+		},
+		{
+			name: "named type with package",
+			typeFunc: func() types.Type {
+				pkg := types.NewPackage("example.com/foo", "foo")
+				return types.NewNamed(
+					types.NewTypeName(token.NoPos, pkg, "MyType", nil),
+					types.Typ[types.Int],
+					nil,
+				)
+			},
+			wantText: "MyType",
 		},
 	}
 
@@ -135,11 +200,9 @@ func TestTypeToExpr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			typ := tt.typeFunc()
 			got := typeToExpr(typ)
-			if tt.wantNil && got != nil {
-				t.Errorf("typeToExpr() = %v, want nil", got)
-			}
-			if !tt.wantNil && got == nil {
-				t.Errorf("typeToExpr() = nil, want non-nil")
+			gotText := exprToString(got)
+			if gotText != tt.wantText {
+				t.Errorf("typeToExpr() = %q, want %q", gotText, tt.wantText)
 			}
 		})
 	}
@@ -448,6 +511,72 @@ func TestTypeConverterCollectPatternImports(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTransformerTypeExpr(t *testing.T) {
+	t.Run("with nil TypeConverter uses standalone typeToExpr", func(t *testing.T) {
+		tr := NewTransformer()
+		// tc is nil by default
+
+		typ := types.Typ[types.Int]
+		got := tr.typeExpr(typ)
+		if got == nil {
+			t.Fatal("typeExpr() returned nil, want non-nil")
+		}
+		ident, ok := got.(*ast.Ident)
+		if !ok {
+			t.Fatalf("typeExpr() returned %T, want *ast.Ident", got)
+		}
+		if ident.Name != "int" {
+			t.Errorf("typeExpr() = %q, want %q", ident.Name, "int")
+		}
+	})
+
+	t.Run("with TypeConverter uses TypeConverter.TypeToExpr", func(t *testing.T) {
+		currentPkg := types.NewPackage("github.com/current/pkg", "current")
+		tc := NewTypeConverter(currentPkg)
+		tr := &Transformer{tc: tc}
+
+		typ := types.Typ[types.String]
+		got := tr.typeExpr(typ)
+		if got == nil {
+			t.Fatal("typeExpr() returned nil, want non-nil")
+		}
+		ident, ok := got.(*ast.Ident)
+		if !ok {
+			t.Fatalf("typeExpr() returned %T, want *ast.Ident", got)
+		}
+		if ident.Name != "string" {
+			t.Errorf("typeExpr() = %q, want %q", ident.Name, "string")
+		}
+	})
+
+	t.Run("with TypeConverter handles external package type", func(t *testing.T) {
+		currentPkg := types.NewPackage("github.com/current/pkg", "current")
+		tc := NewTypeConverter(currentPkg)
+		tr := &Transformer{tc: tc}
+
+		// Create an external package type
+		externalPkg := types.NewPackage("github.com/external/pkg", "extpkg")
+		externalType := types.NewNamed(
+			types.NewTypeName(token.NoPos, externalPkg, "ExternalType", nil),
+			types.Typ[types.Int],
+			nil,
+		)
+
+		got := tr.typeExpr(externalType)
+		if got == nil {
+			t.Fatal("typeExpr() returned nil, want non-nil")
+		}
+		// Should be a SelectorExpr for external package type
+		sel, ok := got.(*ast.SelectorExpr)
+		if !ok {
+			t.Fatalf("typeExpr() returned %T, want *ast.SelectorExpr", got)
+		}
+		if sel.Sel.Name != "ExternalType" {
+			t.Errorf("typeExpr() selector = %q, want %q", sel.Sel.Name, "ExternalType")
+		}
+	})
 }
 
 func TestContains(t *testing.T) {
