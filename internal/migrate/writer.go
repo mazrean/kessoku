@@ -2,7 +2,6 @@ package migrate
 
 import (
 	"bytes"
-	"fmt"
 	"go/ast"
 	"go/format"
 	"go/token"
@@ -23,7 +22,17 @@ func (w *Writer) Write(output *MergedOutput, path string) error {
 	file := w.buildFile(output)
 
 	var buf bytes.Buffer
+
+	// Create a FileSet with proper line information for formatting
 	fset := token.NewFileSet()
+	// Add a file with enough lines for our positions
+	f := fset.AddFile("output.go", 1, 100000)
+	// Set line offsets: each line is 100 bytes apart to ensure clear line boundaries
+	lines := make([]int, 1000)
+	for i := range lines {
+		lines[i] = i * 100
+	}
+	f.SetLines(lines)
 
 	if err := format.Node(&buf, fset, file); err != nil {
 		return err
@@ -180,19 +189,29 @@ func (w *Writer) valueToExpr(kv *KessokuValue) ast.Expr {
 	}
 }
 
-// injectToDecl converts a KessokuInject to a variable declaration.
+// injectToDecl converts a KessokuInject to a variable declaration with proper line breaks.
 // kessoku.Inject is used as: var _ = kessoku.Inject[T]("FuncName", providers...)
 func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
-	// Build arguments: first is the function name as string, then providers
+	// Build arguments with positions on different lines for proper formatting
+	// FileSet has lines at offsets 0, 100, 200, 300, etc.
+	// So positions 100, 200, 300 map to lines 1, 2, 3, etc.
+	const lineOffset = 100
+
 	args := []ast.Expr{
 		&ast.BasicLit{
-			Kind:  token.STRING,
-			Value: fmt.Sprintf("%q", ki.FuncName),
+			ValuePos: token.Pos(2 * lineOffset), // line 2
+			Kind:     token.STRING,
+			Value:    `"` + ki.FuncName + `"`,
 		},
 	}
-	for _, elem := range ki.Elements {
-		args = append(args, w.patternToExpr(elem))
+
+	for i, elem := range ki.Elements {
+		pos := token.Pos((3 + i) * lineOffset) // lines 3, 4, 5, ...
+		expr := w.patternToExprWithPos(elem, pos)
+		args = append(args, expr)
 	}
+
+	lastLine := 3 + len(ki.Elements) - 1
 
 	// Build type parameter for Inject[T]
 	typeExpr := typeToExpr(ki.ReturnType)
@@ -205,7 +224,9 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 			},
 			Index: typeExpr,
 		},
-		Args: args,
+		Lparen: token.Pos(1 * lineOffset), // line 1
+		Args:   args,
+		Rparen: token.Pos((lastLine + 1) * lineOffset), // closing line
 	}
 
 	// Build var _ = kessoku.Inject[T]("FuncName", ...)
@@ -217,5 +238,60 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 				Values: []ast.Expr{injectCall},
 			},
 		},
+	}
+}
+
+// patternToExprWithPos converts a kessoku pattern to an AST expression with position.
+func (w *Writer) patternToExprWithPos(p KessokuPattern, pos token.Pos) ast.Expr {
+	switch kp := p.(type) {
+	case *KessokuProvide:
+		funcExpr := kp.FuncExpr
+		// Set position on the function expression if it's an identifier
+		if ident, ok := funcExpr.(*ast.Ident); ok {
+			funcExpr = &ast.Ident{NamePos: pos, Name: ident.Name}
+		}
+		return &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X: &ast.Ident{
+					NamePos: pos,
+					Name:    "kessoku",
+				},
+				Sel: ast.NewIdent("Provide"),
+			},
+			Lparen: pos,
+			Args:   []ast.Expr{funcExpr},
+		}
+	case *KessokuBind:
+		typeExpr := typeToExpr(kp.Interface)
+		return &ast.CallExpr{
+			Fun: &ast.IndexExpr{
+				X: &ast.SelectorExpr{
+					X: &ast.Ident{
+						NamePos: pos,
+						Name:    "kessoku",
+					},
+					Sel: ast.NewIdent("Bind"),
+				},
+				Index: typeExpr,
+			},
+			Lparen: pos,
+			Args:   []ast.Expr{w.patternToExpr(kp.Provider)},
+		}
+	case *KessokuValue:
+		return &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X: &ast.Ident{
+					NamePos: pos,
+					Name:    "kessoku",
+				},
+				Sel: ast.NewIdent("Value"),
+			},
+			Lparen: pos,
+			Args:   []ast.Expr{kp.Expr},
+		}
+	case *KessokuSetRef:
+		return kp.Expr
+	default:
+		return nil
 	}
 }
