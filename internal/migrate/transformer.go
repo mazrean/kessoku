@@ -133,6 +133,73 @@ func (tc *TypeConverter) CollectPatternImports(p KessokuPattern, sourceImports m
 	}
 }
 
+// TypeToExpr converts a types.Type to an ast.Expr with proper package qualifiers.
+// For types from external packages, it adds the necessary import and generates
+// a SelectorExpr with the package qualifier.
+func (tc *TypeConverter) TypeToExpr(t types.Type) ast.Expr {
+	if t == nil {
+		return nil
+	}
+	switch typ := t.(type) {
+	case *types.Named:
+		obj := typ.Obj()
+		if obj.Pkg() == nil {
+			// Built-in type (e.g., error)
+			return ast.NewIdent(obj.Name())
+		}
+		// Check if this type is from an external package
+		if tc.currentPkg != nil && obj.Pkg() != tc.currentPkg {
+			// External package - add import and generate SelectorExpr
+			pkgPath := obj.Pkg().Path()
+			pkgName := obj.Pkg().Name()
+			actualName := tc.AddImport(pkgPath, pkgName)
+			return &ast.SelectorExpr{
+				X:   ast.NewIdent(actualName),
+				Sel: ast.NewIdent(obj.Name()),
+			}
+		}
+		// Same package - just use the type name
+		return ast.NewIdent(obj.Name())
+	case *types.Pointer:
+		return &ast.StarExpr{X: tc.TypeToExpr(typ.Elem())}
+	case *types.Slice:
+		return &ast.ArrayType{Elt: tc.TypeToExpr(typ.Elem())}
+	case *types.Map:
+		return &ast.MapType{
+			Key:   tc.TypeToExpr(typ.Key()),
+			Value: tc.TypeToExpr(typ.Elem()),
+		}
+	case *types.Basic:
+		return ast.NewIdent(typ.Name())
+	case *types.Interface:
+		if typ.Empty() {
+			return &ast.InterfaceType{Methods: &ast.FieldList{}}
+		}
+		return ast.NewIdent("any")
+	case *types.Array:
+		return &ast.ArrayType{
+			Len: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", typ.Len())},
+			Elt: tc.TypeToExpr(typ.Elem()),
+		}
+	case *types.Chan:
+		dir := ast.SEND | ast.RECV
+		switch typ.Dir() {
+		case types.SendRecv:
+			dir = ast.SEND | ast.RECV
+		case types.SendOnly:
+			dir = ast.SEND
+		case types.RecvOnly:
+			dir = ast.RECV
+		}
+		return &ast.ChanType{
+			Dir:   dir,
+			Value: tc.TypeToExpr(typ.Elem()),
+		}
+	default:
+		return ast.NewIdent(t.String())
+	}
+}
+
 // lastPathElement returns the last element of an import path.
 func lastPathElement(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
@@ -143,87 +210,10 @@ func lastPathElement(path string) string {
 	return path
 }
 
-// TypeToExpr converts a types.Type to an ast.Expr, using package qualifiers for external types.
-func (tc *TypeConverter) TypeToExpr(t types.Type) ast.Expr {
-	if t == nil {
-		return nil
-	}
-	switch typ := t.(type) {
-	case *types.Named:
-		obj := typ.Obj()
-		pkg := obj.Pkg()
-		if pkg == nil {
-			// Built-in type (e.g., error)
-			return ast.NewIdent(obj.Name())
-		}
-		// Check if it's from the current package
-		if tc.currentPkg != nil && pkg.Path() == tc.currentPkg.Path() {
-			return ast.NewIdent(obj.Name())
-		}
-		// External type - use package qualifier
-		pkgName := pkg.Name()
-		tc.imports[pkg.Path()] = pkgName
-		return &ast.SelectorExpr{
-			X:   ast.NewIdent(pkgName),
-			Sel: ast.NewIdent(obj.Name()),
-		}
-	case *types.Pointer:
-		elem := tc.TypeToExpr(typ.Elem())
-		if elem == nil {
-			return nil
-		}
-		return &ast.StarExpr{X: elem}
-	case *types.Slice:
-		elem := tc.TypeToExpr(typ.Elem())
-		if elem == nil {
-			return nil
-		}
-		return &ast.ArrayType{Elt: elem}
-	case *types.Map:
-		key := tc.TypeToExpr(typ.Key())
-		val := tc.TypeToExpr(typ.Elem())
-		if key == nil || val == nil {
-			return nil
-		}
-		return &ast.MapType{Key: key, Value: val}
-	case *types.Basic:
-		return ast.NewIdent(typ.Name())
-	case *types.Interface:
-		if typ.Empty() {
-			return &ast.InterfaceType{Methods: &ast.FieldList{}}
-		}
-		return ast.NewIdent("any")
-	case *types.Array:
-		elem := tc.TypeToExpr(typ.Elem())
-		if elem == nil {
-			return nil
-		}
-		return &ast.ArrayType{
-			Len: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", typ.Len())},
-			Elt: elem,
-		}
-	case *types.Chan:
-		elem := tc.TypeToExpr(typ.Elem())
-		if elem == nil {
-			return nil
-		}
-		dir := ast.SEND | ast.RECV
-		switch typ.Dir() {
-		case types.SendRecv:
-			dir = ast.SEND | ast.RECV
-		case types.SendOnly:
-			dir = ast.SEND
-		case types.RecvOnly:
-			dir = ast.RECV
-		}
-		return &ast.ChanType{Dir: dir, Value: elem}
-	default:
-		return ast.NewIdent(t.String())
-	}
-}
-
 // Transformer converts wire patterns to kessoku patterns.
-type Transformer struct{}
+type Transformer struct {
+	tc *TypeConverter
+}
 
 // NewTransformer creates a new Transformer instance.
 func NewTransformer() *Transformer {
@@ -231,7 +221,9 @@ func NewTransformer() *Transformer {
 }
 
 // Transform transforms a list of wire patterns to kessoku patterns.
-func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package) ([]KessokuPattern, error) {
+// If tc is non-nil, it will be used for proper package-qualified type expressions.
+func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *TypeConverter) ([]KessokuPattern, error) {
+	t.tc = tc
 	var result []KessokuPattern
 
 	for _, p := range patterns {
@@ -270,6 +262,15 @@ func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package) ([]K
 	}
 
 	return result, nil
+}
+
+// typeExpr converts a types.Type to ast.Expr using TypeConverter if available,
+// otherwise falls back to the standalone typeToExpr function.
+func (t *Transformer) typeExpr(typ types.Type) ast.Expr {
+	if t.tc != nil {
+		return t.tc.TypeToExpr(typ)
+	}
+	return typeToExpr(typ)
 }
 
 // transformNewSet transforms wire.NewSet to kessoku.Set.
@@ -566,7 +567,18 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) *Kesso
 
 // transformFieldsOf transforms wire.FieldsOf to kessoku.Provide with accessor function.
 func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *KessokuProvide {
+	// Unwrap pointer(s) to get the struct type
+	// wire.FieldsOf(new(T), ...) -> *T, unwrap once -> T
+	// wire.FieldsOf(new(*T), ...) -> **T, unwrap once -> *T, unwrap again -> T
 	structType := unwrapPointer(wf.StructType)
+	// Keep unwrapping if still a pointer
+	for {
+		if ptr, ok := structType.(*types.Pointer); ok {
+			structType = ptr.Elem()
+		} else {
+			break
+		}
+	}
 	underlying := structType.Underlying()
 	st, ok := underlying.(*types.Struct)
 	if !ok {
@@ -626,7 +638,7 @@ func (t *Transformer) buildStructConstructor(structType types.Type, fields []fie
 		paramNames = append(paramNames, paramName)
 		params = append(params, &ast.Field{
 			Names: []*ast.Ident{ast.NewIdent(paramName)},
-			Type:  typeToExpr(f.typ),
+			Type:  t.typeExpr(f.typ),
 		})
 	}
 
@@ -640,19 +652,19 @@ func (t *Transformer) buildStructConstructor(structType types.Type, fields []fie
 	}
 
 	structLit := &ast.CompositeLit{
-		Type: typeToExpr(structType),
+		Type: t.typeExpr(structType),
 		Elts: elts,
 	}
 
 	returnExpr := ast.Expr(structLit)
-	returnType := typeToExpr(structType)
+	returnType := t.typeExpr(structType)
 
 	if isPointer {
 		returnExpr = &ast.UnaryExpr{
 			Op: token.AND,
 			X:  structLit,
 		}
-		returnType = &ast.StarExpr{X: typeToExpr(structType)}
+		returnType = &ast.StarExpr{X: t.typeExpr(structType)}
 	}
 
 	return &ast.FuncLit{
@@ -678,14 +690,14 @@ func (t *Transformer) buildFieldAccessor(structType types.Type, fields []fieldIn
 	paramName := "s"
 	param := &ast.Field{
 		Names: []*ast.Ident{ast.NewIdent(paramName)},
-		Type:  &ast.StarExpr{X: typeToExpr(structType)},
+		Type:  &ast.StarExpr{X: t.typeExpr(structType)},
 	}
 
 	// Return types
 	var resultTypes []*ast.Field
 	var returnExprs []ast.Expr
 	for _, f := range fields {
-		resultTypes = append(resultTypes, &ast.Field{Type: typeToExpr(f.typ)})
+		resultTypes = append(resultTypes, &ast.Field{Type: t.typeExpr(f.typ)})
 		returnExprs = append(returnExprs, &ast.SelectorExpr{
 			X:   ast.NewIdent(paramName),
 			Sel: ast.NewIdent(f.name),

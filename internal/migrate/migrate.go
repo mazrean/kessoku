@@ -49,6 +49,12 @@ func (m *Migrator) MigrateFiles(files []string, outputPath string) error {
 	var results []MigrationResult
 	var allWarnings []Warning
 
+	// Create a shared TypeConverter for all transforms (using first package's types)
+	var sharedTypeConverter *TypeConverter
+	if len(pkgs) > 0 && pkgs[0].Types != nil {
+		sharedTypeConverter = NewTypeConverter(pkgs[0].Types)
+	}
+
 	for _, pkg := range pkgs {
 		// Build a map from syntax position to file path
 		syntaxFiles := pkg.CompiledGoFiles
@@ -95,7 +101,7 @@ func (m *Migrator) MigrateFiles(files []string, outputPath string) error {
 
 			// Transform patterns
 			var kessokuPatterns []KessokuPattern
-			kessokuPatterns, err = m.transformer.Transform(patterns, pkg.Types)
+			kessokuPatterns, err = m.transformer.Transform(patterns, pkg.Types, sharedTypeConverter)
 			if err != nil {
 				return err
 			}
@@ -124,7 +130,7 @@ func (m *Migrator) MigrateFiles(files []string, outputPath string) error {
 	}
 
 	// Merge results
-	merged, err := m.mergeResults(results)
+	merged, err := m.mergeResults(results, sharedTypeConverter)
 	if err != nil {
 		return err
 	}
@@ -165,7 +171,7 @@ func (m *Migrator) convertPackageError(pkgErr packages.Error) error {
 }
 
 // mergeResults merges multiple migration results into a single output.
-func (m *Migrator) mergeResults(results []MigrationResult) (*MergedOutput, error) {
+func (m *Migrator) mergeResults(results []MigrationResult, typeConverter *TypeConverter) (*MergedOutput, error) {
 	if len(results) == 0 {
 		return nil, fmt.Errorf("no results to merge")
 	}
@@ -201,10 +207,8 @@ func (m *Migrator) mergeResults(results []MigrationResult) (*MergedOutput, error
 		}
 	}
 
-	// Set up the TypeConverter for proper package-qualified type expressions
-	var typeConverter *TypeConverter
-	if results[0].TypesPackage != nil {
-		typeConverter = NewTypeConverter(results[0].TypesPackage)
+	// Set up the writer with the TypeConverter for proper package-qualified type expressions
+	if typeConverter != nil {
 		m.writer.SetTypeConverter(typeConverter)
 	}
 
