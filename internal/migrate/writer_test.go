@@ -9,7 +9,7 @@ import (
 )
 
 func TestPatternToDecl(t *testing.T) {
-	w := NewWriter()
+	w := NewWriter(nil)
 
 	tests := []struct {
 		pattern KessokuPattern
@@ -54,7 +54,7 @@ func TestPatternToDecl(t *testing.T) {
 }
 
 func TestPatternToExpr(t *testing.T) {
-	w := NewWriter()
+	w := NewWriter(nil)
 
 	tests := []struct {
 		pattern KessokuPattern
@@ -113,7 +113,7 @@ func TestPatternToExpr(t *testing.T) {
 }
 
 func TestPatternToExprWithPos(t *testing.T) {
-	w := NewWriter()
+	w := NewWriter(nil)
 
 	tests := []struct {
 		pattern KessokuPattern
@@ -172,7 +172,7 @@ func TestPatternToExprWithPos(t *testing.T) {
 }
 
 func TestBuildImportDecl(t *testing.T) {
-	w := NewWriter()
+	w := NewWriter(nil)
 
 	tests := []struct {
 		name    string
@@ -208,7 +208,7 @@ func TestBuildImportDecl(t *testing.T) {
 }
 
 func TestWriteError(t *testing.T) {
-	w := NewWriter()
+	w := NewWriter(nil)
 
 	// Test writing to an invalid path
 	output := &MergedOutput{
@@ -224,7 +224,7 @@ func TestWriteError(t *testing.T) {
 }
 
 func TestWriteSuccess(t *testing.T) {
-	w := NewWriter()
+	w := NewWriter(nil)
 
 	tmpDir := t.TempDir()
 	outputPath := filepath.Join(tmpDir, "output.go")

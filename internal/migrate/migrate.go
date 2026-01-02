@@ -13,7 +13,6 @@ import (
 type Migrator struct {
 	parser      *Parser
 	transformer *Transformer
-	writer      *Writer
 }
 
 // NewMigrator creates a new Migrator instance.
@@ -21,7 +20,6 @@ func NewMigrator() *Migrator {
 	return &Migrator{
 		parser:      NewParser(),
 		transformer: NewTransformer(),
-		writer:      NewWriter(),
 	}
 }
 
@@ -129,14 +127,14 @@ func (m *Migrator) MigrateFiles(files []string, outputPath string) error {
 		return nil
 	}
 
-	// Merge results
-	merged, err := m.mergeResults(results, sharedTypeConverter)
+	// Merge results and create writer
+	merged, writer, err := m.mergeResults(results, sharedTypeConverter)
 	if err != nil {
 		return err
 	}
 
 	// Write output
-	if err := m.writer.Write(merged, outputPath); err != nil {
+	if err := writer.Write(merged, outputPath); err != nil {
 		return err
 	}
 
@@ -171,16 +169,17 @@ func (m *Migrator) convertPackageError(pkgErr packages.Error) error {
 }
 
 // mergeResults merges multiple migration results into a single output.
-func (m *Migrator) mergeResults(results []MigrationResult, typeConverter *TypeConverter) (*MergedOutput, error) {
+// Returns the merged output and the writer configured for this output.
+func (m *Migrator) mergeResults(results []MigrationResult, typeConverter *TypeConverter) (*MergedOutput, *Writer, error) {
 	if len(results) == 0 {
-		return nil, fmt.Errorf("no results to merge")
+		return nil, nil, fmt.Errorf("no results to merge")
 	}
 
 	// Validate package names
 	pkgName := results[0].Package
 	for _, r := range results[1:] {
 		if r.Package != pkgName {
-			return nil, &MergeError{
+			return nil, nil, &MergeError{
 				Kind:     MergeErrorPackageMismatch,
 				Message:  fmt.Sprintf("package mismatch: %s vs %s", pkgName, r.Package),
 				Files:    []string{results[0].SourceFile, r.SourceFile},
@@ -195,7 +194,7 @@ func (m *Migrator) mergeResults(results []MigrationResult, typeConverter *TypeCo
 		for _, p := range r.Patterns {
 			if set, ok := p.(*KessokuSet); ok {
 				if existingFile, exists := identifiers[set.VarName]; exists {
-					return nil, &MergeError{
+					return nil, nil, &MergeError{
 						Kind:       MergeErrorNameCollision,
 						Message:    fmt.Sprintf("identifier %q defined in multiple files", set.VarName),
 						Files:      []string{existingFile, r.SourceFile},
@@ -205,11 +204,6 @@ func (m *Migrator) mergeResults(results []MigrationResult, typeConverter *TypeCo
 				identifiers[set.VarName] = r.SourceFile
 			}
 		}
-	}
-
-	// Set up the writer with the TypeConverter for proper package-qualified type expressions
-	if typeConverter != nil {
-		m.writer.SetTypeConverter(typeConverter)
 	}
 
 	// Collect imports from expressions in patterns (provider functions, values, etc.)
@@ -222,11 +216,14 @@ func (m *Migrator) mergeResults(results []MigrationResult, typeConverter *TypeCo
 		}
 	}
 
+	// Create writer with the TypeConverter for proper package-qualified type expressions
+	writer := NewWriter(typeConverter)
+
 	// Generate declarations
 	var decls []ast.Decl
 	for _, r := range results {
 		for _, p := range r.Patterns {
-			decl := m.writer.PatternToDecl(p)
+			decl := writer.PatternToDecl(p)
 			if decl != nil {
 				decls = append(decls, decl)
 			}
@@ -244,5 +241,5 @@ func (m *Migrator) mergeResults(results []MigrationResult, typeConverter *TypeCo
 		Package:       pkgName,
 		Imports:       imports,
 		TopLevelDecls: decls,
-	}, nil
+	}, writer, nil
 }

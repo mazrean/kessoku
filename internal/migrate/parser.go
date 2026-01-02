@@ -267,6 +267,18 @@ func (p *Parser) parseSetElement(expr ast.Expr, info *types.Info, wireAlias stri
 }
 
 // parseBind parses wire.Bind(new(Interface), new(Impl)) pattern.
+// extractStringFields extracts string literals from a slice of expressions.
+func extractStringFields(args []ast.Expr) []string {
+	var fields []string
+	for _, arg := range args {
+		if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+			field := strings.Trim(lit.Value, "\"")
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
 func (p *Parser) parseBind(call *ast.CallExpr, info *types.Info, filePath string) *WireBind {
 	if len(call.Args) != wireBindArgCount {
 		return nil
@@ -347,14 +359,7 @@ func (p *Parser) parseStruct(call *ast.CallExpr, info *types.Info, filePath stri
 		isPointer = true
 	}
 
-	var fields []string
-	for _, arg := range call.Args[1:] {
-		if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-			field := strings.Trim(lit.Value, "\"")
-			fields = append(fields, field)
-		}
-	}
-
+	fields := extractStringFields(call.Args[1:])
 	if len(fields) == 0 {
 		fields = []string{"*"}
 	}
@@ -381,13 +386,7 @@ func (p *Parser) parseFieldsOf(call *ast.CallExpr, info *types.Info, filePath st
 		return nil
 	}
 
-	var fields []string
-	for _, arg := range call.Args[1:] {
-		if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-			field := strings.Trim(lit.Value, "\"")
-			fields = append(fields, field)
-		}
-	}
+	fields := extractStringFields(call.Args[1:])
 
 	return &WireFieldsOf{
 		baseWirePattern: baseWirePattern{

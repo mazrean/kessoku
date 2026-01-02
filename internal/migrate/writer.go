@@ -38,14 +38,9 @@ type Writer struct {
 	typeConverter *TypeConverter
 }
 
-// NewWriter creates a new Writer instance.
-func NewWriter() *Writer {
-	return &Writer{}
-}
-
-// SetTypeConverter sets the type converter for proper package qualification.
-func (w *Writer) SetTypeConverter(tc *TypeConverter) {
-	w.typeConverter = tc
+// NewWriter creates a new Writer instance with the given type converter.
+func NewWriter(tc *TypeConverter) *Writer {
+	return &Writer{typeConverter: tc}
 }
 
 // GetCollectedImports returns the imports collected during AST generation.
@@ -90,6 +85,33 @@ func (w *Writer) exprWithPos(expr ast.Expr, pos token.Pos) ast.Expr {
 			Elts:   e.Elts,
 			Rbrace: e.Rbrace,
 		}
+	case *ast.CallExpr:
+		// Apply position to simple args, but not to nested CallExprs
+		// Nested CallExprs (from patternToExpr) should keep their default position
+		// so the formatter puts them on the same line
+		args := make([]ast.Expr, len(e.Args))
+		for i, arg := range e.Args {
+			if _, isCall := arg.(*ast.CallExpr); isCall {
+				// Keep nested CallExpr as-is to preserve formatting
+				args[i] = arg
+			} else {
+				args[i] = w.exprWithPos(arg, pos)
+			}
+		}
+		return &ast.CallExpr{
+			Fun:    w.exprWithPos(e.Fun, pos),
+			Lparen: pos,
+			Args:   args,
+		}
+	case *ast.IndexExpr:
+		return &ast.IndexExpr{
+			X:      w.exprWithPos(e.X, pos),
+			Lbrack: pos,
+			Index:  e.Index, // Keep type parameter as-is
+		}
+	case *ast.FuncLit:
+		// Function literals keep their structure, just update position
+		return e
 	default:
 		return expr
 	}
@@ -197,18 +219,36 @@ func (w *Writer) PatternToDecl(p KessokuPattern) ast.Decl {
 }
 
 // setToDecl converts a KessokuSet to a variable declaration with proper line breaks.
-func (w *Writer) setToDecl(ks *KessokuSet) *ast.GenDecl {
-	// Build arguments with positions on different lines for proper formatting
-	// FileSet has lines at offsets 0, lineOffsetBytes, 2*lineOffsetBytes, etc.
-	var args []ast.Expr
-	for i, elem := range ks.Elements {
-		pos := token.Pos((firstArgLine + i) * lineOffsetBytes)
+// buildElementArgs converts a list of kessoku patterns to positioned AST expressions.
+// startLine is the line number for the first element.
+func (w *Writer) buildElementArgs(elements []KessokuPattern, startLine int) []ast.Expr {
+	args := make([]ast.Expr, 0, len(elements))
+	for i, elem := range elements {
+		pos := token.Pos((startLine + i) * lineOffsetBytes)
 		expr := w.patternToExprWithPos(elem, pos)
 		if expr == nil {
 			expr = &ast.Ident{NamePos: pos, Name: "nil"}
 		}
 		args = append(args, expr)
 	}
+	return args
+}
+
+// wrapInVarDecl wraps an expression in a var declaration.
+func wrapInVarDecl(varName string, value ast.Expr) *ast.GenDecl {
+	return &ast.GenDecl{
+		Tok: token.VAR,
+		Specs: []ast.Spec{
+			&ast.ValueSpec{
+				Names:  []*ast.Ident{ast.NewIdent(varName)},
+				Values: []ast.Expr{value},
+			},
+		},
+	}
+}
+
+func (w *Writer) setToDecl(ks *KessokuSet) *ast.GenDecl {
+	args := w.buildElementArgs(ks.Elements, firstArgLine)
 
 	lastLine := firstArgLine + len(ks.Elements) - 1
 	if len(ks.Elements) == 0 {
@@ -220,20 +260,12 @@ func (w *Writer) setToDecl(ks *KessokuSet) *ast.GenDecl {
 			X:   ast.NewIdent("kessoku"),
 			Sel: ast.NewIdent("Set"),
 		},
-		Lparen: token.Pos(lineOffsetBytes), // line 1
+		Lparen: token.Pos(lineOffsetBytes),
 		Args:   args,
-		Rparen: token.Pos((lastLine + 1) * lineOffsetBytes), // closing line
+		Rparen: token.Pos((lastLine + 1) * lineOffsetBytes),
 	}
 
-	return &ast.GenDecl{
-		Tok: token.VAR,
-		Specs: []ast.Spec{
-			&ast.ValueSpec{
-				Names:  []*ast.Ident{ast.NewIdent(ks.VarName)},
-				Values: []ast.Expr{setCall},
-			},
-		},
-	}
+	return wrapInVarDecl(ks.VarName, setCall)
 }
 
 // patternToExpr converts a kessoku pattern to an AST expression.
@@ -319,8 +351,7 @@ func (w *Writer) valueToExpr(kv *KessokuValue) ast.Expr {
 // injectToDecl converts a KessokuInject to a variable declaration with proper line breaks.
 // kessoku.Inject is used as: var _ = kessoku.Inject[T]("FuncName", providers...)
 func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
-	// Build arguments with positions on different lines for proper formatting
-	// FileSet has lines at offsets 0, lineOffsetBytes, 2*lineOffsetBytes, etc.
+	// First arg is the function name
 	args := []ast.Expr{
 		&ast.BasicLit{
 			ValuePos: token.Pos(firstArgLine * lineOffsetBytes),
@@ -329,14 +360,8 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 		},
 	}
 
-	for i, elem := range ki.Elements {
-		pos := token.Pos((providerStartLine + i) * lineOffsetBytes)
-		expr := w.patternToExprWithPos(elem, pos)
-		if expr == nil {
-			expr = &ast.Ident{NamePos: pos, Name: "nil"}
-		}
-		args = append(args, expr)
-	}
+	// Append provider elements
+	args = append(args, w.buildElementArgs(ki.Elements, providerStartLine)...)
 
 	lastLine := providerStartLine + len(ki.Elements) - 1
 
@@ -354,21 +379,12 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 			},
 			Index: typeExpr,
 		},
-		Lparen: token.Pos(lineOffsetBytes), // line 1
+		Lparen: token.Pos(lineOffsetBytes),
 		Args:   args,
-		Rparen: token.Pos((lastLine + 1) * lineOffsetBytes), // closing line
+		Rparen: token.Pos((lastLine + 1) * lineOffsetBytes),
 	}
 
-	// Build var _ = kessoku.Inject[T]("FuncName", ...)
-	return &ast.GenDecl{
-		Tok: token.VAR,
-		Specs: []ast.Spec{
-			&ast.ValueSpec{
-				Names:  []*ast.Ident{ast.NewIdent("_")},
-				Values: []ast.Expr{injectCall},
-			},
-		},
-	}
+	return wrapInVarDecl("_", injectCall)
 }
 
 // patternToExprWithPos converts a kessoku pattern to an AST expression with position.
@@ -376,68 +392,9 @@ func (w *Writer) patternToExprWithPos(p KessokuPattern, pos token.Pos) ast.Expr 
 	if p == nil {
 		return nil
 	}
-	switch kp := p.(type) {
-	case *KessokuProvide:
-		funcExpr := w.exprWithPos(kp.FuncExpr, pos)
-		if funcExpr == nil {
-			funcExpr = &ast.Ident{NamePos: pos, Name: "nil"}
-		}
-		return &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X: &ast.Ident{
-					NamePos: pos,
-					Name:    "kessoku",
-				},
-				Sel: ast.NewIdent("Provide"),
-			},
-			Lparen: pos,
-			Args:   []ast.Expr{funcExpr},
-		}
-	case *KessokuBind:
-		typeExpr := w.typeToExpr(kp.Interface)
-		if typeExpr == nil {
-			typeExpr = ast.NewIdent("any")
-		}
-		providerExpr := w.patternToExpr(kp.Provider)
-		if providerExpr == nil {
-			providerExpr = ast.NewIdent("nil")
-		}
-		return &ast.CallExpr{
-			Fun: &ast.IndexExpr{
-				X: &ast.SelectorExpr{
-					X: &ast.Ident{
-						NamePos: pos,
-						Name:    "kessoku",
-					},
-					Sel: ast.NewIdent("Bind"),
-				},
-				Index: typeExpr,
-			},
-			Lparen: pos,
-			Args:   []ast.Expr{providerExpr},
-		}
-	case *KessokuValue:
-		expr := w.exprWithPos(kp.Expr, pos)
-		if expr == nil {
-			expr = &ast.Ident{NamePos: pos, Name: "nil"}
-		}
-		return &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X: &ast.Ident{
-					NamePos: pos,
-					Name:    "kessoku",
-				},
-				Sel: ast.NewIdent("Value"),
-			},
-			Lparen: pos,
-			Args:   []ast.Expr{expr},
-		}
-	case *KessokuSetRef:
-		if kp.Expr == nil {
-			return &ast.Ident{NamePos: pos, Name: "nil"}
-		}
-		return w.exprWithPos(kp.Expr, pos)
-	default:
+	expr := w.patternToExpr(p)
+	if expr == nil {
 		return &ast.Ident{NamePos: pos, Name: "nil"}
 	}
+	return w.exprWithPos(expr, pos)
 }
