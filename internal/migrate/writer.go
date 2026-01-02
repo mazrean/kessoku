@@ -131,7 +131,11 @@ func (w *Writer) setToDecl(ks *KessokuSet) *ast.GenDecl {
 	// Build kessoku.Set call
 	var args []ast.Expr
 	for _, elem := range ks.Elements {
-		args = append(args, w.patternToExpr(elem))
+		expr := w.patternToExpr(elem)
+		if expr == nil {
+			expr = ast.NewIdent("nil")
+		}
+		args = append(args, expr)
 	}
 
 	setCall := &ast.CallExpr{
@@ -155,6 +159,9 @@ func (w *Writer) setToDecl(ks *KessokuSet) *ast.GenDecl {
 
 // patternToExpr converts a kessoku pattern to an AST expression.
 func (w *Writer) patternToExpr(p KessokuPattern) ast.Expr {
+	if p == nil {
+		return nil
+	}
 	switch kp := p.(type) {
 	case *KessokuProvide:
 		return w.provideToExpr(kp)
@@ -163,20 +170,27 @@ func (w *Writer) patternToExpr(p KessokuPattern) ast.Expr {
 	case *KessokuValue:
 		return w.valueToExpr(kp)
 	case *KessokuSetRef:
+		if kp.Expr == nil {
+			return ast.NewIdent("nil")
+		}
 		return kp.Expr
 	default:
-		return nil
+		return ast.NewIdent("nil")
 	}
 }
 
 // provideToExpr converts a KessokuProvide to kessoku.Provide(...) expression.
 func (w *Writer) provideToExpr(kp *KessokuProvide) ast.Expr {
+	funcExpr := kp.FuncExpr
+	if funcExpr == nil {
+		funcExpr = ast.NewIdent("nil")
+	}
 	return &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
 			X:   ast.NewIdent("kessoku"),
 			Sel: ast.NewIdent("Provide"),
 		},
-		Args: []ast.Expr{kp.FuncExpr},
+		Args: []ast.Expr{funcExpr},
 	}
 }
 
@@ -184,6 +198,9 @@ func (w *Writer) provideToExpr(kp *KessokuProvide) ast.Expr {
 func (w *Writer) bindToExpr(kb *KessokuBind) ast.Expr {
 	// Build type parameter
 	typeExpr := typeToExpr(kb.Interface)
+	if typeExpr == nil {
+		typeExpr = ast.NewIdent("any")
+	}
 
 	// Build the index expression for type parameter
 	indexExpr := &ast.IndexExpr{
@@ -195,20 +212,28 @@ func (w *Writer) bindToExpr(kb *KessokuBind) ast.Expr {
 	}
 
 	// Build the call with the provider
+	providerExpr := w.patternToExpr(kb.Provider)
+	if providerExpr == nil {
+		providerExpr = ast.NewIdent("nil")
+	}
 	return &ast.CallExpr{
 		Fun:  indexExpr,
-		Args: []ast.Expr{w.patternToExpr(kb.Provider)},
+		Args: []ast.Expr{providerExpr},
 	}
 }
 
 // valueToExpr converts a KessokuValue to kessoku.Value(...) expression.
 func (w *Writer) valueToExpr(kv *KessokuValue) ast.Expr {
+	expr := kv.Expr
+	if expr == nil {
+		expr = ast.NewIdent("nil")
+	}
 	return &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
 			X:   ast.NewIdent("kessoku"),
 			Sel: ast.NewIdent("Value"),
 		},
-		Args: []ast.Expr{kv.Expr},
+		Args: []ast.Expr{expr},
 	}
 }
 
@@ -228,6 +253,9 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 	for i, elem := range ki.Elements {
 		pos := token.Pos((providerStartLine + i) * lineOffsetBytes)
 		expr := w.patternToExprWithPos(elem, pos)
+		if expr == nil {
+			expr = &ast.Ident{NamePos: pos, Name: "nil"}
+		}
 		args = append(args, expr)
 	}
 
@@ -235,6 +263,9 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 
 	// Build type parameter for Inject[T]
 	typeExpr := typeToExpr(ki.ReturnType)
+	if typeExpr == nil {
+		typeExpr = ast.NewIdent("any")
+	}
 
 	injectCall := &ast.CallExpr{
 		Fun: &ast.IndexExpr{
@@ -263,11 +294,16 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 
 // patternToExprWithPos converts a kessoku pattern to an AST expression with position.
 func (w *Writer) patternToExprWithPos(p KessokuPattern, pos token.Pos) ast.Expr {
+	if p == nil {
+		return nil
+	}
 	switch kp := p.(type) {
 	case *KessokuProvide:
 		funcExpr := kp.FuncExpr
-		// Set position on the function expression if it's an identifier
-		if ident, ok := funcExpr.(*ast.Ident); ok {
+		if funcExpr == nil {
+			funcExpr = &ast.Ident{NamePos: pos, Name: "nil"}
+		} else if ident, ok := funcExpr.(*ast.Ident); ok {
+			// Set position on the function expression if it's an identifier
 			funcExpr = &ast.Ident{NamePos: pos, Name: ident.Name}
 		}
 		return &ast.CallExpr{
@@ -283,6 +319,13 @@ func (w *Writer) patternToExprWithPos(p KessokuPattern, pos token.Pos) ast.Expr 
 		}
 	case *KessokuBind:
 		typeExpr := typeToExpr(kp.Interface)
+		if typeExpr == nil {
+			typeExpr = ast.NewIdent("any")
+		}
+		providerExpr := w.patternToExpr(kp.Provider)
+		if providerExpr == nil {
+			providerExpr = ast.NewIdent("nil")
+		}
 		return &ast.CallExpr{
 			Fun: &ast.IndexExpr{
 				X: &ast.SelectorExpr{
@@ -295,9 +338,13 @@ func (w *Writer) patternToExprWithPos(p KessokuPattern, pos token.Pos) ast.Expr 
 				Index: typeExpr,
 			},
 			Lparen: pos,
-			Args:   []ast.Expr{w.patternToExpr(kp.Provider)},
+			Args:   []ast.Expr{providerExpr},
 		}
 	case *KessokuValue:
+		expr := kp.Expr
+		if expr == nil {
+			expr = ast.NewIdent("nil")
+		}
 		return &ast.CallExpr{
 			Fun: &ast.SelectorExpr{
 				X: &ast.Ident{
@@ -307,11 +354,14 @@ func (w *Writer) patternToExprWithPos(p KessokuPattern, pos token.Pos) ast.Expr 
 				Sel: ast.NewIdent("Value"),
 			},
 			Lparen: pos,
-			Args:   []ast.Expr{kp.Expr},
+			Args:   []ast.Expr{expr},
 		}
 	case *KessokuSetRef:
+		if kp.Expr == nil {
+			return &ast.Ident{NamePos: pos, Name: "nil"}
+		}
 		return kp.Expr
 	default:
-		return nil
+		return &ast.Ident{NamePos: pos, Name: "nil"}
 	}
 }
