@@ -12,6 +12,125 @@ import (
 // An injector can return at most 2 values: the injected type and optionally an error.
 const maxInjectorReturns = 2
 
+// TypeConverter handles conversion of types.Type to ast.Expr with proper package qualifiers.
+// It tracks which imports are needed for external types.
+type TypeConverter struct {
+	currentPkg *types.Package
+	imports    map[string]string // package path -> local name
+}
+
+// NewTypeConverter creates a new TypeConverter for the given package.
+func NewTypeConverter(currentPkg *types.Package) *TypeConverter {
+	return &TypeConverter{
+		currentPkg: currentPkg,
+		imports:    make(map[string]string),
+	}
+}
+
+// Imports returns the collected import specifications needed for the generated code.
+func (tc *TypeConverter) Imports() []ImportSpec {
+	var specs []ImportSpec
+	for path, name := range tc.imports {
+		spec := ImportSpec{Path: path}
+		// Only set name if it differs from the last element of the path
+		pkgName := lastPathElement(path)
+		if name != pkgName {
+			spec.Name = name
+		}
+		specs = append(specs, spec)
+	}
+	return specs
+}
+
+// lastPathElement returns the last element of an import path.
+func lastPathElement(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' {
+			return path[i+1:]
+		}
+	}
+	return path
+}
+
+// TypeToExpr converts a types.Type to an ast.Expr, using package qualifiers for external types.
+func (tc *TypeConverter) TypeToExpr(t types.Type) ast.Expr {
+	if t == nil {
+		return nil
+	}
+	switch typ := t.(type) {
+	case *types.Named:
+		obj := typ.Obj()
+		pkg := obj.Pkg()
+		if pkg == nil {
+			// Built-in type (e.g., error)
+			return ast.NewIdent(obj.Name())
+		}
+		// Check if it's from the current package
+		if tc.currentPkg != nil && pkg.Path() == tc.currentPkg.Path() {
+			return ast.NewIdent(obj.Name())
+		}
+		// External type - use package qualifier
+		pkgName := pkg.Name()
+		tc.imports[pkg.Path()] = pkgName
+		return &ast.SelectorExpr{
+			X:   ast.NewIdent(pkgName),
+			Sel: ast.NewIdent(obj.Name()),
+		}
+	case *types.Pointer:
+		elem := tc.TypeToExpr(typ.Elem())
+		if elem == nil {
+			return nil
+		}
+		return &ast.StarExpr{X: elem}
+	case *types.Slice:
+		elem := tc.TypeToExpr(typ.Elem())
+		if elem == nil {
+			return nil
+		}
+		return &ast.ArrayType{Elt: elem}
+	case *types.Map:
+		key := tc.TypeToExpr(typ.Key())
+		val := tc.TypeToExpr(typ.Elem())
+		if key == nil || val == nil {
+			return nil
+		}
+		return &ast.MapType{Key: key, Value: val}
+	case *types.Basic:
+		return ast.NewIdent(typ.Name())
+	case *types.Interface:
+		if typ.Empty() {
+			return &ast.InterfaceType{Methods: &ast.FieldList{}}
+		}
+		return ast.NewIdent("any")
+	case *types.Array:
+		elem := tc.TypeToExpr(typ.Elem())
+		if elem == nil {
+			return nil
+		}
+		return &ast.ArrayType{
+			Len: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", typ.Len())},
+			Elt: elem,
+		}
+	case *types.Chan:
+		elem := tc.TypeToExpr(typ.Elem())
+		if elem == nil {
+			return nil
+		}
+		dir := ast.SEND | ast.RECV
+		switch typ.Dir() {
+		case types.SendRecv:
+			dir = ast.SEND | ast.RECV
+		case types.SendOnly:
+			dir = ast.SEND
+		case types.RecvOnly:
+			dir = ast.RECV
+		}
+		return &ast.ChanType{Dir: dir, Value: elem}
+	default:
+		return ast.NewIdent(t.String())
+	}
+}
+
 // Transformer converts wire patterns to kessoku patterns.
 type Transformer struct{}
 

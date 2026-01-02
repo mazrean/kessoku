@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/format"
 	"go/token"
+	"go/types"
 	"io/fs"
 	"os"
 	"sort"
@@ -33,11 +34,35 @@ const (
 )
 
 // Writer generates kessoku output files.
-type Writer struct{}
+type Writer struct {
+	typeConverter *TypeConverter
+}
 
 // NewWriter creates a new Writer instance.
 func NewWriter() *Writer {
 	return &Writer{}
+}
+
+// SetTypeConverter sets the type converter for proper package qualification.
+func (w *Writer) SetTypeConverter(tc *TypeConverter) {
+	w.typeConverter = tc
+}
+
+// GetCollectedImports returns the imports collected during AST generation.
+func (w *Writer) GetCollectedImports() []ImportSpec {
+	if w.typeConverter == nil {
+		return nil
+	}
+	return w.typeConverter.Imports()
+}
+
+// typeToExpr converts a types.Type to ast.Expr using the type converter if available.
+func (w *Writer) typeToExpr(t types.Type) ast.Expr {
+	if w.typeConverter != nil {
+		return w.typeConverter.TypeToExpr(t)
+	}
+	// Fallback to simple type expression (for backward compatibility)
+	return typeToExpr(t)
 }
 
 // Write writes the merged output to the specified file.
@@ -197,7 +222,7 @@ func (w *Writer) provideToExpr(kp *KessokuProvide) ast.Expr {
 // bindToExpr converts a KessokuBind to kessoku.Bind[I](...) expression.
 func (w *Writer) bindToExpr(kb *KessokuBind) ast.Expr {
 	// Build type parameter
-	typeExpr := typeToExpr(kb.Interface)
+	typeExpr := w.typeToExpr(kb.Interface)
 	if typeExpr == nil {
 		typeExpr = ast.NewIdent("any")
 	}
@@ -262,7 +287,7 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 	lastLine := providerStartLine + len(ki.Elements) - 1
 
 	// Build type parameter for Inject[T]
-	typeExpr := typeToExpr(ki.ReturnType)
+	typeExpr := w.typeToExpr(ki.ReturnType)
 	if typeExpr == nil {
 		typeExpr = ast.NewIdent("any")
 	}
@@ -318,7 +343,7 @@ func (w *Writer) patternToExprWithPos(p KessokuPattern, pos token.Pos) ast.Expr 
 			Args:   []ast.Expr{funcExpr},
 		}
 	case *KessokuBind:
-		typeExpr := typeToExpr(kp.Interface)
+		typeExpr := w.typeToExpr(kp.Interface)
 		if typeExpr == nil {
 			typeExpr = ast.NewIdent("any")
 		}

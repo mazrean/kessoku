@@ -98,11 +98,12 @@ func (m *Migrator) MigrateFiles(files []string, outputPath string) error {
 			}
 
 			results = append(results, MigrationResult{
-				SourceFile: filePath,
-				Package:    pkg.Name,
-				Imports:    nil, // Imports are computed based on actual usage
-				Patterns:   kessokuPatterns,
-				Warnings:   warnings,
+				SourceFile:   filePath,
+				Package:      pkg.Name,
+				TypesPackage: pkg.Types,
+				Imports:      nil, // Imports are computed based on actual usage
+				Patterns:     kessokuPatterns,
+				Warnings:     warnings,
 			})
 		}
 	}
@@ -196,9 +197,12 @@ func (m *Migrator) mergeResults(results []MigrationResult) (*MergedOutput, error
 		}
 	}
 
-	// Only include kessoku import - generated code only uses kessoku package
-	// and references to local identifiers
-	imports := []ImportSpec{{Path: "github.com/mazrean/kessoku"}}
+	// Set up the TypeConverter for proper package-qualified type expressions
+	var typeConverter *TypeConverter
+	if results[0].TypesPackage != nil {
+		typeConverter = NewTypeConverter(results[0].TypesPackage)
+		m.writer.SetTypeConverter(typeConverter)
+	}
 
 	// Generate declarations
 	var decls []ast.Decl
@@ -209,6 +213,13 @@ func (m *Migrator) mergeResults(results []MigrationResult) (*MergedOutput, error
 				decls = append(decls, decl)
 			}
 		}
+	}
+
+	// Collect imports: always include kessoku, plus any imports needed for external types
+	imports := []ImportSpec{{Path: "github.com/mazrean/kessoku"}}
+	if typeConverter != nil {
+		collectedImports := typeConverter.Imports()
+		imports = append(imports, collectedImports...)
 	}
 
 	return &MergedOutput{
