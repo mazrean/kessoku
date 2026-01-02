@@ -110,15 +110,24 @@ func (w *Writer) buildFile(output *MergedOutput) *ast.File {
 
 // buildImportDecl builds an import declaration.
 func (w *Writer) buildImportDecl(imports []ImportSpec) *ast.GenDecl {
+	// Deduplicate imports by path (keep first occurrence)
+	seen := make(map[string]bool)
+	var deduped []ImportSpec
+	for _, imp := range imports {
+		if seen[imp.Path] {
+			continue
+		}
+		seen[imp.Path] = true
+		deduped = append(deduped, imp)
+	}
+
 	// Sort imports by path
-	sorted := make([]ImportSpec, len(imports))
-	copy(sorted, imports)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Path < sorted[j].Path
+	sort.Slice(deduped, func(i, j int) bool {
+		return deduped[i].Path < deduped[j].Path
 	})
 
 	var specs []ast.Spec
-	for _, imp := range sorted {
+	for _, imp := range deduped {
 		spec := &ast.ImportSpec{
 			Path: &ast.BasicLit{
 				Kind:  token.STRING,

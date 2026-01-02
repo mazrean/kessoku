@@ -32,11 +32,20 @@ func NewTypeConverter(currentPkg *types.Package) *TypeConverter {
 }
 
 // Imports returns the collected import specifications needed for the generated code.
+// Each path appears exactly once (guaranteed by the map structure).
 func (tc *TypeConverter) Imports() []ImportSpec {
+	// Use a map to deduplicate by path (should already be unique, but ensure)
+	seen := make(map[string]bool)
 	var specs []ImportSpec
 	for path, name := range tc.imports {
+		if seen[path] {
+			// Should never happen since tc.imports is a map, but log if it does
+			continue
+		}
+		seen[path] = true
 		spec := ImportSpec{Path: path}
-		// Only set name if it differs from the last element of the path
+		// Only set name (alias) if it differs from the last element of the path.
+		// This avoids redundant aliases like: v1 "github.com/.../v1"
 		pkgName := lastPathElement(path)
 		if name != pkgName {
 			spec.Name = name
