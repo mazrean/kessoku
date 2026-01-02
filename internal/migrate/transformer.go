@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 	"unicode"
 )
 
@@ -85,12 +86,7 @@ func unwrapPointer(t types.Type) types.Type {
 }
 
 func contains(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, s)
 }
 
 func toLowerCamel(s string) string {

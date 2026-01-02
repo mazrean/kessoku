@@ -1,5 +1,7 @@
 package migrate
 
+import "maps"
+
 import "go/types"
 
 // transformNewSet transforms wire.NewSet to kessoku.Set.
@@ -121,9 +123,7 @@ func (t *Transformer) collectBoundTypes(elements []WirePattern) map[string]bool 
 			boundTypes[implType.String()] = true
 		case *WireNewSet:
 			// Recursively collect from nested sets
-			for k, v := range t.collectBoundTypes(we.Elements) {
-				boundTypes[k] = v
-			}
+			maps.Copy(boundTypes, t.collectBoundTypes(we.Elements))
 		}
 	}
 	return boundTypes

@@ -32,8 +32,7 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) *Kesso
 
 	// Collect fields to include (skip unexported fields from external packages)
 	var fieldInfos []fieldInfo
-	for i := 0; i < st.NumFields(); i++ {
-		field := st.Field(i)
+	for field := range st.Fields() {
 		if ws.Fields[0] == "*" || contains(ws.Fields, field.Name()) {
 			// Skip unexported fields from external packages
 			if isExternalPkg && !field.Exported() {
@@ -87,8 +86,7 @@ func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *K
 	// Collect field types (skip unexported fields from external packages)
 	var fieldInfos []fieldInfo
 	for _, fieldName := range wf.Fields {
-		for i := 0; i < st.NumFields(); i++ {
-			field := st.Field(i)
+		for field := range st.Fields() {
 			if field.Name() == fieldName {
 				// Skip unexported fields from external packages
 				if isExternalPkg && !field.Exported() {

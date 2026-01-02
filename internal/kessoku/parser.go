@@ -537,19 +537,19 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 		}
 
 		requires := make([]types.Type, 0, providerFnSig.Params().Len())
-		for i := range providerFnSig.Params().Len() {
-			requires = append(requires, providerFnSig.Params().At(i).Type())
+		for v := range providerFnSig.Params().Variables() {
+			requires = append(requires, v.Type())
 		}
 
 		isReturnError := false
 		provides := make([][]types.Type, 0, providerFnSig.Results().Len())
-		for i := range providerFnSig.Results().Len() {
-			if types.Identical(providerFnSig.Results().At(i).Type(), types.Universe.Lookup("error").Type()) {
+		for v := range providerFnSig.Results().Variables() {
+			if types.Identical(v.Type(), types.Universe.Lookup("error").Type()) {
 				isReturnError = true
 				continue
 			}
 
-			provides = append(provides, []types.Type{providerFnSig.Results().At(i).Type()})
+			provides = append(provides, []types.Type{v.Type()})
 		}
 
 		return &parseProviderTypeResult{
