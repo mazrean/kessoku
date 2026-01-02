@@ -288,6 +288,9 @@ func (t *Transformer) transformNewSet(ws *WireNewSet, pkg *types.Package) (*Kess
 	// These are the types for which wire.Bind creates an implicit provider
 	boundTypes := t.collectBoundTypes(ws.Elements)
 
+	// Merge FieldsOf patterns with the same struct type
+	mergedFieldsOf := t.mergeFieldsOf(ws.Elements)
+
 	var elements []KessokuPattern
 
 	for _, elem := range ws.Elements {
@@ -313,7 +316,15 @@ func (t *Transformer) transformNewSet(ws *WireNewSet, pkg *types.Package) (*Kess
 		case *WireStruct:
 			elements = append(elements, t.transformStruct(we, pkg))
 		case *WireFieldsOf:
-			elements = append(elements, t.transformFieldsOf(we, pkg))
+			// Check if this is the first occurrence of this struct type
+			typeKey := we.StructType.String()
+			merged, exists := mergedFieldsOf[typeKey]
+			if !exists {
+				continue // Already processed or no merge needed
+			}
+			// Remove from map so subsequent occurrences are skipped
+			delete(mergedFieldsOf, typeKey)
+			elements = append(elements, t.transformFieldsOf(merged, pkg))
 		case *WireProviderFunc:
 			// Skip provider if its output type is already bound via wire.Bind
 			// (wire.Bind creates an implicit provider for the implementation type)
@@ -331,6 +342,37 @@ func (t *Transformer) transformNewSet(ws *WireNewSet, pkg *types.Package) (*Kess
 		Elements:  elements,
 		SourcePos: ws.Pos,
 	}, nil
+}
+
+// mergeFieldsOf groups WireFieldsOf patterns by struct type and merges their fields.
+func (t *Transformer) mergeFieldsOf(elements []WirePattern) map[string]*WireFieldsOf {
+	result := make(map[string]*WireFieldsOf)
+
+	for _, elem := range elements {
+		wf, ok := elem.(*WireFieldsOf)
+		if !ok {
+			continue
+		}
+
+		typeKey := wf.StructType.String()
+		if existing, exists := result[typeKey]; exists {
+			// Merge fields (avoid duplicates)
+			for _, field := range wf.Fields {
+				if !contains(existing.Fields, field) {
+					existing.Fields = append(existing.Fields, field)
+				}
+			}
+		} else {
+			// Create a copy to avoid modifying the original
+			result[typeKey] = &WireFieldsOf{
+				baseWirePattern: wf.baseWirePattern,
+				StructType:      wf.StructType,
+				Fields:          append([]string{}, wf.Fields...),
+			}
+		}
+	}
+
+	return result
 }
 
 // collectBoundTypes collects all implementation types from WireBind elements.
@@ -441,6 +483,9 @@ func (t *Transformer) transformBuild(wb *WireBuild, pkg *types.Package) (*Kessok
 	// First pass: collect all bound implementation types
 	boundTypes := t.collectBoundTypes(wb.Elements)
 
+	// Merge FieldsOf patterns with the same struct type
+	mergedFieldsOf := t.mergeFieldsOf(wb.Elements)
+
 	// Transform elements (same as NewSet elements)
 	for _, elem := range wb.Elements {
 		switch we := elem.(type) {
@@ -464,7 +509,15 @@ func (t *Transformer) transformBuild(wb *WireBuild, pkg *types.Package) (*Kessok
 		case *WireStruct:
 			inject.Elements = append(inject.Elements, t.transformStruct(we, pkg))
 		case *WireFieldsOf:
-			inject.Elements = append(inject.Elements, t.transformFieldsOf(we, pkg))
+			// Check if this is the first occurrence of this struct type
+			typeKey := we.StructType.String()
+			merged, exists := mergedFieldsOf[typeKey]
+			if !exists {
+				continue // Already processed or no merge needed
+			}
+			// Remove from map so subsequent occurrences are skipped
+			delete(mergedFieldsOf, typeKey)
+			inject.Elements = append(inject.Elements, t.transformFieldsOf(merged, pkg))
 		case *WireProviderFunc:
 			// Skip provider if its output type is already bound via wire.Bind
 			if t.isProviderBound(we, boundTypes) {

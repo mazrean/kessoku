@@ -283,10 +283,10 @@ func TestTypeConverterAddImportCollision(t *testing.T) {
 
 func TestTypeConverterCollectExprImports(t *testing.T) {
 	tests := []struct {
-		name          string
 		expr          ast.Expr
 		sourceImports map[string]string
 		wantImports   map[string]string
+		name          string
 	}{
 		{
 			name:          "nil expression",

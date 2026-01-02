@@ -141,9 +141,9 @@ func TestExtractImports(t *testing.T) {
 	p := NewParser()
 
 	tests := []struct {
+		want map[string]string
 		name string
 		src  string
-		want map[string]string
 	}{
 		{
 			name: "no imports",
