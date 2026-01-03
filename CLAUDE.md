@@ -112,6 +112,8 @@ Migration tool location: `internal/migrate/`
 ## Active Technologies
 - Go 1.24+ + github.com/alecthomas/kong (CLI), golang.org/x/tools (AST parsing, type checking) (001-wire-migrate)
 - N/A (file-based input/output, no persistent storage) (001-wire-migrate)
+- Go 1.24+ + github.com/alecthomas/kong (CLI framework, already in use) (002-agent-skills-setup)
+- File-based output (Skills files installed to filesystem) (002-agent-skills-setup)
 
 ## Recent Changes
 - 001-wire-migrate: Added Go 1.24+ + github.com/alecthomas/kong (CLI), golang.org/x/tools (AST parsing, type checking)

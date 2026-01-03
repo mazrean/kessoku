@@ -9,6 +9,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/mazrean/kessoku/internal/kessoku"
+	"github.com/mazrean/kessoku/internal/llmsetup"
 	"github.com/mazrean/kessoku/internal/migrate"
 )
 
@@ -20,10 +21,11 @@ var (
 
 // CLI is the root command configuration with subcommands.
 type CLI struct {
-	LogLevel string           `kong:"short='l',help='Log level',enum='debug,info,warn,error',default='info'"`
-	Generate GenerateCmd      `kong:"cmd,default='withargs',help='Generate DI code (default)'"`
-	Migrate  MigrateCmd       `kong:"cmd,help='Migrate wire config to kessoku'"`
-	Version  kong.VersionFlag `kong:"short='v',help='Show version and exit.'"`
+	LogLevel string               `kong:"short='l',help='Log level',enum='debug,info,warn,error',default='info'"`
+	Generate GenerateCmd          `kong:"cmd,default='withargs',help='Generate DI code (default)'"`
+	Migrate  MigrateCmd           `kong:"cmd,help='Migrate wire config to kessoku'"`
+	LLMSetup llmsetup.LLMSetupCmd `kong:"cmd,name='llm-setup',help='Setup coding agent skills'"`
+	Version  kong.VersionFlag     `kong:"short='v',help='Show version and exit.'"`
 }
 
 // GenerateCmd is the default command for generating DI code.
