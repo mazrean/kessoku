@@ -6,170 +6,170 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alecthomas/kong"
 )
 
-// TestClaudeCodeCmd_SuccessOutput tests success message output (T012).
-func TestClaudeCodeCmd_SuccessOutput(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "test-claudecode-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
+// TestClaudeCodeCmd tests the ClaudeCodeCmd command with various scenarios.
+func TestClaudeCodeCmd(t *testing.T) {
+	t.Run("success output", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "test-claudecode-*")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+		var stdout, stderr bytes.Buffer
+		cmd := &ClaudeCodeCmd{
+			Path:   tmpDir,
+			User:   false,
+			Stdout: &stdout,
+			Stderr: &stderr,
+		}
 
-	cmd := &ClaudeCodeCmd{
-		Path:   tmpDir,
-		User:   false,
-		Stdout: &stdout,
-		Stderr: &stderr,
-	}
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("ClaudeCodeCmd.Run failed: %v", err)
+		}
 
-	err = cmd.Run()
-	if err != nil {
-		t.Fatalf("ClaudeCodeCmd.Run failed: %v", err)
-	}
+		output := stdout.String()
+		if !strings.Contains(output, "Skills installed to:") {
+			t.Errorf("stdout = %q, want to contain 'Skills installed to:'", output)
+		}
 
-	output := stdout.String()
-	if !strings.Contains(output, "Skills installed to:") {
-		t.Errorf("stdout = %q, want to contain 'Skills installed to:'", output)
-	}
+		expectedPath := filepath.Join(tmpDir, "kessoku-di")
+		if !strings.Contains(output, expectedPath) {
+			t.Errorf("stdout = %q, want to contain path %q", output, expectedPath)
+		}
 
-	// Now we show the skill directory path since multiple files are installed
-	expectedPath := filepath.Join(tmpDir, "kessoku-di")
-	if !strings.Contains(output, expectedPath) {
-		t.Errorf("stdout = %q, want to contain path %q", output, expectedPath)
-	}
+		if stderr.Len() > 0 {
+			t.Errorf("stderr should be empty, got %q", stderr.String())
+		}
+	})
 
-	if stderr.Len() > 0 {
-		t.Errorf("stderr should be empty, got %q", stderr.String())
-	}
+	t.Run("error output when path is a file", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp("", "test-file-*")
+		if err != nil {
+			t.Fatalf("failed to create temp file: %v", err)
+		}
+		_ = tmpFile.Close()
+		defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+		var stdout, stderr bytes.Buffer
+		cmd := &ClaudeCodeCmd{
+			Path:   tmpFile.Name(),
+			User:   false,
+			Stdout: &stdout,
+			Stderr: &stderr,
+		}
+
+		err = cmd.Run()
+		if err == nil {
+			t.Fatal("ClaudeCodeCmd.Run should fail when path is a file")
+		}
+
+		if !strings.Contains(stderr.String(), "Error:") {
+			t.Errorf("stderr = %q, want to contain 'Error:'", stderr.String())
+		}
+	})
+
+	t.Run("stdout/stderr returns defaults when nil", func(t *testing.T) {
+		cmd := &ClaudeCodeCmd{
+			Stdout: nil,
+			Stderr: nil,
+		}
+
+		if cmd.stdout() != os.Stdout {
+			t.Error("stdout() should return os.Stdout when Stdout is nil")
+		}
+		if cmd.stderr() != os.Stderr {
+			t.Error("stderr() should return os.Stderr when Stderr is nil")
+		}
+	})
 }
 
-// TestClaudeCodeCmd_ErrorOutput tests error message output (T013).
-func TestClaudeCodeCmd_ErrorOutput(t *testing.T) {
-	// Create a file where we expect a directory
-	tmpFile, err := os.CreateTemp("", "test-file-*")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	_ = tmpFile.Close()
-	defer func() { _ = os.Remove(tmpFile.Name()) }()
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-
-	cmd := &ClaudeCodeCmd{
-		Path:   tmpFile.Name(), // This is a file, not a directory
-		User:   false,
-		Stdout: &stdout,
-		Stderr: &stderr,
-	}
-
-	err = cmd.Run()
-	if err == nil {
-		t.Fatal("ClaudeCodeCmd.Run should fail when path is a file")
-	}
-
-	errOutput := stderr.String()
-	if !strings.Contains(errOutput, "Error:") {
-		t.Errorf("stderr = %q, want to contain 'Error:'", errOutput)
-	}
-}
-
-// TestClaudeCodeAgent_Interface tests that ClaudeCodeAgent implements Agent correctly.
-func TestClaudeCodeAgent_Interface(t *testing.T) {
+// TestClaudeCodeAgent tests that ClaudeCodeAgent implements Agent correctly.
+func TestClaudeCodeAgent(t *testing.T) {
 	var _ Agent = &ClaudeCodeAgent{} // Compile-time check
 
 	agent := &ClaudeCodeAgent{}
 
-	if agent.Name() != "claude-code" {
-		t.Errorf("Name() = %q, want %q", agent.Name(), "claude-code")
+	tests := []struct {
+		name   string
+		got    string
+		want   string
+		notNil bool // If true, just check that got is not empty
+	}{
+		{"Name", agent.Name(), "claude-code", false},
+		{"Description", agent.Description(), "", true},
+		{"SkillsSrcDir", agent.SkillsSrcDir(), "skills", false},
+		{"SkillsDirName", agent.SkillsDirName(), "kessoku-di", false},
+		{"ProjectSubPath", agent.ProjectSubPath(), ".claude/skills", false},
+		{"UserSubPath", agent.UserSubPath(), ".claude/skills", false},
 	}
 
-	if agent.Description() == "" {
-		t.Error("Description() should not be empty")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.notNil {
+				if tt.got == "" {
+					t.Errorf("%s() should not be empty", tt.name)
+				}
+			} else {
+				if tt.got != tt.want {
+					t.Errorf("%s() = %q, want %q", tt.name, tt.got, tt.want)
+				}
+			}
+		})
 	}
 
-	// Verify SkillsFS returns a valid embed.FS with files
-	skillsFS := agent.SkillsFS()
-	entries, err := skillsFS.ReadDir(agent.SkillsSrcDir())
-	if err != nil {
-		t.Errorf("SkillsFS().ReadDir() failed: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Error("SkillsFS() should contain at least one file")
-	}
+	// Test SkillsFS separately as it requires more complex verification
+	t.Run("SkillsFS", func(t *testing.T) {
+		skillsFS := agent.SkillsFS()
+		entries, err := skillsFS.ReadDir(agent.SkillsSrcDir())
+		if err != nil {
+			t.Errorf("SkillsFS().ReadDir() failed: %v", err)
+		}
+		if len(entries) == 0 {
+			t.Error("SkillsFS() should contain at least one file")
+		}
 
-	// Verify SKILL.md exists
-	_, err = skillsFS.ReadFile(agent.SkillsSrcDir() + "/SKILL.md")
-	if err != nil {
-		t.Errorf("SKILL.md not found in SkillsFS: %v", err)
-	}
-
-	if agent.SkillsSrcDir() != "skills" {
-		t.Errorf("SkillsSrcDir() = %q, want %q", agent.SkillsSrcDir(), "skills")
-	}
-
-	if agent.SkillsDirName() != "kessoku-di" {
-		t.Errorf("SkillsDirName() = %q, want %q", agent.SkillsDirName(), "kessoku-di")
-	}
-
-	if agent.ProjectSubPath() != ".claude/skills" {
-		t.Errorf("ProjectSubPath() = %q, want %q", agent.ProjectSubPath(), ".claude/skills")
-	}
-
-	if agent.UserSubPath() != ".claude/skills" {
-		t.Errorf("UserSubPath() = %q, want %q", agent.UserSubPath(), ".claude/skills")
-	}
+		if _, err := skillsFS.ReadFile(agent.SkillsSrcDir() + "/SKILL.md"); err != nil {
+			t.Errorf("SKILL.md not found in SkillsFS: %v", err)
+		}
+	})
 }
 
-// TestLLMSetupCmd_NoSubcommand tests that running llm-setup without subcommand exits 0 (T030).
-// Note: The actual exit behavior is handled by Kong when parsing CLI args.
-// This test verifies that LLMSetupCmd.Run() returns nil (no error = exit 0).
-func TestLLMSetupCmd_NoSubcommand(t *testing.T) {
-	cmd := &LLMSetupCmd{}
-
-	// When LLMSetupCmd.Run() is called (no subcommand), it should return nil
-	// The Run() method calls ctx.PrintUsage() which requires a kong.Context
-	// For unit testing, we just verify the struct exists and the method signature
-	// A full integration test would use kong.Parse to test the actual CLI behavior
-
-	// Verify LLMSetupCmd has the expected structure
-	if cmd.ClaudeCode.User != false {
-		t.Error("ClaudeCode.User should default to false")
-	}
-	if cmd.ClaudeCode.Path != "" {
-		t.Error("ClaudeCode.Path should default to empty")
-	}
-}
-
-// TestLLMSetupCmd_UnknownAgent tests that unknown agents exit with error (T031).
-// Note: Kong automatically handles unknown subcommands with exit 1.
-// This test documents that behavior - the actual error handling is in Kong.
-func TestLLMSetupCmd_UnknownAgent(t *testing.T) {
-	// Kong handles unknown subcommands automatically:
-	// - Prints error: "unknown command '<name>'"
-	// - Lists available commands
-	// - Exits with code 1
-	//
-	// The agent registry provides the list of valid agents:
-	agent, ok := GetAgent("unknown-agent")
-	if ok {
-		t.Error("GetAgent should return false for unknown agent")
-	}
-	if agent != nil {
-		t.Error("GetAgent should return nil for unknown agent")
+// TestGetAgent tests the GetAgent function with various agent names.
+func TestGetAgent(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentName string
+		wantOK    bool
+		wantNil   bool
+	}{
+		{
+			name:      "known agent claude-code",
+			agentName: "claude-code",
+			wantOK:    true,
+			wantNil:   false,
+		},
+		{
+			name:      "unknown agent",
+			agentName: "unknown-agent",
+			wantOK:    false,
+			wantNil:   true,
+		},
 	}
 
-	// Verify known agent exists
-	agent, ok = GetAgent("claude-code")
-	if !ok {
-		t.Error("GetAgent should return true for claude-code")
-	}
-	if agent == nil {
-		t.Error("GetAgent should return non-nil for claude-code")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent, ok := GetAgent(tt.agentName)
+			if ok != tt.wantOK {
+				t.Errorf("GetAgent(%q) ok = %v, want %v", tt.agentName, ok, tt.wantOK)
+			}
+			if (agent == nil) != tt.wantNil {
+				t.Errorf("GetAgent(%q) agent nil = %v, want %v", tt.agentName, agent == nil, tt.wantNil)
+			}
+		})
 	}
 }
 
@@ -193,7 +193,47 @@ func TestListAgents(t *testing.T) {
 	}
 }
 
-// TestInstall_Integration tests the complete Install function.
+// TestLLMSetupCmd tests LLMSetupCmd structure and defaults.
+func TestLLMSetupCmd(t *testing.T) {
+	cmd := &LLMSetupCmd{}
+
+	if cmd.ClaudeCode.User != false {
+		t.Error("ClaudeCode.User should default to false")
+	}
+	if cmd.ClaudeCode.Path != "" {
+		t.Error("ClaudeCode.Path should default to empty")
+	}
+}
+
+// TestUsageCmd_Run tests that UsageCmd.Run prints usage and returns nil.
+func TestUsageCmd_Run(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	cmd := &LLMSetupCmd{}
+	parser, err := kong.New(cmd,
+		kong.Writers(&stdout, &stderr),
+		kong.Exit(func(int) {}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create kong parser: %v", err)
+	}
+
+	ctx, err := parser.Parse([]string{})
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	usageCmd := &UsageCmd{}
+	if err := usageCmd.Run(ctx); err != nil {
+		t.Errorf("UsageCmd.Run() returned error: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "Usage:") {
+		t.Errorf("usage output should contain 'Usage:', got: %q", stdout.String())
+	}
+}
+
+// TestInstall_Integration tests the complete Install function with real ClaudeCodeAgent.
 func TestInstall_Integration(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-install-*")
 	if err != nil {
@@ -213,6 +253,7 @@ func TestInstall_Integration(t *testing.T) {
 	if skillDir != expectedSkillDir {
 		t.Errorf("Install returned wrong path: got %s, want %s", skillDir, expectedSkillDir)
 	}
+
 	info, err := os.Stat(skillDir)
 	if err != nil {
 		t.Fatalf("skill directory was not created: %v", err)
@@ -233,17 +274,14 @@ func TestInstall_Integration(t *testing.T) {
 			continue
 		}
 
-		// Read expected content from embed.FS
-		expectedContent, err := skillsFS.ReadFile(agent.SkillsSrcDir() + "/" + entry.Name())
-		if err != nil {
-			t.Fatalf("failed to read embedded file %s: %v", entry.Name(), err)
+		expectedContent, readErr := skillsFS.ReadFile(agent.SkillsSrcDir() + "/" + entry.Name())
+		if readErr != nil {
+			t.Fatalf("failed to read embedded file %s: %v", entry.Name(), readErr)
 		}
 
-		// Read installed file
-		installedPath := filepath.Join(skillDir, entry.Name())
-		installedContent, err := os.ReadFile(installedPath)
-		if err != nil {
-			t.Fatalf("installed file %s not found: %v", entry.Name(), err)
+		installedContent, readErr := os.ReadFile(filepath.Join(skillDir, entry.Name()))
+		if readErr != nil {
+			t.Fatalf("installed file %s not found: %v", entry.Name(), readErr)
 		}
 
 		if string(installedContent) != string(expectedContent) {
