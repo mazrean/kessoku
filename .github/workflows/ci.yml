@@ -90,6 +90,18 @@ jobs:
           path: dist/
           retention-days: 30
 
+  validate-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Validate kessoku-di skill
+        run: uvx --from git+https://github.com/agentskills/agentskills.git#subdirectory=skills-ref skills-ref validate internal/llmsetup/skills/kessoku-di
+
   api-compatibility:
     runs-on: ubuntu-latest
     steps:
