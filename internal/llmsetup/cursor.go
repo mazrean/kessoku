@@ -22,7 +22,7 @@ func (a *CursorAgent) SkillsFS() embed.FS {
 
 // SkillsSrcDir returns the source directory path in the embedded filesystem.
 func (a *CursorAgent) SkillsSrcDir() string {
-	return "skills"
+	return "skills/kessoku-di"
 }
 
 // SkillsDirName returns the skill directory name for installation.

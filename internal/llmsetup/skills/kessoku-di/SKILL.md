@@ -9,7 +9,7 @@ Kessoku is a compile-time dependency injection library that speeds up Go applica
 
 **Use this skill when** you are building or debugging kessoku injectors/providers, wiring async dependencies, migrating from google/wire, or troubleshooting `go tool kessoku` generation problems.
 
-**Supporting files:** [PATTERNS.md](PATTERNS.md) for examples, [MIGRATION.md](MIGRATION.md) for wire migration, [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common errors.
+**Supporting files:** [PATTERNS.md](references/PATTERNS.md) for examples, [MIGRATION.md](references/MIGRATION.md) for wire migration, [TROUBLESHOOTING.md](references/TROUBLESHOOTING.md) for common errors.
 
 ## When to Use Kessoku
 
@@ -120,9 +120,9 @@ var _ = kessoku.Inject[*DB](
 ## Support Files
 
 For detailed information, see:
-- [PATTERNS.md](PATTERNS.md) - Detailed patterns, examples, best practices
-- [MIGRATION.md](MIGRATION.md) - Wire migration guide
-- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common errors and solutions
+- [PATTERNS.md](references/PATTERNS.md) - Detailed patterns, examples, best practices
+- [MIGRATION.md](references/MIGRATION.md) - Wire migration guide
+- [TROUBLESHOOTING.md](references/TROUBLESHOOTING.md) - Common errors and solutions
 
 ## Resources
 

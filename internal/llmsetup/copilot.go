@@ -22,7 +22,7 @@ func (a *CopilotAgent) SkillsFS() embed.FS {
 
 // SkillsSrcDir returns the source directory path in the embedded filesystem.
 func (a *CopilotAgent) SkillsSrcDir() string {
-	return "skills"
+	return "skills/kessoku-di"
 }
 
 // SkillsDirName returns the skill directory name for installation.

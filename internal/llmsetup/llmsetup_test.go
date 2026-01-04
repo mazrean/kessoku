@@ -123,8 +123,8 @@ func TestAgents(t *testing.T) {
 			if got := tt.agent.Description(); got == "" {
 				t.Error("Description() should not be empty")
 			}
-			if got := tt.agent.SkillsSrcDir(); got != "skills" {
-				t.Errorf("SkillsSrcDir() = %q, want %q", got, "skills")
+			if got := tt.agent.SkillsSrcDir(); got != "skills/kessoku-di" {
+				t.Errorf("SkillsSrcDir() = %q, want %q", got, "skills/kessoku-di")
 			}
 			if got := tt.agent.SkillsDirName(); got != "kessoku-di" {
 				t.Errorf("SkillsDirName() = %q, want %q", got, "kessoku-di")
@@ -153,7 +153,7 @@ func TestAgents(t *testing.T) {
 
 	// Test that all agents share the same SkillsFS
 	t.Run("SkillsFS shared across agents", func(t *testing.T) {
-		claudeEntries, _ := (&ClaudeCodeAgent{}).SkillsFS().ReadDir("skills")
+		claudeEntries, _ := (&ClaudeCodeAgent{}).SkillsFS().ReadDir("skills/kessoku-di")
 		for _, tt := range tests {
 			entries, _ := tt.agent.SkillsFS().ReadDir(tt.agent.SkillsSrcDir())
 			if len(entries) != len(claudeEntries) {
@@ -290,30 +290,45 @@ func TestInstall_Integration(t *testing.T) {
 		t.Error("skill path is not a directory")
 	}
 
-	// Verify all files from embedded FS were installed
-	skillsFS := agent.SkillsFS()
-	entries, err := skillsFS.ReadDir(agent.SkillsSrcDir())
-	if err != nil {
-		t.Fatalf("failed to read embedded dir: %v", err)
+	// Verify SKILL.md exists at root of skill directory
+	skillMDPath := filepath.Join(skillDir, "SKILL.md")
+	if _, statErr := os.Stat(skillMDPath); statErr != nil {
+		t.Errorf("SKILL.md not found at %s: %v", skillMDPath, statErr)
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
+	// Verify references subdirectory exists
+	referencesDir := filepath.Join(skillDir, "references")
+	refInfo, err := os.Stat(referencesDir)
+	if err != nil {
+		t.Errorf("references directory not found: %v", err)
+	} else if !refInfo.IsDir() {
+		t.Error("references should be a directory")
+	}
 
-		expectedContent, readErr := skillsFS.ReadFile(agent.SkillsSrcDir() + "/" + entry.Name())
-		if readErr != nil {
-			t.Fatalf("failed to read embedded file %s: %v", entry.Name(), readErr)
+	// Verify reference files exist
+	expectedRefFiles := []string{"PATTERNS.md", "MIGRATION.md", "TROUBLESHOOTING.md"}
+	for _, refFile := range expectedRefFiles {
+		refPath := filepath.Join(referencesDir, refFile)
+		if _, err := os.Stat(refPath); err != nil {
+			t.Errorf("reference file %s not found: %v", refFile, err)
 		}
+	}
 
-		installedContent, readErr := os.ReadFile(filepath.Join(skillDir, entry.Name()))
-		if readErr != nil {
-			t.Fatalf("installed file %s not found: %v", entry.Name(), readErr)
-		}
+	// Verify file contents match embedded FS
+	skillsFS := agent.SkillsFS()
+	srcDir := agent.SkillsSrcDir()
 
-		if string(installedContent) != string(expectedContent) {
-			t.Errorf("installed content of %s does not match embedded content", entry.Name())
-		}
+	// Check SKILL.md content
+	expectedContent, _ := skillsFS.ReadFile(srcDir + "/SKILL.md")
+	installedContent, _ := os.ReadFile(skillMDPath)
+	if string(installedContent) != string(expectedContent) {
+		t.Error("installed SKILL.md content does not match embedded content")
+	}
+
+	// Check a reference file content
+	expectedPatterns, _ := skillsFS.ReadFile(srcDir + "/references/PATTERNS.md")
+	installedPatterns, _ := os.ReadFile(filepath.Join(referencesDir, "PATTERNS.md"))
+	if string(installedPatterns) != string(expectedPatterns) {
+		t.Error("installed PATTERNS.md content does not match embedded content")
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 )
 
@@ -67,7 +66,7 @@ func InstallFile(targetDir string, fileName string, content []byte) (retErr erro
 }
 
 // Install performs a complete Skills installation for the given agent.
-// Skills files (SKILL.md and support files) are installed into a single directory.
+// Skills directory (SKILL.md and support files/subdirectories) is installed recursively.
 func Install(agent Agent, customPath string, userFlag bool) (string, error) {
 	basePath, err := ResolvePath(customPath, userFlag, agent)
 	if err != nil {
@@ -82,24 +81,45 @@ func Install(agent Agent, customPath string, userFlag bool) (string, error) {
 	skillsFS := agent.SkillsFS()
 	srcDir := agent.SkillsSrcDir()
 
-	entries, err := fs.ReadDir(skillsFS, srcDir)
-	if err != nil {
+	// Verify srcDir exists before walking
+	if _, err = fs.Stat(skillsFS, srcDir); err != nil {
 		return "", fmt.Errorf("cannot read skills directory: %w", err)
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	// Walk the embedded directory tree and install all files
+	err = fs.WalkDir(skillsFS, srcDir, func(fsPath string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 
-		content, readErr := fs.ReadFile(skillsFS, path.Join(srcDir, entry.Name()))
+		// Skip directories (they're created automatically by InstallFile)
+		if d.IsDir() {
+			return nil
+		}
+
+		// Calculate relative path from srcDir
+		relPath, relErr := filepath.Rel(srcDir, fsPath)
+		if relErr != nil {
+			return fmt.Errorf("cannot compute relative path for %s: %w", fsPath, relErr)
+		}
+
+		content, readErr := fs.ReadFile(skillsFS, fsPath)
 		if readErr != nil {
-			return "", fmt.Errorf("cannot read embedded file %s: %w", entry.Name(), readErr)
+			return fmt.Errorf("cannot read embedded file %s: %w", fsPath, readErr)
 		}
 
-		if installErr := InstallFile(skillPath, entry.Name(), content); installErr != nil {
-			return "", installErr
+		// Determine target directory (skillPath + parent directories of relPath)
+		targetDir := filepath.Join(skillPath, filepath.Dir(relPath))
+		fileName := filepath.Base(relPath)
+
+		if installErr := InstallFile(targetDir, fileName, content); installErr != nil {
+			return installErr
 		}
+
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
 
 	return skillPath, nil
