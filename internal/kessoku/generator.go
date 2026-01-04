@@ -109,11 +109,11 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 		}
 	}
 
-	// Check if context is available
-	hasCtx := false
+	// Find context parameter name if available
+	var ctxParamName string
 	for _, arg := range injector.Args {
-		hasCtx = isContextType(arg.Type)
-		if hasCtx {
+		if isContextType(arg.Type) {
+			ctxParamName = arg.Param.Name(varPool)
 			break
 		}
 	}
@@ -132,15 +132,16 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 	})
 
 	// Generate errgroup declaration
-	egDecl := generateErrGroupDeclaration(hasCtx)
+	egDecl := generateErrGroupDeclaration(ctxParamName)
 	stmts = append(stmts, egDecl)
 
 	return stmts, nil
 }
 
 // generateErrGroupDeclaration creates the errgroup variable declaration
-func generateErrGroupDeclaration(hasCtx bool) *ast.AssignStmt {
-	if hasCtx {
+// ctxParamName is the name of the context parameter (empty string if no context)
+func generateErrGroupDeclaration(ctxParamName string) *ast.AssignStmt {
+	if ctxParamName != "" {
 		return &ast.AssignStmt{
 			Lhs: []ast.Expr{
 				ast.NewIdent("eg"),
@@ -153,7 +154,7 @@ func generateErrGroupDeclaration(hasCtx bool) *ast.AssignStmt {
 						X:   ast.NewIdent("errgroup"),
 						Sel: ast.NewIdent("WithContext"),
 					},
-					Args: []ast.Expr{ast.NewIdent("ctx")},
+					Args: []ast.Expr{ast.NewIdent(ctxParamName)},
 				},
 			},
 		}
