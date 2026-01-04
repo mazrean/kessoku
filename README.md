@@ -177,6 +177,47 @@ sudo apk add --allow-untrusted kessoku_amd64.apk
 
 </details>
 
+## Coding Agent Integration
+
+Kessoku provides built-in skills for AI coding assistants to help you write better DI code.
+
+**Install skills for your coding agent:**
+
+```bash
+# Claude Code
+go tool kessoku llm-setup claude-code
+
+# Cursor
+go tool kessoku llm-setup cursor
+
+# GitHub Copilot
+go tool kessoku llm-setup github-copilot
+```
+
+<details>
+<summary>Installation Options</summary>
+
+```bash
+# Install to user-level directory (available across all projects)
+go tool kessoku llm-setup claude-code --user
+
+# Install to custom directory
+go tool kessoku llm-setup claude-code --path ./custom/path
+```
+
+**Default installation paths:**
+- **Claude Code:** `.claude/skills/` (project) or `~/.claude/skills/` (user)
+- **Cursor:** `.cursor/rules/` (project) or `~/.cursor/rules/` (user)
+- **GitHub Copilot:** `.github/copilot-instructions.d/` (project) or `~/.github/copilot-instructions.d/` (user)
+
+</details>
+
+Once installed, your coding agent will understand kessoku patterns and can help you:
+- Write providers and injectors correctly
+- Set up parallel initialization with `Async`
+- Migrate from google/wire
+- Troubleshoot code generation issues
+
 ## API Reference
 
 **Full docs:** [pkg.go.dev/github.com/mazrean/kessoku](https://pkg.go.dev/github.com/mazrean/kessoku)
