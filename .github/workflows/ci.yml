@@ -78,7 +78,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build with GoReleaser (snapshot)
-        run: go tool goreleaser build --snapshot --clean
+        run: go tool goreleaser build --clean
 
       - name: Test binary execution
         run: ./dist/kessoku_linux_amd64_v1/kessoku --version
