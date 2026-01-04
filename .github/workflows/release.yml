@@ -31,7 +31,7 @@ jobs:
             homebrew-tap
 
       - name: Run GoReleaser
-        run: go tool goreleaser release --clean
+        run: go tool goreleaser release --clean --skip=validate
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
 
