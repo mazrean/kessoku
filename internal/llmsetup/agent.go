@@ -17,6 +17,8 @@ type Agent interface {
 // agents is the registry of all supported coding agents.
 var agents = []Agent{
 	&ClaudeCodeAgent{},
+	&CursorAgent{},
+	&CopilotAgent{},
 }
 
 // GetAgent returns the agent with the given name, if it exists.

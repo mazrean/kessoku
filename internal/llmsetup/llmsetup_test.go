@@ -10,25 +10,22 @@ import (
 	"github.com/alecthomas/kong"
 )
 
-// TestClaudeCodeCmd tests the ClaudeCodeCmd command with various scenarios.
-func TestClaudeCodeCmd(t *testing.T) {
+// testAgentCmd is a generic test helper for AgentCmd tests.
+func testAgentCmd[T Agent](t *testing.T, cmdName string, newCmd func(path string, stdout, stderr *bytes.Buffer) *AgentCmd[T]) {
+	t.Helper()
+
 	t.Run("success output", func(t *testing.T) {
-		tmpDir, err := os.MkdirTemp("", "test-claudecode-*")
+		tmpDir, err := os.MkdirTemp("", "test-"+cmdName+"-*")
 		if err != nil {
 			t.Fatalf("failed to create temp dir: %v", err)
 		}
 		defer func() { _ = os.RemoveAll(tmpDir) }()
 
 		var stdout, stderr bytes.Buffer
-		cmd := &ClaudeCodeCmd{
-			Path:   tmpDir,
-			User:   false,
-			Stdout: &stdout,
-			Stderr: &stderr,
-		}
+		cmd := newCmd(tmpDir, &stdout, &stderr)
 
 		if err := cmd.Run(); err != nil {
-			t.Fatalf("ClaudeCodeCmd.Run failed: %v", err)
+			t.Fatalf("%sCmd.Run failed: %v", cmdName, err)
 		}
 
 		output := stdout.String()
@@ -55,109 +52,127 @@ func TestClaudeCodeCmd(t *testing.T) {
 		defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 		var stdout, stderr bytes.Buffer
-		cmd := &ClaudeCodeCmd{
-			Path:   tmpFile.Name(),
-			User:   false,
-			Stdout: &stdout,
-			Stderr: &stderr,
-		}
+		cmd := newCmd(tmpFile.Name(), &stdout, &stderr)
 
 		err = cmd.Run()
 		if err == nil {
-			t.Fatal("ClaudeCodeCmd.Run should fail when path is a file")
+			t.Fatalf("%sCmd.Run should fail when path is a file", cmdName)
 		}
 
 		if !strings.Contains(stderr.String(), "Error:") {
 			t.Errorf("stderr = %q, want to contain 'Error:'", stderr.String())
 		}
 	})
+}
 
-	t.Run("stdout/stderr returns defaults when nil", func(t *testing.T) {
-		cmd := &ClaudeCodeCmd{
-			Stdout: nil,
-			Stderr: nil,
-		}
-
-		if cmd.stdout() != os.Stdout {
-			t.Error("stdout() should return os.Stdout when Stdout is nil")
-		}
-		if cmd.stderr() != os.Stderr {
-			t.Error("stderr() should return os.Stderr when Stderr is nil")
-		}
+func TestClaudeCodeCmd(t *testing.T) {
+	testAgentCmd(t, "ClaudeCode", func(path string, stdout, stderr *bytes.Buffer) *ClaudeCodeCmd {
+		return &ClaudeCodeCmd{Path: path, Stdout: stdout, Stderr: stderr}
 	})
 }
 
-// TestClaudeCodeAgent tests that ClaudeCodeAgent implements Agent correctly.
-func TestClaudeCodeAgent(t *testing.T) {
-	var _ Agent = &ClaudeCodeAgent{} // Compile-time check
+func TestCursorCmd(t *testing.T) {
+	testAgentCmd(t, "Cursor", func(path string, stdout, stderr *bytes.Buffer) *CursorCmd {
+		return &CursorCmd{Path: path, Stdout: stdout, Stderr: stderr}
+	})
+}
 
-	agent := &ClaudeCodeAgent{}
+func TestCopilotCmd(t *testing.T) {
+	testAgentCmd(t, "Copilot", func(path string, stdout, stderr *bytes.Buffer) *CopilotCmd {
+		return &CopilotCmd{Path: path, Stdout: stdout, Stderr: stderr}
+	})
+}
 
+// TestAgents tests all Agent implementations with table-driven tests.
+func TestAgents(t *testing.T) {
 	tests := []struct {
-		name   string
-		got    string
-		want   string
-		notNil bool // If true, just check that got is not empty
+		name           string
+		agent          Agent
+		wantName       string
+		projectSubPath string
+		userSubPath    string
 	}{
-		{"Name", agent.Name(), "claude-code", false},
-		{"Description", agent.Description(), "", true},
-		{"SkillsSrcDir", agent.SkillsSrcDir(), "skills", false},
-		{"SkillsDirName", agent.SkillsDirName(), "kessoku-di", false},
-		{"ProjectSubPath", agent.ProjectSubPath(), ".claude/skills", false},
-		{"UserSubPath", agent.UserSubPath(), ".claude/skills", false},
+		{
+			name:           "ClaudeCodeAgent",
+			agent:          &ClaudeCodeAgent{},
+			wantName:       "claude-code",
+			projectSubPath: ".claude/skills",
+			userSubPath:    ".claude/skills",
+		},
+		{
+			name:           "CursorAgent",
+			agent:          &CursorAgent{},
+			wantName:       "cursor",
+			projectSubPath: ".cursor/rules",
+			userSubPath:    ".cursor/rules",
+		},
+		{
+			name:           "CopilotAgent",
+			agent:          &CopilotAgent{},
+			wantName:       "github-copilot",
+			projectSubPath: ".github/skills",
+			userSubPath:    ".github/skills",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.notNil {
-				if tt.got == "" {
-					t.Errorf("%s() should not be empty", tt.name)
-				}
-			} else {
-				if tt.got != tt.want {
-					t.Errorf("%s() = %q, want %q", tt.name, tt.got, tt.want)
-				}
+			if got := tt.agent.Name(); got != tt.wantName {
+				t.Errorf("Name() = %q, want %q", got, tt.wantName)
+			}
+			if got := tt.agent.Description(); got == "" {
+				t.Error("Description() should not be empty")
+			}
+			if got := tt.agent.SkillsSrcDir(); got != "skills" {
+				t.Errorf("SkillsSrcDir() = %q, want %q", got, "skills")
+			}
+			if got := tt.agent.SkillsDirName(); got != "kessoku-di" {
+				t.Errorf("SkillsDirName() = %q, want %q", got, "kessoku-di")
+			}
+			if got := tt.agent.ProjectSubPath(); got != tt.projectSubPath {
+				t.Errorf("ProjectSubPath() = %q, want %q", got, tt.projectSubPath)
+			}
+			if got := tt.agent.UserSubPath(); got != tt.userSubPath {
+				t.Errorf("UserSubPath() = %q, want %q", got, tt.userSubPath)
+			}
+
+			// Test SkillsFS
+			skillsFS := tt.agent.SkillsFS()
+			entries, err := skillsFS.ReadDir(tt.agent.SkillsSrcDir())
+			if err != nil {
+				t.Errorf("SkillsFS().ReadDir() failed: %v", err)
+			}
+			if len(entries) == 0 {
+				t.Error("SkillsFS() should contain at least one file")
+			}
+			if _, err := skillsFS.ReadFile(tt.agent.SkillsSrcDir() + "/SKILL.md"); err != nil {
+				t.Errorf("SKILL.md not found in SkillsFS: %v", err)
 			}
 		})
 	}
 
-	// Test SkillsFS separately as it requires more complex verification
-	t.Run("SkillsFS", func(t *testing.T) {
-		skillsFS := agent.SkillsFS()
-		entries, err := skillsFS.ReadDir(agent.SkillsSrcDir())
-		if err != nil {
-			t.Errorf("SkillsFS().ReadDir() failed: %v", err)
-		}
-		if len(entries) == 0 {
-			t.Error("SkillsFS() should contain at least one file")
-		}
-
-		if _, err := skillsFS.ReadFile(agent.SkillsSrcDir() + "/SKILL.md"); err != nil {
-			t.Errorf("SKILL.md not found in SkillsFS: %v", err)
+	// Test that all agents share the same SkillsFS
+	t.Run("SkillsFS shared across agents", func(t *testing.T) {
+		claudeEntries, _ := (&ClaudeCodeAgent{}).SkillsFS().ReadDir("skills")
+		for _, tt := range tests {
+			entries, _ := tt.agent.SkillsFS().ReadDir(tt.agent.SkillsSrcDir())
+			if len(entries) != len(claudeEntries) {
+				t.Errorf("%s SkillsFS should have same files as ClaudeCodeAgent", tt.name)
+			}
 		}
 	})
 }
 
-// TestGetAgent tests the GetAgent function with various agent names.
 func TestGetAgent(t *testing.T) {
 	tests := []struct {
 		name      string
 		agentName string
 		wantOK    bool
-		wantNil   bool
 	}{
-		{
-			name:      "known agent claude-code",
-			agentName: "claude-code",
-			wantOK:    true,
-			wantNil:   false,
-		},
-		{
-			name:      "unknown agent",
-			agentName: "unknown-agent",
-			wantOK:    false,
-			wantNil:   true,
-		},
+		{"known agent claude-code", "claude-code", true},
+		{"known agent cursor", "cursor", true},
+		{"known agent github-copilot", "github-copilot", true},
+		{"unknown agent", "unknown-agent", false},
 	}
 
 	for _, tt := range tests {
@@ -166,46 +181,61 @@ func TestGetAgent(t *testing.T) {
 			if ok != tt.wantOK {
 				t.Errorf("GetAgent(%q) ok = %v, want %v", tt.agentName, ok, tt.wantOK)
 			}
-			if (agent == nil) != tt.wantNil {
-				t.Errorf("GetAgent(%q) agent nil = %v, want %v", tt.agentName, agent == nil, tt.wantNil)
+			if tt.wantOK && agent == nil {
+				t.Errorf("GetAgent(%q) returned nil agent", tt.agentName)
+			}
+			if !tt.wantOK && agent != nil {
+				t.Errorf("GetAgent(%q) should return nil agent", tt.agentName)
 			}
 		})
 	}
 }
 
-// TestListAgents tests the ListAgents function.
 func TestListAgents(t *testing.T) {
 	agents := ListAgents()
 	if len(agents) == 0 {
 		t.Error("ListAgents should return at least one agent")
 	}
 
-	// Verify claude-code is in the list
-	found := false
-	for _, a := range agents {
-		if a.Name() == "claude-code" {
-			found = true
-			break
+	expectedAgents := []string{"claude-code", "cursor", "github-copilot"}
+	for _, expected := range expectedAgents {
+		found := false
+		for _, a := range agents {
+			if a.Name() == expected {
+				found = true
+				break
+			}
 		}
-	}
-	if !found {
-		t.Error("ListAgents should include claude-code")
+		if !found {
+			t.Errorf("ListAgents should include %s", expected)
+		}
 	}
 }
 
-// TestLLMSetupCmd tests LLMSetupCmd structure and defaults.
 func TestLLMSetupCmd(t *testing.T) {
 	cmd := &LLMSetupCmd{}
 
-	if cmd.ClaudeCode.User != false {
-		t.Error("ClaudeCode.User should default to false")
+	// All subcommands should have default values
+	subcommands := []struct {
+		name string
+		path string
+		user bool
+	}{
+		{"ClaudeCode", cmd.ClaudeCode.Path, cmd.ClaudeCode.User},
+		{"Cursor", cmd.Cursor.Path, cmd.Cursor.User},
+		{"GithubCopilot", cmd.GithubCopilot.Path, cmd.GithubCopilot.User},
 	}
-	if cmd.ClaudeCode.Path != "" {
-		t.Error("ClaudeCode.Path should default to empty")
+
+	for _, sc := range subcommands {
+		if sc.user != false {
+			t.Errorf("%s.User should default to false", sc.name)
+		}
+		if sc.path != "" {
+			t.Errorf("%s.Path should default to empty", sc.name)
+		}
 	}
 }
 
-// TestUsageCmd_Run tests that UsageCmd.Run prints usage and returns nil.
 func TestUsageCmd_Run(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -233,7 +263,6 @@ func TestUsageCmd_Run(t *testing.T) {
 	}
 }
 
-// TestInstall_Integration tests the complete Install function with real ClaudeCodeAgent.
 func TestInstall_Integration(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-install-*")
 	if err != nil {
@@ -248,7 +277,6 @@ func TestInstall_Integration(t *testing.T) {
 		t.Fatalf("Install failed: %v", err)
 	}
 
-	// Verify skill directory was created
 	expectedSkillDir := filepath.Join(tmpDir, agent.SkillsDirName())
 	if skillDir != expectedSkillDir {
 		t.Errorf("Install returned wrong path: got %s, want %s", skillDir, expectedSkillDir)

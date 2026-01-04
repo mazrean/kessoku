@@ -10,8 +10,10 @@ import (
 
 // LLMSetupCmd is the parent command for coding agent setup.
 type LLMSetupCmd struct {
-	Usage      UsageCmd      `kong:"cmd,default='1',hidden"`
-	ClaudeCode ClaudeCodeCmd `kong:"cmd,name='claude-code',help='Install Claude Code skills'"`
+	Usage         UsageCmd      `kong:"cmd,default='1',hidden"`
+	ClaudeCode    ClaudeCodeCmd `kong:"cmd,name='claude-code',help='Install Claude Code skills'"`
+	Cursor        CursorCmd     `kong:"cmd,name='cursor',help='Install Cursor skills'"`
+	GithubCopilot CopilotCmd    `kong:"cmd,name='github-copilot',help='Install GitHub Copilot skills'"`
 }
 
 // UsageCmd is a hidden default command that prints usage (FR-003).
@@ -22,8 +24,8 @@ func (c *UsageCmd) Run(ctx *kong.Context) error {
 	return ctx.PrintUsage(false)
 }
 
-// ClaudeCodeCmd is the subcommand for installing Claude Code Skills.
-type ClaudeCodeCmd struct {
+// AgentCmd is a generic command for installing agent skills.
+type AgentCmd[T Agent] struct {
 	// Stdout and Stderr for output (defaults to os.Stdout/os.Stderr)
 	Stdout io.Writer `kong:"-"`
 	Stderr io.Writer `kong:"-"`
@@ -31,9 +33,9 @@ type ClaudeCodeCmd struct {
 	User   bool      `kong:"help='Install to user-level directory'"`
 }
 
-// Run installs the Claude Code Skills file.
-func (c *ClaudeCodeCmd) Run() error {
-	agent := &ClaudeCodeAgent{}
+// Run installs the agent skills.
+func (c *AgentCmd[T]) Run() error {
+	var agent T
 
 	installedPath, err := Install(agent, c.Path, c.User)
 	if err != nil {
@@ -45,24 +47,33 @@ func (c *ClaudeCodeCmd) Run() error {
 	return nil
 }
 
-func (c *ClaudeCodeCmd) stdout() io.Writer {
+func (c *AgentCmd[T]) stdout() io.Writer {
 	if c.Stdout != nil {
 		return c.Stdout
 	}
 	return os.Stdout
 }
 
-func (c *ClaudeCodeCmd) stderr() io.Writer {
+func (c *AgentCmd[T]) stderr() io.Writer {
 	if c.Stderr != nil {
 		return c.Stderr
 	}
 	return os.Stderr
 }
 
-func (c *ClaudeCodeCmd) writeSuccess(path string) {
+func (c *AgentCmd[T]) writeSuccess(path string) {
 	_, _ = fmt.Fprintf(c.stdout(), "Skills installed to: %s\n", path)
 }
 
-func (c *ClaudeCodeCmd) writeError(err error) {
+func (c *AgentCmd[T]) writeError(err error) {
 	_, _ = fmt.Fprintf(c.stderr(), "Error: %v\n", err)
 }
+
+// ClaudeCodeCmd is the subcommand for installing Claude Code Skills.
+type ClaudeCodeCmd = AgentCmd[*ClaudeCodeAgent]
+
+// CursorCmd is the subcommand for installing Cursor Skills.
+type CursorCmd = AgentCmd[*CursorAgent]
+
+// CopilotCmd is the subcommand for installing GitHub Copilot Skills.
+type CopilotCmd = AgentCmd[*CopilotAgent]
