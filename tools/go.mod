@@ -6,7 +6,7 @@ require (
 	github.com/alingse/asasalint v0.0.11
 	github.com/breml/bidichk v0.3.3
 	github.com/charithe/durationcheck v0.0.11
-	github.com/go-critic/go-critic v0.13.0
+	github.com/go-critic/go-critic v0.14.3
 	github.com/gordonklaus/ineffassign v0.1.0
 	github.com/kisielk/errcheck v1.9.0
 	github.com/kyoh86/exportloopref v0.1.11
@@ -33,11 +33,11 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/gostaticanalysis/analysisutil v0.7.1 // indirect
 	github.com/gostaticanalysis/comment v1.5.0 // indirect
-	github.com/quasilyte/go-ruleguard v0.4.4 // indirect
+	github.com/quasilyte/go-ruleguard v0.4.5 // indirect
 	github.com/quasilyte/gogrep v0.5.0 // indirect
 	github.com/quasilyte/regex/syntax v0.0.0-20210819130434-b3f0c404a727 // indirect
 	github.com/quasilyte/stdinfo v0.0.0-20220114132959-f7386bf02567 // indirect
-	golang.org/x/exp/typeparams v0.0.0-20240213143201-ec583247a57a // indirect
+	golang.org/x/exp/typeparams v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 )
 
 require (
