@@ -13,7 +13,7 @@ require (
 	github.com/lufeee/execinquery v1.2.1
 	github.com/nishanths/exhaustive v0.12.0
 	github.com/sanposhiho/wastedassign/v2 v2.1.0
-	github.com/sonatard/noctx v0.3.3
+	github.com/sonatard/noctx v0.4.0
 	github.com/tdakkota/asciicheck v0.4.1
 	github.com/timakin/bodyclose v0.0.0-20241222091800-1db5c5ca4d67
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1
