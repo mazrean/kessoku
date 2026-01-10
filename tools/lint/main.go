@@ -1,11 +1,7 @@
 package main
 
 import (
-	"errors"
-	"fmt"
-	"go/types"
 	"log"
-	"os"
 
 	"github.com/alingse/asasalint"
 	"github.com/breml/bidichk/pkg/bidichk"
@@ -22,7 +18,6 @@ import (
 	"github.com/timakin/bodyclose/passes/bodyclose"
 	gomnd "github.com/tommy-muehle/go-mnd/v2"
 	"github.com/uudashr/iface/unused"
-	"golang.org/x/exp/apidiff"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/multichecker"
 	"golang.org/x/tools/go/analysis/passes/assign"
@@ -41,6 +36,7 @@ import (
 	"golang.org/x/tools/go/analysis/passes/ifaceassert"
 	"golang.org/x/tools/go/analysis/passes/loopclosure"
 	"golang.org/x/tools/go/analysis/passes/lostcancel"
+	"golang.org/x/tools/go/analysis/passes/modernize"
 	"golang.org/x/tools/go/analysis/passes/nilfunc"
 	"golang.org/x/tools/go/analysis/passes/nilness"
 	"golang.org/x/tools/go/analysis/passes/printf"
@@ -56,7 +52,6 @@ import (
 	"golang.org/x/tools/go/analysis/passes/unreachable"
 	"golang.org/x/tools/go/analysis/passes/unsafeptr"
 	"golang.org/x/tools/go/analysis/passes/unusedresult"
-	"golang.org/x/tools/go/packages"
 	"honnef.co/go/tools/analysis/lint"
 	"honnef.co/go/tools/simple"
 	"honnef.co/go/tools/staticcheck"
@@ -64,34 +59,6 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Println("No arguments provided")
-		return
-	}
-
-	subcommand := os.Args[1]
-	os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
-
-	switch subcommand {
-	case "lint":
-		if err := runLint(); err != nil {
-			log.Fatalf("Failed to run lint: %v", err)
-		}
-	case "apicompat":
-		if len(os.Args) < 3 {
-			log.Fatalf("usage: apicompat <base_package_path> <target_package_path>")
-		}
-
-		if err := runAPICompat(os.Args[1], os.Args[2]); err != nil {
-			log.Fatalf("Failed to run API compatibility check: %v", err)
-		}
-	default:
-		log.Printf("Invalid subcommand: %s\n", subcommand)
-		log.Println("Available subcommands: lint, apicompat")
-	}
-}
-
-func runLint() error {
 	asasalintAnalyzer, err := asasalint.NewAnalyzer(asasalint.LinterSetting{})
 	if err != nil {
 		log.Fatalf("Failed to create asasalint analyzer: %v", err)
@@ -151,6 +118,9 @@ func runLint() error {
 		wastedassign.Analyzer,
 	}
 
+	// modernize analyzers
+	analyzers = append(analyzers, modernize.Suite...)
+
 	staticcheckAnalyzers := make([]*lint.Analyzer, 0, len(simple.Analyzers)+len(staticcheck.Analyzers)+len(stylecheck.Analyzers))
 	staticcheckAnalyzers = append(staticcheckAnalyzers, simple.Analyzers...)
 	staticcheckAnalyzers = append(staticcheckAnalyzers, staticcheck.Analyzers...)
@@ -161,52 +131,4 @@ func runLint() error {
 	}
 
 	multichecker.Main(analyzers...)
-	return nil
-}
-
-// runAPICompat runs API compatibility checks between the current version and a base version
-func runAPICompat(basePackagePath, targetPackagePath string) error {
-	// Load packages for comparison
-	basePackages, err := loadPackages(basePackagePath)
-	if err != nil {
-		return fmt.Errorf("failed to load base packages: %w", err)
-	}
-
-	targetPackages, err := loadPackages(targetPackagePath)
-	if err != nil {
-		return fmt.Errorf("failed to load target packages: %w", err)
-	}
-
-	// Compare APIs
-	return compareAPIs(basePackages, targetPackages)
-}
-
-func loadPackages(packagePath string) (*types.Package, error) {
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedTypes | packages.NeedTypesSizes | packages.NeedTypesInfo | packages.NeedDeps,
-	}
-
-	pkgs, err := packages.Load(cfg, packagePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load packages: %w", err)
-	}
-
-	for _, pkg := range pkgs {
-		if pkg.PkgPath == packagePath {
-			return pkg.Types, nil
-		}
-	}
-
-	return nil, errors.New("not implemented")
-}
-
-func compareAPIs(basePackage, targetPackage *types.Package) error {
-	report := apidiff.Changes(basePackage, targetPackage)
-
-	// Print only incompatible changes to stdout (empty output means no breaking changes)
-	if err := report.TextIncompatible(os.Stdout, false); err != nil {
-		return fmt.Errorf("failed to print incompatible changes: %w", err)
-	}
-
-	return nil
 }

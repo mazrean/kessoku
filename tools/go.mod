@@ -372,5 +372,6 @@ require (
 
 tool (
 	github.com/goreleaser/goreleaser/v2
-	github.com/mazrean/kessoku/tools
+	github.com/mazrean/kessoku/tools/apicompat
+	github.com/mazrean/kessoku/tools/lint
 )
