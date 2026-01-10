@@ -132,7 +132,7 @@ func TestInstallFile(t *testing.T) {
 		content := []byte("test content")
 
 		// Install twice
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			if installErr := InstallFile(tmpDir, fileName, content); installErr != nil {
 				t.Fatalf("InstallFile #%d failed: %v", i+1, installErr)
 			}
