@@ -42,7 +42,7 @@ jobs:
       - name: Run custom linter
         run: |
           set -o pipefail
-          go tool tools lint ./... 2>&1 | tee lint-output.txt || {
+          go tool lint ./... 2>&1 | tee lint-output.txt || {
             echo "::group::Linting Issues"
             while IFS= read -r line; do
               if [[ "$line" =~ ^([^:]+):([0-9]+):([0-9]+):(.*)$ ]]; then
@@ -119,7 +119,7 @@ jobs:
         run: |
           MODULE_PATH="github.com/mazrean/kessoku"
           # Run API compatibility check and capture output
-          if OUTPUT=$(go tool tools apicompat "${MODULE_PATH}@latest" "${MODULE_PATH}" 2>&1); then
+          if OUTPUT=$(go tool apicompat "${MODULE_PATH}@latest" "${MODULE_PATH}" 2>&1); then
             echo "No breaking API changes detected"
           else
             echo "$OUTPUT"

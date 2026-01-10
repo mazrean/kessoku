@@ -22,7 +22,7 @@ go test -v -run TestGoldenGeneration ./internal/kessoku/...           # Run gold
 go test -v -run TestGoldenGeneration ./internal/kessoku/... -update   # Update golden files
 
 # Lint (mandatory before commit)
-go tool tools lint ./...
+go tool lint ./...
 
 # Code generation
 go generate ./...                          # Generate DI code via go:generate
@@ -32,7 +32,7 @@ go tool kessoku [files...]                 # Direct codegen for specific files
 go tool kessoku migrate [patterns...] -o kessoku.go    # Migrate wire config to kessoku (default: ./)
 
 # API compatibility check
-go tool tools apicompat github.com/mazrean/kessoku@latest github.com/mazrean/kessoku
+go tool apicompat github.com/mazrean/kessoku@latest github.com/mazrean/kessoku
 
 # Release
 go tool goreleaser release --snapshot --clean  # Snapshot (local testing)
@@ -101,7 +101,7 @@ Migration tool location: `internal/migrate/`
 ## Development Guidelines
 
 ### Mandatory Before Commit
-- Run `go tool tools lint ./...` - treat failures as blockers
+- Run `go tool lint ./...` - treat failures as blockers
 - Run `go test -v ./...` - all tests must pass
 - Run `go fmt ./...` - format code
 
