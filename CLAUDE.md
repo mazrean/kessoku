@@ -17,6 +17,10 @@ go test -v ./...                           # Run all tests
 go test -v -run TestName ./...             # Run specific test
 go test -v ./internal/kessoku/...          # Run tests in specific package
 
+# Golden tests (code generation validation)
+go test -v -run TestGoldenGeneration ./internal/kessoku/...           # Run golden tests
+go test -v -run TestGoldenGeneration ./internal/kessoku/... -update   # Update golden files
+
 # Lint (mandatory before commit)
 go tool tools lint ./...
 
@@ -89,6 +93,8 @@ Migration tool location: `internal/migrate/`
 
 - `annotation.go`: Public API (`Inject`, `Provide`, `Async`, `Bind`, `Value`, `Set`, `Struct`)
 - `internal/kessoku/provider.go`: Core data structures (`ProviderSpec`, `Injector`, `InjectorStmt`)
+- `internal/kessoku/golden_test.go`: Golden tests for code generation validation
+- `internal/kessoku/testdata/`: Test cases for golden tests (input files + expected.go)
 - `internal/config/`: CLI configuration and orchestration
 - `internal/migrate/`: Wire to Kessoku migration tool
 
@@ -114,6 +120,8 @@ Migration tool location: `internal/migrate/`
 - N/A (file-based input/output, no persistent storage) (001-wire-migrate)
 - Go 1.24+ + github.com/alecthomas/kong (CLI framework, already in use) (002-agent-skills-setup)
 - File-based output (Skills files installed to filesystem) (002-agent-skills-setup)
+- Go 1.24+ + golang.org/x/tools (AST/type checking), standard library (testing, flag, os, path/filepath) (003-golden-test)
+- File-based (testdata directory with input/expected files) (003-golden-test)
 
 ## Recent Changes
 - 001-wire-migrate: Added Go 1.24+ + github.com/alecthomas/kong (CLI), golang.org/x/tools (AST parsing, type checking)
