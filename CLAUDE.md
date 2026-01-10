@@ -23,6 +23,7 @@ go test -v -run TestGoldenGeneration ./internal/kessoku/... -update   # Update g
 
 # Lint (mandatory before commit)
 go tool lint ./...
+go tool lint -fix ./...                # Auto-fix issues where possible
 
 # Code generation
 go generate ./...                          # Generate DI code via go:generate
