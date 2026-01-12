@@ -19,6 +19,12 @@ var agents = []Agent{
 	&ClaudeCodeAgent{},
 	&CursorAgent{},
 	&CopilotAgent{},
+	&AmpAgent{},
+	&CodexAgent{},
+	&FactoryAgent{},
+	&GeminiCLIAgent{},
+	&GooseAgent{},
+	&OpenCodeAgent{},
 }
 
 // GetAgent returns the agent with the given name, if it exists.
