@@ -14,6 +14,12 @@ type LLMSetupCmd struct {
 	ClaudeCode    ClaudeCodeCmd `kong:"cmd,name='claude-code',help='Install Claude Code skills'"`
 	Cursor        CursorCmd     `kong:"cmd,name='cursor',help='Install Cursor skills'"`
 	GithubCopilot CopilotCmd    `kong:"cmd,name='github-copilot',help='Install GitHub Copilot skills'"`
+	Amp           AmpCmd        `kong:"cmd,name='amp',help='Install Amp skills'"`
+	Factory       FactoryCmd    `kong:"cmd,name='factory',help='Install Factory skills'"`
+	GeminiCLI     GeminiCLICmd  `kong:"cmd,name='gemini-cli',help='Install Gemini CLI skills'"`
+	Goose         GooseCmd      `kong:"cmd,name='goose',help='Install Goose skills'"`
+	OpenAICodex   CodexCmd      `kong:"cmd,name='openai-codex',help='Install OpenAI Codex skills'"`
+	OpenCode      OpenCodeCmd   `kong:"cmd,name='opencode',help='Install OpenCode skills'"`
 }
 
 // UsageCmd is a hidden default command that prints usage (FR-003).
@@ -77,3 +83,21 @@ type CursorCmd = AgentCmd[*CursorAgent]
 
 // CopilotCmd is the subcommand for installing GitHub Copilot Skills.
 type CopilotCmd = AgentCmd[*CopilotAgent]
+
+// AmpCmd is the subcommand for installing Amp Skills.
+type AmpCmd = AgentCmd[*AmpAgent]
+
+// CodexCmd is the subcommand for installing OpenAI Codex Skills.
+type CodexCmd = AgentCmd[*CodexAgent]
+
+// FactoryCmd is the subcommand for installing Factory Skills.
+type FactoryCmd = AgentCmd[*FactoryAgent]
+
+// GeminiCLICmd is the subcommand for installing Gemini CLI Skills.
+type GeminiCLICmd = AgentCmd[*GeminiCLIAgent]
+
+// GooseCmd is the subcommand for installing Goose Skills.
+type GooseCmd = AgentCmd[*GooseAgent]
+
+// OpenCodeCmd is the subcommand for installing OpenCode Skills.
+type OpenCodeCmd = AgentCmd[*OpenCodeAgent]

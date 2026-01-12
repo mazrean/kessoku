@@ -123,6 +123,8 @@ Migration tool location: `internal/migrate/`
 - File-based output (Skills files installed to filesystem) (002-agent-skills-setup)
 - Go 1.24+ + golang.org/x/tools (AST/type checking), standard library (testing, flag, os, path/filepath) (003-golden-test)
 - File-based (testdata directory with input/expected files) (003-golden-test)
+- Go 1.24+ + github.com/alecthomas/kong (CLI framework) (001-expand-agent-support)
+- N/A (file-based skill installation) (001-expand-agent-support)
 
 ## Recent Changes
 - 001-wire-migrate: Added Go 1.24+ + github.com/alecthomas/kong (CLI), golang.org/x/tools (AST parsing, type checking)

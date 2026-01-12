@@ -184,31 +184,32 @@ Kessoku provides built-in skills for AI coding assistants to help you write bett
 **Install skills for your coding agent:**
 
 ```bash
-# Claude Code
-go tool kessoku llm-setup claude-code
-
-# Cursor
-go tool kessoku llm-setup cursor
-
-# GitHub Copilot
-go tool kessoku llm-setup github-copilot
+go tool kessoku llm-setup <agent>
 ```
+
+**Supported agents:** Claude Code(`claude-code`), OpenAI Codex(`openai-codex`), Cursor(`cursor`), GitHub Copilot(`github-copilot`), Gemini CLI(`gemini-cli`), OpenCode(`opencode`), Amp(`amp`), Goose(`goose`), Factory(`factory`)
 
 <details>
 <summary>Installation Options</summary>
 
 ```bash
 # Install to user-level directory (available across all projects)
-go tool kessoku llm-setup claude-code --user
+go tool kessoku llm-setup <agent> --user
 
 # Install to custom directory
-go tool kessoku llm-setup claude-code --path ./custom/path
+go tool kessoku llm-setup <agent> --path ./custom/path
 ```
 
 **Default installation paths:**
 - **Claude Code:** `.claude/skills/` (project) or `~/.claude/skills/` (user)
 - **Cursor:** `.cursor/rules/` (project) or `~/.cursor/rules/` (user)
-- **GitHub Copilot:** `.github/copilot-instructions.d/` (project) or `~/.github/copilot-instructions.d/` (user)
+- **GitHub Copilot:** `.github/skills/` (project) or `~/.github/skills/` (user)
+- **Gemini CLI:** `.gemini/skills/` (project) or `~/.gemini/skills/` (user)
+- **OpenCode:** `.opencode/skill/` (project) or `~/.config/opencode/skill/` (user)
+- **OpenAI Codex:** `.codex/skills/` (project) or `~/.codex/skills/` (user)
+- **Amp:** `.agents/skills/` (project) or `~/.config/agents/skills/` (user)
+- **Goose:** `.agents/skills/` (project) or `~/.config/goose/skills/` (user)
+- **Factory:** `.factory/skills/` (project) or `~/.factory/skills/` (user)
 
 </details>
 

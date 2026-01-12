@@ -17,7 +17,7 @@ func (a *CopilotAgent) Description() string {
 
 // SkillsFS returns the embedded skill files (shared with Claude Code).
 func (a *CopilotAgent) SkillsFS() embed.FS {
-	return claudeCodeSkillsFS
+	return defaultSkillsFS
 }
 
 // SkillsSrcDir returns the source directory path in the embedded filesystem.

@@ -2,9 +2,6 @@ package llmsetup
 
 import "embed"
 
-//go:embed all:skills/kessoku-di
-var claudeCodeSkillsFS embed.FS
-
 // ClaudeCodeAgent implements the Agent interface for Claude Code.
 type ClaudeCodeAgent struct{}
 
@@ -20,7 +17,7 @@ func (a *ClaudeCodeAgent) Description() string {
 
 // SkillsFS returns the embedded skill files.
 func (a *ClaudeCodeAgent) SkillsFS() embed.FS {
-	return claudeCodeSkillsFS
+	return defaultSkillsFS
 }
 
 // SkillsSrcDir returns the source directory path in the embedded filesystem.

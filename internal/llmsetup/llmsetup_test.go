@@ -83,6 +83,42 @@ func TestCopilotCmd(t *testing.T) {
 	})
 }
 
+func TestGeminiCLICmd(t *testing.T) {
+	testAgentCmd(t, "GeminiCLI", func(path string, stdout, stderr *bytes.Buffer) *GeminiCLICmd {
+		return &GeminiCLICmd{Path: path, Stdout: stdout, Stderr: stderr}
+	})
+}
+
+func TestOpenCodeCmd(t *testing.T) {
+	testAgentCmd(t, "OpenCode", func(path string, stdout, stderr *bytes.Buffer) *OpenCodeCmd {
+		return &OpenCodeCmd{Path: path, Stdout: stdout, Stderr: stderr}
+	})
+}
+
+func TestCodexCmd(t *testing.T) {
+	testAgentCmd(t, "Codex", func(path string, stdout, stderr *bytes.Buffer) *CodexCmd {
+		return &CodexCmd{Path: path, Stdout: stdout, Stderr: stderr}
+	})
+}
+
+func TestAmpCmd(t *testing.T) {
+	testAgentCmd(t, "Amp", func(path string, stdout, stderr *bytes.Buffer) *AmpCmd {
+		return &AmpCmd{Path: path, Stdout: stdout, Stderr: stderr}
+	})
+}
+
+func TestGooseCmd(t *testing.T) {
+	testAgentCmd(t, "Goose", func(path string, stdout, stderr *bytes.Buffer) *GooseCmd {
+		return &GooseCmd{Path: path, Stdout: stdout, Stderr: stderr}
+	})
+}
+
+func TestFactoryCmd(t *testing.T) {
+	testAgentCmd(t, "Factory", func(path string, stdout, stderr *bytes.Buffer) *FactoryCmd {
+		return &FactoryCmd{Path: path, Stdout: stdout, Stderr: stderr}
+	})
+}
+
 // TestAgents tests all Agent implementations with table-driven tests.
 func TestAgents(t *testing.T) {
 	tests := []struct {
@@ -112,6 +148,48 @@ func TestAgents(t *testing.T) {
 			wantName:       "github-copilot",
 			projectSubPath: ".github/skills",
 			userSubPath:    ".github/skills",
+		},
+		{
+			name:           "GeminiCLIAgent",
+			agent:          &GeminiCLIAgent{},
+			wantName:       "gemini-cli",
+			projectSubPath: ".gemini/skills",
+			userSubPath:    ".gemini/skills",
+		},
+		{
+			name:           "OpenCodeAgent",
+			agent:          &OpenCodeAgent{},
+			wantName:       "opencode",
+			projectSubPath: ".opencode/skill",
+			userSubPath:    ".config/opencode/skill",
+		},
+		{
+			name:           "CodexAgent",
+			agent:          &CodexAgent{},
+			wantName:       "openai-codex",
+			projectSubPath: ".codex/skills",
+			userSubPath:    ".codex/skills",
+		},
+		{
+			name:           "AmpAgent",
+			agent:          &AmpAgent{},
+			wantName:       "amp",
+			projectSubPath: ".agents/skills",
+			userSubPath:    ".config/agents/skills",
+		},
+		{
+			name:           "GooseAgent",
+			agent:          &GooseAgent{},
+			wantName:       "goose",
+			projectSubPath: ".agents/skills",
+			userSubPath:    ".config/goose/skills",
+		},
+		{
+			name:           "FactoryAgent",
+			agent:          &FactoryAgent{},
+			wantName:       "factory",
+			projectSubPath: ".factory/skills",
+			userSubPath:    ".factory/skills",
 		},
 	}
 
@@ -172,6 +250,12 @@ func TestGetAgent(t *testing.T) {
 		{"known agent claude-code", "claude-code", true},
 		{"known agent cursor", "cursor", true},
 		{"known agent github-copilot", "github-copilot", true},
+		{"known agent gemini-cli", "gemini-cli", true},
+		{"known agent opencode", "opencode", true},
+		{"known agent openai-codex", "openai-codex", true},
+		{"known agent amp", "amp", true},
+		{"known agent goose", "goose", true},
+		{"known agent factory", "factory", true},
 		{"unknown agent", "unknown-agent", false},
 	}
 
@@ -197,7 +281,11 @@ func TestListAgents(t *testing.T) {
 		t.Error("ListAgents should return at least one agent")
 	}
 
-	expectedAgents := []string{"claude-code", "cursor", "github-copilot"}
+	expectedAgents := []string{
+		"claude-code", "cursor", "github-copilot",
+		"gemini-cli", "opencode", "openai-codex",
+		"amp", "goose", "factory",
+	}
 	for _, expected := range expectedAgents {
 		found := false
 		for _, a := range agents {
@@ -224,6 +312,12 @@ func TestLLMSetupCmd(t *testing.T) {
 		{"ClaudeCode", cmd.ClaudeCode.Path, cmd.ClaudeCode.User},
 		{"Cursor", cmd.Cursor.Path, cmd.Cursor.User},
 		{"GithubCopilot", cmd.GithubCopilot.Path, cmd.GithubCopilot.User},
+		{"GeminiCLI", cmd.GeminiCLI.Path, cmd.GeminiCLI.User},
+		{"OpenCode", cmd.OpenCode.Path, cmd.OpenCode.User},
+		{"OpenAICodex", cmd.OpenAICodex.Path, cmd.OpenAICodex.User},
+		{"Amp", cmd.Amp.Path, cmd.Amp.User},
+		{"Goose", cmd.Goose.Path, cmd.Goose.User},
+		{"Factory", cmd.Factory.Path, cmd.Factory.User},
 	}
 
 	for _, sc := range subcommands {

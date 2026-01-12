@@ -3,6 +3,9 @@ package llmsetup
 
 import "embed"
 
+//go:embed all:skills/kessoku-di
+var defaultSkillsFS embed.FS
+
 // Agent defines configuration for a coding agent.
 type Agent interface {
 	Name() string           // Subcommand name (e.g., "claude-code")
@@ -19,6 +22,12 @@ var agents = []Agent{
 	&ClaudeCodeAgent{},
 	&CursorAgent{},
 	&CopilotAgent{},
+	&AmpAgent{},
+	&CodexAgent{},
+	&FactoryAgent{},
+	&GeminiCLIAgent{},
+	&GooseAgent{},
+	&OpenCodeAgent{},
 }
 
 // GetAgent returns the agent with the given name, if it exists.
