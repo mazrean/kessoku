@@ -17,7 +17,7 @@ func (a *CodexAgent) Description() string {
 
 // SkillsFS returns the embedded skill files.
 func (a *CodexAgent) SkillsFS() embed.FS {
-	return claudeCodeSkillsFS
+	return defaultSkillsFS
 }
 
 // SkillsSrcDir returns the source directory path in the embedded filesystem.

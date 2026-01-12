@@ -17,7 +17,7 @@ func (a *AmpAgent) Description() string {
 
 // SkillsFS returns the embedded skill files.
 func (a *AmpAgent) SkillsFS() embed.FS {
-	return claudeCodeSkillsFS
+	return defaultSkillsFS
 }
 
 // SkillsSrcDir returns the source directory path in the embedded filesystem.
