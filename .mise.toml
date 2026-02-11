@@ -4,7 +4,7 @@ node = "24.13.0"
 "npm:@openai/codex" = "0.87.0"
 
 python = "3.14.3"
-uv = "0.9.26"
+uv = "0.10.2"
 "pipx:oraios/serena" = "v0.1.4"
 "pipx:github/spec-kit" = "v0.0.90"
 
