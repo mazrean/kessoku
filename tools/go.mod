@@ -8,7 +8,7 @@ require (
 	github.com/charithe/durationcheck v0.0.11
 	github.com/go-critic/go-critic v0.14.3
 	github.com/gordonklaus/ineffassign v0.2.0
-	github.com/kisielk/errcheck v1.9.0
+	github.com/kisielk/errcheck v1.10.0
 	github.com/kyoh86/exportloopref v0.1.11
 	github.com/lufeee/execinquery v1.2.1
 	github.com/nishanths/exhaustive v0.12.0
