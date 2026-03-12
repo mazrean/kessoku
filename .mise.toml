@@ -1,6 +1,6 @@
 [tools]
 node = "24.14.0"
-"npm:@anthropic-ai/claude-code" = "2.1.50"
+"npm:@anthropic-ai/claude-code" = "2.1.74"
 "npm:@openai/codex" = "0.112.0"
 
 python = "3.14.3"
