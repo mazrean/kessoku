@@ -3,7 +3,7 @@ node = "24.14.1"
 "npm:@anthropic-ai/claude-code" = "2.1.74"
 "npm:@openai/codex" = "0.118.0"
 
-python = "3.14.3"
+python = "3.14.4"
 uv = "0.11.6"
 "pipx:oraios/serena" = "v0.1.4"
 "pipx:github/spec-kit" = "v0.5.1"
