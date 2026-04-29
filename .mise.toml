@@ -6,7 +6,7 @@ node = "24.15.0"
 python = "3.14.4"
 uv = "0.11.8"
 "pipx:oraios/serena" = "v1.2.0"
-"pipx:github/spec-kit" = "v0.8.2"
+"pipx:github/spec-kit" = "v0.8.3"
 
 go = "1.26.2"
 "go:golang.org/x/tools/gopls" = "0.21.1"
