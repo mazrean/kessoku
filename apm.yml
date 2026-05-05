@@ -8,11 +8,8 @@ dependencies:
     - mazrean/apm-plackage/go
     - mazrean/apm-plackage/goreleaser
   mcp:
+    # serena (multi-language LSP) is repo-local; gopls MCP is provided transitively by apm-plackage/go.
     - name: serena
       transport: stdio
       command: pipx
       args: ["run", "oraios/serena", "--transport", "stdio"]
-    - name: gopls
-      transport: stdio
-      command: gopls
-      args: ["mcp"]
