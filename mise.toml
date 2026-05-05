@@ -1,0 +1,42 @@
+[tools]
+# common
+apm = "latest"
+gh = "latest"
+
+# go
+go = "1.26.2"
+"go:golang.org/x/tools/gopls" = "0.21.1"
+
+# python toolchain (kept for serena LSP)
+python = "3.14.4"
+uv = "0.11.8"
+"pipx:oraios/serena" = "v1.2.0"
+
+# goreleaser
+goreleaser = "latest"
+
+# Note: `npm:@anthropic-ai/claude-code`, `npm:@openai/codex`, and other coding-agent
+# CLIs are intentionally NOT pinned per project policy — install per developer.
+# Note: `pipx:github/spec-kit` is intentionally NOT pinned — spec-driven development
+# is unified on `mazrean/agent-skills/skills/writing-*` org-wide.
+
+[tasks.worktree]
+run = '''
+create_worktree() {
+    local branch_name=$1
+
+    # メインリポジトリのディレクトリを取得
+    local git_common=$(git rev-parse --git-common-dir)
+    local main_repo=$(dirname "$git_common")
+
+    # worktreesディレクトリを作成
+    local new_worktree="${main_repo}/.worktrees/${branch_name}"
+    mkdir -p "$new_worktree"
+
+    git worktree add -b "$branch_name" "$new_worktree"
+    echo "✓ worktreeを作成しました: $new_worktree"
+    code "$new_worktree"
+}
+create_worktree $1
+'''
+description = "Create and checkout a new git worktree"
