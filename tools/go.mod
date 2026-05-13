@@ -17,7 +17,7 @@ require (
 	github.com/tdakkota/asciicheck v0.4.1
 	github.com/timakin/bodyclose v0.0.0-20260129054331-73d1f95b84b4
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1
-	github.com/uudashr/iface v1.4.1
+	github.com/uudashr/iface v1.4.3
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f
 	golang.org/x/tools v0.44.0
 )
