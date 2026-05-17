@@ -7,18 +7,14 @@ gh = "latest"
 go = "1.26.2"
 "go:golang.org/x/tools/gopls" = "0.21.1"
 
-# python toolchain (kept for serena LSP)
-python = "3.14.4"
-uv = "0.11.8"
-"pipx:oraios/serena" = "v1.2.0"
-
 # goreleaser
 goreleaser = "latest"
 
-# Note: `npm:@anthropic-ai/claude-code`, `npm:@openai/codex`, and other coding-agent
-# CLIs are intentionally NOT pinned per project policy — install per developer.
-# Note: `pipx:github/spec-kit` is intentionally NOT pinned — spec-driven development
-# is unified on `mazrean/agent-skills/skills/writing-*` org-wide.
+# Note: golangci-lint is intentionally NOT pinned — use the per-repo `tools/lint`
+# Go module via `go tool lint ./...` (apm-plackage/go convention).
+# Note: claude-code / codex / other coding-agent CLIs are intentionally NOT pinned per project policy.
+# Note: python / uv / pipx-installed tools (serena, etc.) are intentionally NOT pinned
+# — gopls MCP from apm-plackage/go covers Go-only code intelligence for this repo.
 
 [tasks.worktree]
 run = '''
