@@ -394,6 +394,10 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 					return nil
 				}
 				continue
+			case *ast.SelectorExpr:
+				return fmt.Errorf("Set call expression from another package is not supported: %s", v.Sel.Name)
+			default:
+				return fmt.Errorf("unsupported Set call expression: %T", currentArg)
 			}
 		}
 
