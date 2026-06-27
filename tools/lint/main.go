@@ -1,7 +1,10 @@
 package main
 
 import (
+	"go/token"
 	"log"
+	"path/filepath"
+	"strings"
 
 	"github.com/alingse/asasalint"
 	"github.com/breml/bidichk/pkg/bidichk"
@@ -20,6 +23,7 @@ import (
 	"github.com/uudashr/iface/unused"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/multichecker"
+	"honnef.co/go/tools/analysis/facts/directives"
 	"golang.org/x/tools/go/analysis/passes/assign"
 	"golang.org/x/tools/go/analysis/passes/atomic"
 	"golang.org/x/tools/go/analysis/passes/atomicalign"
@@ -127,8 +131,56 @@ func main() {
 	staticcheckAnalyzers = append(staticcheckAnalyzers, stylecheck.Analyzers...)
 
 	for _, analyzer := range staticcheckAnalyzers {
-		analyzers = append(analyzers, analyzer.Analyzer)
+		analyzers = append(analyzers, wrapWithDirectives(analyzer.Analyzer))
 	}
 
 	multichecker.Main(analyzers...)
+}
+
+// wrapWithDirectives makes a staticcheck-style analyzer honor //lint:ignore
+// and //lint:file-ignore directives. The multichecker entry point used here
+// does not apply those directives by default; the staticcheck command does
+// it as a post-processing step, so we replicate that filtering inside each
+// analyzer's Report path.
+func wrapWithDirectives(a *analysis.Analyzer) *analysis.Analyzer {
+	a.Requires = append(a.Requires, directives.Analyzer)
+	name := a.Name
+	originalRun := a.Run
+	a.Run = func(pass *analysis.Pass) (any, error) {
+		dirs, _ := pass.ResultOf[directives.Analyzer].([]lint.Directive)
+		originalReport := pass.Report
+		pass.Report = func(d analysis.Diagnostic) {
+			if isIgnored(pass.Fset, d, dirs, name) {
+				return
+			}
+			originalReport(d)
+		}
+		return originalRun(pass)
+	}
+	return a
+}
+
+func isIgnored(fset *token.FileSet, d analysis.Diagnostic, dirs []lint.Directive, name string) bool {
+	diagPos := fset.Position(d.Pos)
+	for _, dir := range dirs {
+		if dir.Command != "ignore" && dir.Command != "file-ignore" {
+			continue
+		}
+		if len(dir.Arguments) == 0 {
+			continue
+		}
+		nodePos := fset.Position(dir.Node.Pos())
+		if nodePos.Filename != diagPos.Filename {
+			continue
+		}
+		if dir.Command == "ignore" && nodePos.Line != diagPos.Line {
+			continue
+		}
+		for _, c := range strings.Split(dir.Arguments[0], ",") {
+			if m, _ := filepath.Match(c, name); m {
+				return true
+			}
+		}
+	}
+	return false
 }
