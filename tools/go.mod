@@ -19,7 +19,7 @@ require (
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1
 	github.com/uudashr/iface v1.5.0
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976
-	golang.org/x/tools v0.46.0
+	golang.org/x/tools v0.47.0
 )
 
 require (
