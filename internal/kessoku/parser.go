@@ -395,6 +395,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 				}
 				continue
 			case *ast.SelectorExpr:
+				//lint:ignore ST1005 is ignored because Set is a kessoku-specific proper noun, so capitalizing it in the error string is intentional and not a generic sentence case issue.
 				return fmt.Errorf("Set call expression from another package is not supported: %s", v.Sel.Name)
 			default:
 				return fmt.Errorf("unsupported Set call expression: %T", currentArg)
