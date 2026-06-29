@@ -6,7 +6,7 @@ require (
 	github.com/alingse/asasalint v0.0.11
 	github.com/breml/bidichk v0.3.3
 	github.com/charithe/durationcheck v0.0.11
-	github.com/go-critic/go-critic v0.14.3
+	github.com/go-critic/go-critic v0.14.4
 	github.com/gordonklaus/ineffassign v0.2.0
 	github.com/kisielk/errcheck v1.20.0
 	github.com/kyoh86/exportloopref v0.1.11
