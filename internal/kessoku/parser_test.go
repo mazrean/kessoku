@@ -467,7 +467,7 @@ var _ = kessoku.Inject[*Service](
 		shouldHaveError bool
 	}{
 		{
-			name: "undefined Set variable graceful handling",
+			name: "undefined Set variable fails loudly",
 			content: `package main
 
 import "github.com/mazrean/kessoku"
@@ -486,8 +486,8 @@ var _ = kessoku.Inject[*Service](
 	kessoku.Provide(NewService),
 )
 `,
-			expectedBuilds:  0,     // Should skip this injector due to parse error
-			shouldHaveError: false, // Parser should not fail completely, just skip the injector
+			expectedBuilds:  0,    // No injector is generated from the invalid directive
+			shouldHaveError: true, // Directives that cannot be parsed must abort generation
 		},
 	}
 

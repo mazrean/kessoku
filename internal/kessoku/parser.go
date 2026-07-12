@@ -60,6 +60,17 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 		return nil, nil, nil
 	}
 
+	// Dot imports hide the package qualifier the directive scanner relies on,
+	// so Inject calls would be silently ignored. Reject them explicitly.
+	for _, imp := range astFile.Imports {
+		if imp.Name == nil || imp.Name.Name != "." {
+			continue
+		}
+		if path, unquoteErr := strconv.Unquote(imp.Path.Value); unquoteErr == nil && path == kessokuPkgPath {
+			return nil, nil, fmt.Errorf("%s: dot import of %s is not supported; import it with a package qualifier", filename, kessokuPkgPath)
+		}
+	}
+
 	if kessokuPkg.Types == nil {
 		slog.Warn("kessoku package is imported, but kessoku.Inject function is not found", "filename", filename)
 		return nil, nil, nil
@@ -235,9 +246,16 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 		return nil, nil
 	}
 
-	var builds []*BuildDirective
+	var (
+		builds   []*BuildDirective
+		parseErr error
+	)
 
 	ast.Inspect(file, func(n ast.Node) bool {
+		if parseErr != nil {
+			return false
+		}
+
 		callExpr, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -276,13 +294,17 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 
 		build, err := p.parseInjectCall(pkg, kessokuPackageScope, callExpr, imports, fileImports, varPool)
 		if err != nil {
-			slog.Warn("parseInjectCall failed", "callExpr", callExpr, "error", err)
-			return true
+			pos := p.fset.Position(callExpr.Pos())
+			parseErr = fmt.Errorf("%s: parse kessoku.Inject call: %w", pos, err)
+			return false
 		}
 
 		builds = append(builds, build)
 		return false
 	})
+	if parseErr != nil {
+		return nil, parseErr
+	}
 
 	return builds, nil
 }
@@ -372,6 +394,9 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 			switch v := currentArg.(type) {
 			case *ast.CallExpr:
 				callExpr = v
+			case *ast.ParenExpr:
+				currentArg = v.X
+				continue
 			case *ast.Ident:
 				obj := pkg.TypesInfo.ObjectOf(v)
 				if obj == nil {

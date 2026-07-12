@@ -22,37 +22,68 @@ func NewProcessor() *Processor {
 	}
 }
 
+// parsedFile holds the parse result for one input file awaiting generation.
+type parsedFile struct {
+	metaData *MetaData
+	filename string
+	builds   []*BuildDirective
+}
+
 // ProcessFiles processes specified Go files for wire generation.
+// All files are parsed and validated before any output is written, so a
+// failure in one file does not leave partial *_band.go files behind.
 func (p *Processor) ProcessFiles(files []string) error {
+	parsedFiles := make([]*parsedFile, 0, len(files))
+	// injector function names must be unique per package
+	seenNames := make(map[string]string)
+
 	for _, filename := range files {
-		if err := p.processFile(filename); err != nil {
+		slog.Debug("Processing file", "file", filename)
+
+		metaData, builds, err := p.parser.ParseFile(filename, p.varPool)
+		if err != nil {
+			return fmt.Errorf("parse file %s: %w", filename, err)
+		}
+
+		if len(builds) == 0 {
+			continue
+		}
+
+		slog.Info("Found inject directives", "file", filename, "count", len(builds))
+
+		for _, build := range builds {
+			key := metaData.Package.Path + "." + build.InjectorName
+			if prevFile, ok := seenNames[key]; ok {
+				return fmt.Errorf("duplicate injector name %q in package %s: declared in both %s and %s",
+					build.InjectorName, metaData.Package.Path, prevFile, filename)
+			}
+			seenNames[key] = filename
+		}
+
+		parsedFiles = append(parsedFiles, &parsedFile{
+			metaData: metaData,
+			filename: filename,
+			builds:   builds,
+		})
+	}
+
+	for _, pf := range parsedFiles {
+		if err := p.generateFile(pf); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
-// processFile processes a single Go file for wire generation.
-func (p *Processor) processFile(filename string) error {
-	slog.Debug("Processing file", "file", filename)
-
-	metaData, builds, err := p.parser.ParseFile(filename, p.varPool)
-	if err != nil {
-		return fmt.Errorf("parse file %s: %w", filename, err)
-	}
-
-	if len(builds) == 0 {
-		return nil
-	}
-
-	slog.Info("Found inject directives", "file", filename, "count", len(builds))
-
-	outputFileName := outputFileName(filename)
+// generateFile generates the *_band.go file for a parsed input file.
+func (p *Processor) generateFile(pf *parsedFile) error {
+	outputFileName := outputFileName(pf.filename)
 	slog.Debug("outputFileName", "outputFileName", outputFileName)
 
-	injectors := make([]*Injector, 0, len(builds))
-	for _, build := range builds {
-		injector, injectorErr := CreateInjector(metaData, build, p.varPool)
+	injectors := make([]*Injector, 0, len(pf.builds))
+	for _, build := range pf.builds {
+		injector, injectorErr := CreateInjector(pf.metaData, build, p.varPool)
 		if injectorErr != nil {
 			return fmt.Errorf("create injector: %w", injectorErr)
 		}
@@ -72,7 +103,7 @@ func (p *Processor) processFile(filename string) error {
 		}
 	}()
 
-	if genErr := Generate(f, filename, metaData, injectors, p.varPool); genErr != nil {
+	if genErr := Generate(f, pf.filename, pf.metaData, injectors, p.varPool); genErr != nil {
 		return fmt.Errorf("generate: %w", genErr)
 	}
 
