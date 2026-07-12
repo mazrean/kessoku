@@ -68,19 +68,24 @@ go get -tool github.com/mazrean/kessoku/cmd/kessoku
 package main
 
 import (
+    "context"
     "fmt"
     "time"
+
     "github.com/mazrean/kessoku"
 )
 
-func SlowDB() string {
+type DB struct{ Addr string }
+type Cache struct{ Addr string }
+
+func SlowDB() *DB {
     time.Sleep(200 * time.Millisecond)
-    return "DB-connected"
+    return &DB{Addr: "db:5432"}
 }
 
-func SlowCache() string {
+func SlowCache() *Cache {
     time.Sleep(150 * time.Millisecond)
-    return "Cache-ready"
+    return &Cache{Addr: "cache:6379"}
 }
 
 //go:generate go tool kessoku $GOFILE
@@ -88,22 +93,22 @@ func SlowCache() string {
 var _ = kessoku.Inject[string]("InitApp",
     kessoku.Async(kessoku.Provide(SlowDB)),
     kessoku.Async(kessoku.Provide(SlowCache)),
-    kessoku.Provide(func(db, cache string) string {
-        return fmt.Sprintf("App running with %s and %s", db, cache)
+    kessoku.Provide(func(db *DB, cache *Cache) string {
+        return fmt.Sprintf("App running with %s and %s", db.Addr, cache.Addr)
     }),
 )
 
 func main() {
     start := time.Now()
-    result, _ := InitApp()
+    result := InitApp(context.Background())
     fmt.Printf("%s in %v\n", result, time.Since(start))
 }
 ```
 
 **Run:**
 ```bash
-go generate && go run main.go
-# Shows: App running with DB-connected and Cache-ready (parallel startup)
+go generate && go run .
+# Shows: App running with db:5432 and cache:6379 in ~200ms (parallel startup)
 ```
 
 ## Installation
