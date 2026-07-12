@@ -23,22 +23,37 @@ func NewTransformer() *Transformer {
 	return &Transformer{}
 }
 
+// buildSetIndex builds a map from WireNewSet variable name to *WireNewSet for
+// all top-level sets in the patterns list.  This index is passed down to
+// transformNewSet / transformElements so that WireSetRef entries can be
+// resolved when checking for duplicate providers (Bug 3 fix).
+func buildSetIndex(patterns []WirePattern) map[string]*WireNewSet {
+	idx := make(map[string]*WireNewSet)
+	for _, p := range patterns {
+		if ws, ok := p.(*WireNewSet); ok && ws.VarName != "" {
+			idx[ws.VarName] = ws
+		}
+	}
+	return idx
+}
+
 // Transform transforms a list of wire patterns to kessoku patterns.
 // If tc is non-nil, it will be used for proper package-qualified type expressions.
 func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *TypeConverter) ([]KessokuPattern, error) {
 	t.tc = tc
+	setIndex := buildSetIndex(patterns)
 	var result []KessokuPattern
 
 	for _, p := range patterns {
 		switch wp := p.(type) {
 		case *WireNewSet:
-			transformed, err := t.transformNewSet(wp, pkg)
+			transformed, err := t.transformNewSet(wp, pkg, setIndex)
 			if err != nil {
 				return nil, err
 			}
 			result = append(result, transformed)
 		case *WireBind:
-			transformed, err := t.transformBind(wp, pkg)
+			transformed, err := t.transformBind(wp, pkg, nil)
 			if err != nil {
 				return nil, err
 			}

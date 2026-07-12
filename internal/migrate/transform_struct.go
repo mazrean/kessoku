@@ -15,7 +15,18 @@ type fieldInfo struct {
 
 // transformStruct transforms wire.Struct to kessoku.Provide with function literal.
 func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) *KessokuProvide {
+	// Unwrap all pointer layers to reach the underlying struct type.
+	// wire.Struct(new(*T)) yields **T from extractTypeFromNew; we must strip
+	// both layers to reach T before calling Underlying().
+	// transformFieldsOf uses the same loop — mirror it here.
 	structType := unwrapPointer(ws.StructType)
+	for {
+		if ptr, ok := structType.(*types.Pointer); ok {
+			structType = ptr.Elem()
+		} else {
+			break
+		}
+	}
 	underlying := structType.Underlying()
 	st, ok := underlying.(*types.Struct)
 	if !ok {

@@ -41,8 +41,11 @@ func (t *Transformer) transformBuild(wb *WireBuild, pkg *types.Package) (*Kessok
 		hasError = true
 	}
 
-	// Transform elements using common logic
-	elements, err := t.transformElements(wb.Elements, pkg)
+	// Transform elements using common logic.
+	// wire.Build lives inside a function; build a local set index from the
+	// build elements themselves (they cannot reference top-level sets by name
+	// the same way, but we still pass a non-nil map for consistency).
+	elements, err := t.transformElements(wb.Elements, pkg, nil)
 	if err != nil {
 		return nil, err
 	}

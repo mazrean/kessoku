@@ -5,8 +5,8 @@ import "maps"
 import "go/types"
 
 // transformNewSet transforms wire.NewSet to kessoku.Set.
-func (t *Transformer) transformNewSet(ws *WireNewSet, pkg *types.Package) (*KessokuSet, error) {
-	elements, err := t.transformElements(ws.Elements, pkg)
+func (t *Transformer) transformNewSet(ws *WireNewSet, pkg *types.Package, setIndex map[string]*WireNewSet) (*KessokuSet, error) {
+	elements, err := t.transformElements(ws.Elements, pkg, setIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,9 @@ func (t *Transformer) mergeFieldsOf(elements []WirePattern) map[string]*WireFiel
 // collectBoundTypes collects all implementation types from WireBind elements.
 // transformElements transforms a list of wire patterns to kessoku patterns.
 // This is the common logic shared between transformNewSet and transformBuild.
-func (t *Transformer) transformElements(elements []WirePattern, pkg *types.Package) ([]KessokuPattern, error) {
+// setIndex maps WireNewSet variable names to their parsed WireNewSet, used to
+// determine what providers a WireSetRef contributes (for duplicate-provider detection).
+func (t *Transformer) transformElements(elements []WirePattern, pkg *types.Package, setIndex map[string]*WireNewSet) ([]KessokuPattern, error) {
 	// First pass: collect all bound implementation types
 	// These are the types for which wire.Bind creates an implicit provider
 	boundTypes := t.collectBoundTypes(elements)
@@ -66,14 +68,14 @@ func (t *Transformer) transformElements(elements []WirePattern, pkg *types.Packa
 		switch we := elem.(type) {
 		case *WireNewSet:
 			// Handle inline nested wire.NewSet
-			nestedSet, err := t.transformNewSet(we, pkg)
+			nestedSet, err := t.transformNewSet(we, pkg, setIndex)
 			if err != nil {
 				return nil, err
 			}
 			// Flatten nested set elements into parent
 			result = append(result, nestedSet.Elements...)
 		case *WireBind:
-			transformed, err := t.transformBind(we, pkg)
+			transformed, err := t.transformBind(we, pkg, elements)
 			if err != nil {
 				return nil, err
 			}
@@ -102,6 +104,14 @@ func (t *Transformer) transformElements(elements []WirePattern, pkg *types.Packa
 			}
 			result = append(result, t.transformProviderFunc(we))
 		case *WireSetRef:
+			// Bug 3 fix: skip set references whose providers are entirely superseded
+			// by a wire.Bind in the same element list.  When the referenced set
+			// contributes only concrete types that are bound, the Bind expression
+			// already embeds kessoku.Provide(constructor), so including the set ref
+			// would create duplicate providers that kessoku rejects.
+			if t.isSetRefSupersededByBind(we, boundTypes, setIndex) {
+				continue
+			}
 			result = append(result, t.transformSetRef(we))
 		}
 	}
@@ -148,4 +158,37 @@ func (t *Transformer) isProviderBound(wf *WireProviderFunc, boundTypes map[strin
 	// Check if the first return type is in the bound types
 	returnType := results.At(0).Type()
 	return boundTypes[returnType.String()]
+}
+
+// isSetRefSupersededByBind returns true when every provider contributed by the
+// referenced set is already bound (i.e. will be embedded inside a kessoku.Bind
+// by transformBind).  In that situation, including the set reference would
+// produce a duplicate provider that kessoku's code generator would reject.
+//
+// We can only make this determination when the referenced WireNewSet is available
+// in setIndex; if it is not (e.g. it lives in another file/package), we conservatively
+// return false so the set ref is kept.
+func (t *Transformer) isSetRefSupersededByBind(ref *WireSetRef, boundTypes map[string]bool, setIndex map[string]*WireNewSet) bool {
+	if setIndex == nil {
+		return false
+	}
+	ws, ok := setIndex[ref.Name]
+	if !ok {
+		return false
+	}
+	if len(ws.Elements) == 0 {
+		return false
+	}
+	// Every element of the referenced set must be a provider whose return type is bound.
+	for _, elem := range ws.Elements {
+		wpf, ok := elem.(*WireProviderFunc)
+		if !ok {
+			// Non-provider element (e.g. nested set, Bind, Value) — conservative: keep ref.
+			return false
+		}
+		if !t.isProviderBound(wpf, boundTypes) {
+			return false
+		}
+	}
+	return true
 }
