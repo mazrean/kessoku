@@ -19,7 +19,12 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		notificationServiceCh = make(chan struct{})
 		app                   *App
 	)
+	ctx, cancel := context.WithCancel(ctx)
 	eg, ctx := errgroup.WithContext(ctx)
+	defer func() {
+		cancel()
+		_ = eg.Wait()
+	}()
 	eg.Go(func() error {
 		cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
 		close(cacheServiceCh)
@@ -40,6 +45,10 @@ func InitializeApp(ctx context.Context) (*App, error) {
 	select {
 	case <-cacheServiceCh:
 	case <-ctx.Done():
+		if err := eg.Wait(); err != nil {
+			var zero *App
+			return zero, err
+		}
 		var zero *App
 		return zero, ctx.Err()
 	}
@@ -47,12 +56,17 @@ func InitializeApp(ctx context.Context) (*App, error) {
 	select {
 	case <-notificationServiceCh:
 	case <-ctx.Done():
+		if err := eg.Wait(); err != nil {
+			var zero *App
+			return zero, err
+		}
 		var zero *App
 		return zero, ctx.Err()
 	}
 	app = kessoku.Provide(NewApp).Fn()(userService, notificationService)
 	if err := eg.Wait(); err != nil {
-		return nil, err
+		var zero *App
+		return zero, err
 	}
 	return app, nil
 }

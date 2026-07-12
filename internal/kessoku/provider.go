@@ -88,6 +88,10 @@ type ProviderSpec struct {
 	DeclOrder         int
 	IsReturnError     bool
 	IsAsync           bool
+	// IsVariadic reports whether the provider function is variadic; the last
+	// element of Requires is then the variadic slice type and the generated
+	// call site must expand it with `...`.
+	IsVariadic bool
 }
 
 type Return struct {
@@ -259,7 +263,10 @@ type InjectorReturn struct {
 }
 
 type InjectorStmt interface {
-	Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(errExpr ast.Expr) []ast.Stmt) ([]ast.Stmt, []string)
+	// Stmt generates the statements for this injector statement.
+	// inChain reports whether the statements are emitted inside an errgroup
+	// goroutine (an InjectorChainStmt body) rather than on the main goroutine.
+	Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(errExpr ast.Expr) []ast.Stmt, inChain bool) ([]ast.Stmt, []string)
 	HasAsync() bool
 }
 
@@ -300,9 +307,13 @@ type InjectorFieldAccessStmt struct {
 }
 
 // Stmt generates: fieldVar := structVar.FieldName (or = when predeclared in async builds)
-func (stmt *InjectorFieldAccessStmt) Stmt(varPool *VarPool, _ *Injector, _ func(errExpr ast.Expr) []ast.Stmt) ([]ast.Stmt, []string) {
-	// Determine if we need to use = instead of := (when variables are predeclared in async builds)
+func (stmt *InjectorFieldAccessStmt) Stmt(varPool *VarPool, injector *Injector, _ func(errExpr ast.Expr) []ast.Stmt, _ bool) ([]ast.Stmt, []string) {
+	// In async builds all injector variables are predeclared in a var block,
+	// so plain assignment is required to avoid shadowing them with :=.
 	useAssign := stmt.ReturnParam.WithChannel()
+	if injector != nil && hasChainStmts(injector) {
+		useAssign = true
+	}
 
 	tokenType := token.DEFINE
 	if useAssign {
@@ -343,11 +354,28 @@ func (stmt *InjectorFieldAccessStmt) HasAsync() bool {
 }
 
 type Injector struct {
-	Return        *InjectorReturn
-	Name          string
+	Return *InjectorReturn
+	Name   string
+	// asyncEgName is the generated errgroup variable name (async builds only).
+	asyncEgName string
+	// asyncCancelName is the generated context.CancelFunc variable name.
+	// It is set only for error-returning async builds.
+	asyncCancelName string
+	// asyncCtxName is the name of the cancellable context variable used for
+	// channel-wait select statements. It is empty when the generated code
+	// must wait on channels unconditionally (non-error-returning builds).
+	asyncCtxName  string
 	Params        []*InjectorParam
 	Args          []*InjectorArgument
 	Vars          []*InjectorParam
 	Stmts         []InjectorStmt
 	IsReturnError bool
+}
+
+// egName returns the errgroup variable name used in generated async code.
+func (injector *Injector) egName() string {
+	if injector.asyncEgName != "" {
+		return injector.asyncEgName
+	}
+	return "eg"
 }

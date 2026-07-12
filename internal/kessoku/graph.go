@@ -15,6 +15,64 @@ import (
 	"github.com/mazrean/kessoku/internal/pkg/collection"
 )
 
+// namedASTTypeExpr builds the AST expression for a named or aliased type,
+// qualifying it with its package and instantiating type arguments if present.
+func namedASTTypeExpr(pkg string, obj *types.TypeName, typeArgs *types.TypeList, varPool *VarPool, imports map[string]*Import) (ast.Expr, error) {
+	var baseExpr ast.Expr = ast.NewIdent(obj.Name())
+	if objPkg := obj.Pkg(); objPkg != nil && objPkg.Path() != pkg {
+		// For types from other packages, create a selector expression
+		// Format: package.TypeName
+		pkgPath := objPkg.Path()
+		pkgName := objPkg.Name()
+
+		// Check if package is already imported
+		if imp, exists := imports[pkgPath]; exists {
+			pkgName = imp.Name
+		} else {
+			newPkgName := varPool.GetName(pkgName)
+			imports[pkgPath] = &Import{
+				Name:          newPkgName,
+				IsDefaultName: newPkgName == pkgName,
+				IsUsed:        false, // Will be marked during code generation
+			}
+			pkgName = newPkgName
+		}
+
+		baseExpr = &ast.SelectorExpr{
+			X:   ast.NewIdent(pkgName),
+			Sel: ast.NewIdent(obj.Name()),
+		}
+	}
+
+	// Instantiated generic types keep their type arguments
+	// (e.g. Container[string]); without them the generated var
+	// declarations would reference an uninstantiated generic type.
+	if typeArgs == nil || typeArgs.Len() == 0 {
+		return baseExpr, nil
+	}
+
+	argExprs := make([]ast.Expr, 0, typeArgs.Len())
+	for i := 0; i < typeArgs.Len(); i++ {
+		argExpr, err := createASTTypeExpr(pkg, typeArgs.At(i), varPool, imports)
+		if err != nil {
+			return nil, fmt.Errorf("type argument %d: %w", i, err)
+		}
+		argExprs = append(argExprs, argExpr)
+	}
+
+	if len(argExprs) == 1 {
+		return &ast.IndexExpr{
+			X:     baseExpr,
+			Index: argExprs[0],
+		}, nil
+	}
+
+	return &ast.IndexListExpr{
+		X:       baseExpr,
+		Indices: argExprs,
+	}, nil
+}
+
 // createASTTypeExpr creates an AST type expression from a types.Type and updates existingImports
 func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[string]*Import) (ast.Expr, error) {
 	switch typ := t.(type) {
@@ -30,59 +88,11 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 			X: expr,
 		}, nil
 	case *types.Named:
-		name := typ.Obj().Name()
-		if objPkg := typ.Obj().Pkg(); objPkg != nil && objPkg.Path() != pkg {
-			// For types from other packages, create a selector expression
-			// Format: package.TypeName
-			pkgPath := objPkg.Path()
-			pkgName := objPkg.Name()
-
-			// Check if package is already imported
-			if imp, exists := imports[pkgPath]; exists {
-				pkgName = imp.Name
-			} else {
-				newPkgName := varPool.GetName(pkgName)
-				imports[pkgPath] = &Import{
-					Name:          newPkgName,
-					IsDefaultName: newPkgName == pkgName,
-					IsUsed:        false, // Will be marked during code generation
-				}
-			}
-
-			return &ast.SelectorExpr{
-				X:   ast.NewIdent(pkgName),
-				Sel: ast.NewIdent(name),
-			}, nil
-		}
-
-		return ast.NewIdent(name), nil
+		return namedASTTypeExpr(pkg, typ.Obj(), typ.TypeArgs(), varPool, imports)
 	case *types.Alias:
-		name := typ.Obj().Name()
-		if objPkg := typ.Obj().Pkg(); objPkg != nil && objPkg.Path() != pkg {
-			// For types from other packages, create a selector expression
-			// Format: package.TypeName
-			pkgPath := objPkg.Path()
-			pkgName := objPkg.Name()
-
-			// Check if package is already imported
-			if imp, exists := imports[pkgPath]; exists {
-				pkgName = imp.Name
-			} else {
-				newPkgName := varPool.GetName(pkgName)
-				imports[pkgPath] = &Import{
-					Name:          newPkgName,
-					IsDefaultName: newPkgName == pkgName,
-					IsUsed:        false, // Will be marked during code generation
-				}
-			}
-
-			return &ast.SelectorExpr{
-				X:   ast.NewIdent(pkgName),
-				Sel: ast.NewIdent(name),
-			}, nil
-		}
-
-		return ast.NewIdent(name), nil
+		return namedASTTypeExpr(pkg, typ.Obj(), typ.TypeArgs(), varPool, imports)
+	case *types.TypeParam:
+		return ast.NewIdent(typ.Obj().Name()), nil
 	case *types.Slice:
 		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {

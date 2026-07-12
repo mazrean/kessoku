@@ -7,7 +7,6 @@ import (
 	"go/token"
 	"go/types"
 	"io"
-	"log/slog"
 	"slices"
 	"strings"
 )
@@ -27,8 +26,7 @@ func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Inj
 	for _, injector := range injectors {
 		funcDecl, err := generateInjectorDecl(metaData, injector, varPool)
 		if err != nil {
-			slog.Error("Failed to generate injector declaration", "error", err)
-			continue
+			return fmt.Errorf("generate injector declaration for %s: %w", injector.Name, err)
 		}
 
 		funcDecls = append(funcDecls, funcDecl)
@@ -93,21 +91,40 @@ func hasChainStmts(injector *Injector) bool {
 	return false
 }
 
-// generateAsyncInitialization creates errgroup and variable declarations for async execution
+// ensureImport returns the local name of the import for pkgPath, creating
+// and registering it via varPool when missing, and marks it as used.
+func ensureImport(imports map[string]*Import, varPool *VarPool, pkgPath, pkgName string) string {
+	if imp, exists := imports[pkgPath]; exists {
+		imp.IsUsed = true
+		return imp.Name
+	}
+
+	name := varPool.GetName(pkgName)
+	imports[pkgPath] = &Import{
+		Name:          name,
+		IsDefaultName: pkgName == name,
+		IsUsed:        true,
+	}
+
+	return name
+}
+
+// generateAsyncInitialization creates errgroup and variable declarations for async execution.
+//
+// For error-returning injectors it establishes the exit protocol of the
+// generated code: a cancellable context wrapping the caller's context plus a
+// deferred `cancel(); eg.Wait()` pair, so that every early return unblocks
+// and joins all in-flight provider goroutines (no goroutine leaks, no
+// abandoned channels).
+//
+// Injectors without an error return cannot observe provider failures (none of
+// their providers return errors), so their generated code waits on completion
+// channels unconditionally instead of selecting on context cancellation.
+// This keeps them deadlock-free even when called with a cancelled context.
 func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
 
-	// Add errgroup import and mark it as used
-	if imp, exists := imports[errgroupPkgPath]; exists {
-		imp.IsUsed = true // Mark as used since we're generating errgroup code
-	} else {
-		name := varPool.GetName(errgroupPkgName)
-		imports[errgroupPkgPath] = &Import{
-			Name:          name,
-			IsDefaultName: errgroupPkgName == name,
-			IsUsed:        true, // Mark as used since we're generating errgroup code
-		}
-	}
+	errgroupAlias := ensureImport(imports, varPool, errgroupPkgPath, errgroupPkgName)
 
 	// Find context parameter name if available
 	var ctxParamName string
@@ -131,44 +148,121 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 		},
 	})
 
-	// Generate errgroup declaration
-	egDecl := generateErrGroupDeclaration(ctxParamName)
-	stmts = append(stmts, egDecl)
+	injector.asyncEgName = varPool.GetName("eg")
+
+	if !injector.IsReturnError {
+		// Unconditional channel waits: no cancellable context needed.
+		injector.asyncCtxName = ""
+		stmts = append(stmts, generateErrGroupDeclaration(injector.asyncEgName, "", errgroupAlias))
+
+		return stmts, nil
+	}
+
+	contextAlias := ensureImport(imports, varPool, contextPkgPath, contextPkgName)
+	injector.asyncCancelName = varPool.GetName("cancel")
+
+	// ctx, cancel := context.WithCancel(ctx)
+	// (falls back to context.Background() when the injector has no context
+	// parameter; async injectors normally receive one automatically)
+	var parentCtxExpr ast.Expr
+	if ctxParamName != "" {
+		injector.asyncCtxName = ctxParamName
+		parentCtxExpr = ast.NewIdent(ctxParamName)
+	} else {
+		injector.asyncCtxName = varPool.GetName("ctx")
+		parentCtxExpr = &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent(contextAlias),
+				Sel: ast.NewIdent("Background"),
+			},
+		}
+	}
+
+	stmts = append(stmts, &ast.AssignStmt{
+		Lhs: []ast.Expr{
+			ast.NewIdent(injector.asyncCtxName),
+			ast.NewIdent(injector.asyncCancelName),
+		},
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{
+			&ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ast.NewIdent(contextAlias),
+					Sel: ast.NewIdent("WithCancel"),
+				},
+				Args: []ast.Expr{parentCtxExpr},
+			},
+		},
+	})
+
+	stmts = append(stmts, generateErrGroupDeclaration(injector.asyncEgName, injector.asyncCtxName, errgroupAlias))
+
+	// defer func() { cancel(); _ = eg.Wait() }()
+	// Guarantees that any return path unblocks and joins provider goroutines.
+	stmts = append(stmts, &ast.DeferStmt{
+		Call: &ast.CallExpr{
+			Fun: &ast.FuncLit{
+				Type: &ast.FuncType{Params: &ast.FieldList{}},
+				Body: &ast.BlockStmt{
+					List: []ast.Stmt{
+						&ast.ExprStmt{
+							X: &ast.CallExpr{
+								Fun: ast.NewIdent(injector.asyncCancelName),
+							},
+						},
+						&ast.AssignStmt{
+							Lhs: []ast.Expr{ast.NewIdent("_")},
+							Tok: token.ASSIGN,
+							Rhs: []ast.Expr{
+								&ast.CallExpr{
+									Fun: &ast.SelectorExpr{
+										X:   ast.NewIdent(injector.asyncEgName),
+										Sel: ast.NewIdent("Wait"),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
 
 	return stmts, nil
 }
 
-// generateErrGroupDeclaration creates the errgroup variable declaration
-// ctxParamName is the name of the context parameter (empty string if no context)
-func generateErrGroupDeclaration(ctxParamName string) *ast.AssignStmt {
-	if ctxParamName != "" {
+// generateErrGroupDeclaration creates the errgroup variable declaration.
+// ctxName is the name of the context variable to derive from (empty string
+// when the errgroup should not be bound to a context).
+func generateErrGroupDeclaration(egName, ctxName, errgroupAlias string) *ast.AssignStmt {
+	if ctxName != "" {
 		return &ast.AssignStmt{
 			Lhs: []ast.Expr{
-				ast.NewIdent("eg"),
-				ast.NewIdent("ctx"),
+				ast.NewIdent(egName),
+				ast.NewIdent(ctxName),
 			},
 			Tok: token.DEFINE,
 			Rhs: []ast.Expr{
 				&ast.CallExpr{
 					Fun: &ast.SelectorExpr{
-						X:   ast.NewIdent("errgroup"),
+						X:   ast.NewIdent(errgroupAlias),
 						Sel: ast.NewIdent("WithContext"),
 					},
-					Args: []ast.Expr{ast.NewIdent(ctxParamName)},
+					Args: []ast.Expr{ast.NewIdent(ctxName)},
 				},
 			},
 		}
 	}
 
 	return &ast.AssignStmt{
-		Lhs: []ast.Expr{ast.NewIdent("eg")},
+		Lhs: []ast.Expr{ast.NewIdent(egName)},
 		Tok: token.DEFINE,
 		Rhs: []ast.Expr{
 			&ast.UnaryExpr{
 				Op: token.AND,
 				X: &ast.CompositeLit{
 					Type: &ast.SelectorExpr{
-						X:   ast.NewIdent("errgroup"),
+						X:   ast.NewIdent(errgroupAlias),
 						Sel: ast.NewIdent("Group"),
 					},
 				},
@@ -226,8 +320,8 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imp
 }
 
 // generateAsyncWaitStatements creates errgroup wait statements
-func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
-	if injector.IsReturnError {
+func generateAsyncWaitStatements(injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) []ast.Stmt {
+	if injector.IsReturnError && returnErrStmts != nil {
 		errIdent := ast.NewIdent("err")
 
 		return []ast.Stmt{
@@ -238,7 +332,7 @@ func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
 					Rhs: []ast.Expr{
 						&ast.CallExpr{
 							Fun: &ast.SelectorExpr{
-								X:   ast.NewIdent("eg"),
+								X:   ast.NewIdent(injector.egName()),
 								Sel: ast.NewIdent("Wait"),
 							},
 						},
@@ -250,14 +344,7 @@ func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
 					Y:  ast.NewIdent("nil"),
 				},
 				Body: &ast.BlockStmt{
-					List: []ast.Stmt{
-						&ast.ReturnStmt{
-							Results: []ast.Expr{
-								ast.NewIdent("nil"),
-								errIdent,
-							},
-						},
-					},
+					List: returnErrStmts(errIdent),
 				},
 			},
 		}
@@ -270,7 +357,7 @@ func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
 			Rhs: []ast.Expr{
 				&ast.CallExpr{
 					Fun: &ast.SelectorExpr{
-						X:   ast.NewIdent("eg"),
+						X:   ast.NewIdent(injector.egName()),
 						Sel: ast.NewIdent("Wait"),
 					},
 				},
@@ -434,13 +521,13 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map
 
 	// Process statements and collect completion channels
 	for _, stmt := range injector.Stmts {
-		newStmts, _ := stmt.Stmt(varPool, injector, returnErrStmts)
+		newStmts, _ := stmt.Stmt(varPool, injector, returnErrStmts, false)
 		stmts = append(stmts, newStmts...)
 	}
 
 	// Add async completion handling
 	if hasChains {
-		waitStmts := generateAsyncWaitStatements(injector)
+		waitStmts := generateAsyncWaitStatements(injector, returnErrStmts)
 		stmts = append(stmts, waitStmts...)
 	}
 
@@ -461,13 +548,13 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map
 	return stmts, nil
 }
 
-func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) ([]ast.Stmt, []string) {
+func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt, inChain bool) ([]ast.Stmt, []string) {
 	var stmts []ast.Stmt
 
 	// Add channel synchronization for async scenarios
 	hasChains := hasChainStmts(injector)
 	if hasChains {
-		waitStmt := stmt.generateChannelWaitStatement(varPool, injector, returnErrStmts)
+		waitStmt := stmt.generateChannelWaitStatement(varPool, injector, returnErrStmts, inChain)
 		if waitStmt != nil {
 			stmts = append(stmts, waitStmt)
 		}
@@ -523,19 +610,10 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 	return stmts, nil
 }
 
-func (stmt *InjectorProviderCallStmt) channelsWait(channels []ast.Expr, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
-	// Check if context is available
-	hasCtx := false
-	for _, arg := range injector.Args {
-		if isContextType(arg.Type) {
-			hasCtx = true
-			break
-		}
-	}
-
+func (stmt *InjectorProviderCallStmt) channelsWait(channels []ast.Expr, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt, inChain bool) ast.Stmt {
 	if len(channels) == 1 {
 		// Single channel case
-		return stmt.buildWaitStatement(hasCtx, channels[0], returnErrStmts)
+		return stmt.buildWaitStatement(injector, channels[0], returnErrStmts, inChain)
 	}
 
 	return &ast.RangeStmt{
@@ -553,20 +631,72 @@ func (stmt *InjectorProviderCallStmt) channelsWait(channels []ast.Expr, injector
 		},
 		Body: &ast.BlockStmt{
 			List: []ast.Stmt{
-				stmt.buildWaitStatement(hasCtx, ast.NewIdent("ch"), returnErrStmts),
+				stmt.buildWaitStatement(injector, ast.NewIdent("ch"), returnErrStmts, inChain),
 			},
 		},
 	}
 }
 
-func (stmt *InjectorProviderCallStmt) buildWaitStatement(hasCtx bool, channel ast.Expr, returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
-	if !hasCtx || returnErrStmts == nil {
+// buildWaitStatement emits the wait for a dependency's completion channel.
+//
+// When the injector has no cancellable context (non-error-returning builds)
+// the wait is an unconditional receive: none of the providers can fail, so
+// every channel is guaranteed to be closed and selecting on context
+// cancellation would only introduce paths that leave waiters stuck or return
+// silent zero values.
+//
+// Inside errgroup goroutines the ctx.Done() branch returns ctx.Err() into the
+// errgroup. On the main goroutine it consults eg.Wait() first so the actual
+// provider failure is returned to the caller instead of a derived
+// context.Canceled.
+func (stmt *InjectorProviderCallStmt) buildWaitStatement(injector *Injector, channel ast.Expr, returnErrStmts func(ast.Expr) []ast.Stmt, inChain bool) ast.Stmt {
+	ctxName := injector.asyncCtxName
+	if ctxName == "" || returnErrStmts == nil {
 		return &ast.ExprStmt{
 			X: &ast.UnaryExpr{
 				Op: token.ARROW,
 				X:  channel,
 			},
 		}
+	}
+
+	ctxErrExpr := &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   ast.NewIdent(ctxName),
+			Sel: ast.NewIdent("Err"),
+		},
+	}
+
+	var doneBody []ast.Stmt
+	if inChain {
+		doneBody = returnErrStmts(ctxErrExpr)
+	} else {
+		// if err := eg.Wait(); err != nil { return zero, err }
+		// return zero, ctx.Err()
+		errIdent := ast.NewIdent("err")
+		doneBody = append(doneBody, &ast.IfStmt{
+			Init: &ast.AssignStmt{
+				Lhs: []ast.Expr{errIdent},
+				Tok: token.DEFINE,
+				Rhs: []ast.Expr{
+					&ast.CallExpr{
+						Fun: &ast.SelectorExpr{
+							X:   ast.NewIdent(injector.egName()),
+							Sel: ast.NewIdent("Wait"),
+						},
+					},
+				},
+			},
+			Cond: &ast.BinaryExpr{
+				X:  errIdent,
+				Op: token.NEQ,
+				Y:  ast.NewIdent("nil"),
+			},
+			Body: &ast.BlockStmt{
+				List: returnErrStmts(errIdent),
+			},
+		})
+		doneBody = append(doneBody, returnErrStmts(ctxErrExpr)...)
 	}
 
 	return &ast.SelectStmt{
@@ -587,18 +717,13 @@ func (stmt *InjectorProviderCallStmt) buildWaitStatement(hasCtx bool, channel as
 							Op: token.ARROW,
 							X: &ast.CallExpr{
 								Fun: &ast.SelectorExpr{
-									X:   ast.NewIdent("ctx"),
+									X:   ast.NewIdent(ctxName),
 									Sel: ast.NewIdent("Done"),
 								},
 							},
 						},
 					},
-					Body: returnErrStmts(&ast.CallExpr{
-						Fun: &ast.SelectorExpr{
-							X:   ast.NewIdent("ctx"),
-							Sel: ast.NewIdent("Err"),
-						},
-					}),
+					Body: doneBody,
 				},
 			},
 		},
@@ -659,13 +784,21 @@ func chainReturnErrStmts(errExpr ast.Expr) []ast.Stmt {
 	}
 }
 
-func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ func(ast.Expr) []ast.Stmt) ([]ast.Stmt, []string) {
+func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ func(ast.Expr) []ast.Stmt, _ bool) ([]ast.Stmt, []string) {
 	var imports []string
 	var stmts []ast.Stmt
 
+	// Providers of non-error-returning injectors cannot fail, so their
+	// goroutines wait on dependency channels unconditionally (nil
+	// returnErrStmts) instead of racing against context cancellation.
+	chainErrStmts := chainReturnErrStmts
+	if !injector.IsReturnError {
+		chainErrStmts = nil
+	}
+
 	// Generate statements for this chain
 	for _, chainStmt := range stmt.Statements {
-		chainStmts, chainImports := chainStmt.Stmt(varPool, injector, chainReturnErrStmts)
+		chainStmts, chainImports := chainStmt.Stmt(varPool, injector, chainErrStmts, true)
 		stmts = append(stmts, chainStmts...)
 		imports = append(imports, chainImports...)
 	}
@@ -679,7 +812,7 @@ func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ func
 		&ast.ExprStmt{
 			X: &ast.CallExpr{
 				Fun: &ast.SelectorExpr{
-					X:   ast.NewIdent("eg"),
+					X:   ast.NewIdent(injector.egName()),
 					Sel: ast.NewIdent("Go"),
 				},
 				Args: []ast.Expr{
@@ -735,17 +868,23 @@ func (stmt *InjectorProviderCallStmt) buildArguments(varPool *VarPool) []ast.Exp
 
 // buildProviderCall builds the provider function call expression
 func (stmt *InjectorProviderCallStmt) buildProviderCall(args []ast.Expr) []ast.Expr {
-	return []ast.Expr{
-		&ast.CallExpr{
-			Fun: &ast.CallExpr{
-				Fun: &ast.SelectorExpr{
-					X:   stmt.Provider.ASTExpr,
-					Sel: ast.NewIdent("Fn"),
-				},
+	callExpr := &ast.CallExpr{
+		Fun: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   stmt.Provider.ASTExpr,
+				Sel: ast.NewIdent("Fn"),
 			},
-			Args: args,
 		},
+		Args: args,
 	}
+
+	// Variadic providers receive the last dependency as a slice that must be
+	// expanded at the call site: fn(a, opts...).
+	if stmt.Provider.IsVariadic && len(args) > 0 {
+		callExpr.Ellipsis = token.Pos(1)
+	}
+
+	return []ast.Expr{callExpr}
 }
 
 // buildAssignmentStatement builds the assignment statement
@@ -781,7 +920,7 @@ func (stmt *InjectorProviderCallStmt) buildErrorHandlingStatement(errIdent *ast.
 }
 
 // generateChannelWaitStatement generates channel wait statements for async coordination
-func (stmt *InjectorProviderCallStmt) generateChannelWaitStatement(varPool *VarPool, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
+func (stmt *InjectorProviderCallStmt) generateChannelWaitStatement(varPool *VarPool, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt, inChain bool) ast.Stmt {
 	var channels []ast.Expr
 
 	// Collect channels from dependencies
@@ -795,7 +934,7 @@ func (stmt *InjectorProviderCallStmt) generateChannelWaitStatement(varPool *VarP
 		return nil
 	}
 
-	return stmt.channelsWait(channels, injector, returnErrStmts)
+	return stmt.channelsWait(channels, injector, returnErrStmts, inChain)
 }
 
 // generateChannelCloseStatement generates channel close statements for async coordination

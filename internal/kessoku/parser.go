@@ -456,6 +456,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 			Requires:          result.Requires,
 			IsReturnError:     result.IsReturnError,
 			IsAsync:           result.IsAsync,
+			IsVariadic:        result.IsVariadic,
 			ReferencedImports: referencedImports,
 		})
 	}
@@ -471,6 +472,7 @@ type parseProviderTypeResult struct {
 	IsReturnError bool
 	IsAsync       bool
 	IsStruct      bool
+	IsVariadic    bool
 }
 
 func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Type, varPool *VarPool) (*parseProviderTypeResult, error) {
@@ -563,6 +565,7 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 			IsReturnError: isReturnError,
 			IsAsync:       false,
 			IsStruct:      false,
+			IsVariadic:    providerFnSig.Variadic(),
 		}, nil
 	case "structProvider":
 		if typeArgs.Len() < 1 {

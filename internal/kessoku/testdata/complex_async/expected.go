@@ -22,24 +22,16 @@ func InitializeComplexApp(ctx context.Context) *App {
 		notificationService *NotificationService
 		app                 *App
 	)
-	eg, ctx := errgroup.WithContext(ctx)
+	eg := &errgroup.Group{}
 	eg.Go(func() error {
-		select {
-		case <-configCh:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		<-configCh
 		databaseService = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()(config)
 		userService = kessoku.Async(kessoku.Provide(NewUserService)).Fn()(databaseService)
 		close(userServiceCh)
 		return nil
 	})
 	eg.Go(func() error {
-		select {
-		case <-configCh:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		<-configCh
 		cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()(config)
 		sessionService = kessoku.Async(kessoku.Provide(NewSessionService)).Fn()(cacheService)
 		close(sessionServiceCh)
