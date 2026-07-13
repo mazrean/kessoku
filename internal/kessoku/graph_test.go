@@ -1,8 +1,11 @@
 package kessoku
 
 import (
+	"bytes"
 	"errors"
 	"go/ast"
+	"go/printer"
+	"go/token"
 	"go/types"
 	"strings"
 	"testing"
@@ -603,6 +606,76 @@ func TestCreateASTTypeExpr(t *testing.T) {
 				if _, exists := existingImports[expectedImport]; !exists {
 					t.Errorf("Expected import %q not found in existingImports", expectedImport)
 				}
+			}
+		})
+	}
+}
+
+// exprToString renders an ast.Expr to its Go source string for comparison.
+func exprToString(expr ast.Expr) string {
+	var buf bytes.Buffer
+	_ = printer.Fprint(&buf, token.NewFileSet(), expr)
+	return buf.String()
+}
+
+// TestCreateASTTypeExprVariadic verifies that variadic function types are rendered
+// as func(arg0 ...T) instead of func(arg0 []T).
+func TestCreateASTTypeExprVariadic(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		typeExpr     types.Type
+		expectedExpr string
+	}{
+		{
+			name: "variadic function type single param",
+			typeExpr: func() types.Type {
+				params := types.NewTuple(types.NewVar(0, nil, "args", types.NewSlice(types.Typ[types.String])))
+				results := types.NewTuple(types.NewVar(0, nil, "", types.Typ[types.String]))
+				return types.NewSignatureType(nil, nil, nil, params, results, true)
+			}(),
+			expectedExpr: "func(arg0 ...string) (result0 string)",
+		},
+		{
+			name: "variadic function type with leading non-variadic params",
+			typeExpr: func() types.Type {
+				p0 := types.NewVar(0, nil, "n", types.Typ[types.Int])
+				p1 := types.NewVar(0, nil, "args", types.NewSlice(types.Typ[types.String]))
+				params := types.NewTuple(p0, p1)
+				results := types.NewTuple(types.NewVar(0, nil, "", types.Typ[types.Int]))
+				return types.NewSignatureType(nil, nil, nil, params, results, true)
+			}(),
+			expectedExpr: "func(arg0 int, arg1 ...string) (result0 int)",
+		},
+		{
+			name: "non-variadic function type is unchanged",
+			typeExpr: func() types.Type {
+				params := types.NewTuple(types.NewVar(0, nil, "x", types.Typ[types.Int]))
+				results := types.NewTuple(types.NewVar(0, nil, "", types.Typ[types.String]))
+				return types.NewSignatureType(nil, nil, nil, params, results, false)
+			}(),
+			expectedExpr: "func(arg0 int) (result0 string)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			varPool := NewVarPool()
+			existingImports := make(map[string]*Import)
+			expr, err := createASTTypeExpr("main", tt.typeExpr, varPool, existingImports)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if expr == nil {
+				t.Fatal("Expected non-nil expression but got nil")
+			}
+
+			got := exprToString(expr)
+			if got != tt.expectedExpr {
+				t.Errorf("Expected %q, got %q", tt.expectedExpr, got)
 			}
 		})
 	}

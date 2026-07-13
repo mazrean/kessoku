@@ -199,9 +199,27 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 	case *types.Signature:
 		funcFields := make([]*ast.Field, 0, typ.Params().Len())
 		for i := 0; i < typ.Params().Len(); i++ {
-			expr, err := createASTTypeExpr(pkg, typ.Params().At(i).Type(), varPool, imports)
-			if err != nil {
-				return nil, fmt.Errorf("param %d: %w", i, err)
+			paramType := typ.Params().At(i).Type()
+			isLastVariadic := typ.Variadic() && i == typ.Params().Len()-1
+			var expr ast.Expr
+			if isLastVariadic {
+				// The last param of a variadic function is stored as *types.Slice.
+				// Unwrap it and emit ...ElemType instead of []ElemType.
+				sliceType, ok := paramType.(*types.Slice)
+				if !ok {
+					return nil, fmt.Errorf("param %d: variadic parameter is not a slice type", i)
+				}
+				elemExpr, err := createASTTypeExpr(pkg, sliceType.Elem(), varPool, imports)
+				if err != nil {
+					return nil, fmt.Errorf("param %d: %w", i, err)
+				}
+				expr = &ast.Ellipsis{Elt: elemExpr}
+			} else {
+				var err error
+				expr, err = createASTTypeExpr(pkg, paramType, varPool, imports)
+				if err != nil {
+					return nil, fmt.Errorf("param %d: %w", i, err)
+				}
 			}
 			funcFields = append(funcFields, &ast.Field{
 				Names: []*ast.Ident{ast.NewIdent(fmt.Sprintf("arg%d", i))},
