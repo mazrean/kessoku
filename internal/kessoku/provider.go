@@ -161,6 +161,12 @@ func collectImportsFromType(t types.Type, pkg string, imports map[string]*Import
 				referencedImports[pkgPath] = newImp
 			}
 		}
+		// Recurse into type arguments (e.g. Container[*config.Config] needs config imported)
+		if typeArgs := typ.TypeArgs(); typeArgs != nil {
+			for typeArg := range typeArgs.Types() {
+				collectImportsFromType(typeArg, pkg, imports, referencedImports, varPool)
+			}
+		}
 	case *types.Alias:
 		if objPkg := typ.Obj().Pkg(); objPkg != nil && objPkg.Path() != pkg {
 			pkgPath := objPkg.Path()
@@ -177,6 +183,12 @@ func collectImportsFromType(t types.Type, pkg string, imports map[string]*Import
 				}
 				imports[pkgPath] = newImp
 				referencedImports[pkgPath] = newImp
+			}
+		}
+		// Recurse into type arguments for generic aliases
+		if typeArgs := typ.TypeArgs(); typeArgs != nil {
+			for typeArg := range typeArgs.Types() {
+				collectImportsFromType(typeArg, pkg, imports, referencedImports, varPool)
 			}
 		}
 	case *types.Pointer:
