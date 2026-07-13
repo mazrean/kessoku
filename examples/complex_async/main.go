@@ -1,12 +1,9 @@
 package main
 
-import (
-	"context"
-	"fmt"
-)
+import "fmt"
 
 func main() {
-	app := InitializeComplexApp(context.Background())
+	app := InitializeComplexApp()
 
 	fmt.Println("Complex app initialized successfully!")
 	app.Run()

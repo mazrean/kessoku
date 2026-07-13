@@ -3,12 +3,11 @@
 package main
 
 import (
-	"context"
 	"github.com/mazrean/kessoku"
 	"golang.org/x/sync/errgroup"
 )
 
-func InitializeComplexApp(ctx context.Context) *App {
+func InitializeComplexApp() *App {
 	var (
 		config              *Config
 		configCh            = make(chan struct{})

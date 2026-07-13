@@ -19,6 +19,7 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		notificationServiceCh = make(chan struct{})
 		app                   *App
 	)
+	parentCtx := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	eg, ctx := errgroup.WithContext(ctx)
 	defer func() {
@@ -65,6 +66,10 @@ func InitializeApp(ctx context.Context) (*App, error) {
 	}
 	app = kessoku.Provide(NewApp).Fn()(userService, notificationService)
 	if err := eg.Wait(); err != nil {
+		var zero *App
+		return zero, err
+	}
+	if err := parentCtx.Err(); err != nil {
 		var zero *App
 		return zero, err
 	}

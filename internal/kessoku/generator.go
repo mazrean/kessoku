@@ -110,6 +110,9 @@ func ensureImport(imports map[string]*Import, varPool *VarPool, pkgPath, pkgName
 }
 
 // generateAsyncInitialization creates errgroup and variable declarations for async execution.
+// It returns the generated statements, the name of the parent context variable (if any), and any error.
+// The parent context variable preserves the original ctx parameter before errgroup.WithContext shadows it,
+// so that ctx.Err() can be checked after eg.Wait() to detect cancellation that completed before any error.
 //
 // For error-returning injectors it establishes the exit protocol of the
 // generated code: a cancellable context wrapping the caller's context plus a
@@ -121,7 +124,7 @@ func ensureImport(imports map[string]*Import, varPool *VarPool, pkgPath, pkgName
 // their providers return errors), so their generated code waits on completion
 // channels unconditionally instead of selecting on context cancellation.
 // This keeps them deadlock-free even when called with a cancelled context.
-func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Stmt, error) {
+func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Stmt, string, error) {
 	var stmts []ast.Stmt
 
 	errgroupAlias := ensureImport(imports, varPool, errgroupPkgPath, errgroupPkgName)
@@ -138,7 +141,7 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 	// Generate variable declarations for async access
 	varSpecs, err := generateVariableSpecs(pkg, injector, varPool, imports)
 	if err != nil {
-		return nil, fmt.Errorf("generate variable declarations: %w", err)
+		return nil, "", fmt.Errorf("generate variable declarations: %w", err)
 	}
 
 	stmts = append(stmts, &ast.DeclStmt{
@@ -155,7 +158,7 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 		injector.asyncCtxName = ""
 		stmts = append(stmts, generateErrGroupDeclaration(injector.asyncEgName, "", errgroupAlias))
 
-		return stmts, nil
+		return stmts, "", nil
 	}
 
 	contextAlias := ensureImport(imports, varPool, contextPkgPath, contextPkgName)
@@ -164,9 +167,22 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 	// ctx, cancel := context.WithCancel(ctx)
 	// (falls back to context.Background() when the injector has no context
 	// parameter; async injectors normally receive one automatically)
+	//
+	// Save the original ctx before context.WithCancel shadows the name so that
+	// we can check parentCtx.Err() after eg.Wait() (BUG-06: a goroutine may
+	// complete via the channel select arm at the exact instant the caller's
+	// deadline fires; eg.Wait() then returns nil while parentCtx is cancelled).
+	var parentCtxName string
 	var parentCtxExpr ast.Expr
 	if ctxParamName != "" {
 		injector.asyncCtxName = ctxParamName
+		parentCtxName = varPool.GetName("parentCtx")
+		// parentCtx := ctx
+		stmts = append(stmts, &ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(parentCtxName)},
+			Tok: token.DEFINE,
+			Rhs: []ast.Expr{ast.NewIdent(ctxParamName)},
+		})
 		parentCtxExpr = ast.NewIdent(ctxParamName)
 	} else {
 		injector.asyncCtxName = varPool.GetName("ctx")
@@ -228,7 +244,7 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 		},
 	})
 
-	return stmts, nil
+	return stmts, parentCtxName, nil
 }
 
 // generateErrGroupDeclaration creates the errgroup variable declaration.
@@ -319,12 +335,15 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imp
 	return specs, nil
 }
 
-// generateAsyncWaitStatements creates errgroup wait statements
-func generateAsyncWaitStatements(injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) []ast.Stmt {
+// generateAsyncWaitStatements creates errgroup wait statements.
+// parentCtxName is the variable holding the original context before errgroup.WithContext shadowed it;
+// if non-empty and the injector returns an error, a ctx.Err() guard is emitted after eg.Wait()
+// to catch cancellations that raced past the goroutine channel-selects.
+func generateAsyncWaitStatements(injector *Injector, parentCtxName string, returnErrStmts func(ast.Expr) []ast.Stmt) []ast.Stmt {
 	if injector.IsReturnError && returnErrStmts != nil {
 		errIdent := ast.NewIdent("err")
 
-		return []ast.Stmt{
+		stmts := []ast.Stmt{
 			&ast.IfStmt{
 				Init: &ast.AssignStmt{
 					Lhs: []ast.Expr{errIdent},
@@ -348,6 +367,37 @@ func generateAsyncWaitStatements(injector *Injector, returnErrStmts func(ast.Exp
 				},
 			},
 		}
+
+		// Guard against the race where goroutines completed via the channel case of a select
+		// just as the caller's context deadline expired.  eg.Wait() returns nil in this case
+		// but the parent context is already cancelled, so we must surface the cancellation error.
+		if parentCtxName != "" && returnErrStmts != nil {
+			ctxErrIdent := ast.NewIdent("err")
+			stmts = append(stmts, &ast.IfStmt{
+				Init: &ast.AssignStmt{
+					Lhs: []ast.Expr{ctxErrIdent},
+					Tok: token.DEFINE,
+					Rhs: []ast.Expr{
+						&ast.CallExpr{
+							Fun: &ast.SelectorExpr{
+								X:   ast.NewIdent(parentCtxName),
+								Sel: ast.NewIdent("Err"),
+							},
+						},
+					},
+				},
+				Cond: &ast.BinaryExpr{
+					X:  ctxErrIdent,
+					Op: token.NEQ,
+					Y:  ast.NewIdent("nil"),
+				},
+				Body: &ast.BlockStmt{
+					List: returnErrStmts(ctxErrIdent),
+				},
+			})
+		}
+
+		return stmts
 	}
 
 	return []ast.Stmt{
@@ -476,14 +526,18 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map
 
 	hasChains := hasChainStmts(injector)
 
+	// parentCtxName is the variable holding the original ctx before errgroup.WithContext shadows it.
+	var parentCtxName string
+
 	// Initialize async components if needed
 	if hasChains {
-		asyncStmts, err := generateAsyncInitialization(pkg, injector, varPool, imports)
+		asyncStmts, pCtx, err := generateAsyncInitialization(pkg, injector, varPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("generate async initialization: %w", err)
 		}
 
 		stmts = append(stmts, asyncStmts...)
+		parentCtxName = pCtx
 	}
 
 	var returnErrStmts func(ast.Expr) []ast.Stmt
@@ -527,7 +581,7 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map
 
 	// Add async completion handling
 	if hasChains {
-		waitStmts := generateAsyncWaitStatements(injector, returnErrStmts)
+		waitStmts := generateAsyncWaitStatements(injector, parentCtxName, returnErrStmts)
 		stmts = append(stmts, waitStmts...)
 	}
 

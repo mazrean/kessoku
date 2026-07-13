@@ -1240,7 +1240,9 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 			expectedArgsCount:      0,
 		},
 		{
-			name: "async providers - context injection required",
+			// BUG-05: async providers without error return and without parallel chains
+			// should NOT inject ctx, because cancellation cannot be propagated to the caller.
+			name: "async providers without error return - no context injection",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1252,7 +1254,7 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
-						IsAsync:       true, // This should trigger context injection
+						IsAsync:       true,
 					},
 					{
 						Type:          ProviderTypeFunction,
@@ -1263,13 +1265,14 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 					},
 				},
 			},
-			expectError:             false,
-			expectContextInjection:  true,
-			expectedArgsCount:       1,
-			expectedContextPosition: 0,
+			expectError:            false,
+			expectContextInjection: false,
+			expectedArgsCount:      0,
 		},
 		{
-			name: "mixed async and sync providers - context injection required",
+			// BUG-05: mixed async and sync providers without error return
+			// should NOT inject ctx.
+			name: "mixed async and sync providers without error return - no context injection",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1288,17 +1291,17 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
-						IsAsync:       true, // This should trigger context injection
+						IsAsync:       true,
 					},
 				},
 			},
-			expectError:             false,
-			expectContextInjection:  true,
-			expectedArgsCount:       1,
-			expectedContextPosition: 0,
+			expectError:            false,
+			expectContextInjection: false,
+			expectedArgsCount:      0,
 		},
 		{
-			name: "multiple async providers - single context injection",
+			// BUG-05: multiple async providers without error return should NOT inject ctx.
+			name: "multiple async providers without error return - no context injection",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1310,21 +1313,20 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
-						IsAsync:       true, // Async
+						IsAsync:       true,
 					},
 					{
 						Type:          ProviderTypeFunction,
 						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
-						IsAsync:       true, // Also async
+						IsAsync:       true,
 					},
 				},
 			},
-			expectError:             false,
-			expectContextInjection:  true,
-			expectedArgsCount:       1, // Only one context should be injected
-			expectedContextPosition: 0,
+			expectError:            false,
+			expectContextInjection: false,
+			expectedArgsCount:      0,
 		},
 	}
 
@@ -1489,7 +1491,10 @@ func TestGraph_Build_ContextInjection_NoDuplicates(t *testing.T) {
 			expectedArgTypes:  []string{"context.Context"},
 		},
 		{
-			name: "context.Context with other args - should reorder correctly",
+			// BUG-05: async provider with context.Context as a direct dependency but
+			// without error return — no ctx injection happens, so the natural ordering
+			// (as discovered during graph traversal) is preserved: int first, ctx second.
+			name: "context.Context with other args - no reorder when injection skipped",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1513,7 +1518,7 @@ func TestGraph_Build_ContextInjection_NoDuplicates(t *testing.T) {
 				},
 			},
 			expectedArgsCount: 2,                                  // Should have int and context.Context
-			expectedArgTypes:  []string{"context.Context", "int"}, // context should be first
+			expectedArgTypes:  []string{"int", "context.Context"}, // natural traversal order
 		},
 	}
 
