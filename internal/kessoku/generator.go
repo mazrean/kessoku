@@ -171,6 +171,7 @@ func generateAsyncInitialization(pkg string, injector *Injector, localVarPool *V
 	}
 
 	contextAlias := ensureImport(imports, fileVarPool, contextPkgPath, contextPkgName)
+	injector.asyncContextAlias = contextAlias
 	injector.asyncCancelName = localVarPool.GetName("cancel")
 
 	// ctx, cancel := context.WithCancel(ctx)
@@ -725,6 +726,10 @@ func (stmt *InjectorProviderCallStmt) channelsWait(channels []ast.Expr, injector
 // context.Canceled.
 func (stmt *InjectorProviderCallStmt) buildWaitStatement(injector *Injector, channel ast.Expr, returnErrStmts func(ast.Expr) []ast.Stmt, inChain bool) ast.Stmt {
 	ctxName := injector.asyncCtxName
+	contextAlias := injector.asyncContextAlias
+	if contextAlias == "" {
+		contextAlias = contextPkgName
+	}
 	if ctxName == "" || returnErrStmts == nil {
 		return &ast.ExprStmt{
 			X: &ast.UnaryExpr{
@@ -760,7 +765,7 @@ func (stmt *InjectorProviderCallStmt) buildWaitStatement(injector *Injector, cha
 					},
 					Body: returnErrStmts(&ast.CallExpr{
 						Fun: &ast.SelectorExpr{
-							X:   ast.NewIdent("context"),
+							X:   ast.NewIdent(contextAlias),
 							Sel: ast.NewIdent("Cause"),
 						},
 						Args: []ast.Expr{ast.NewIdent(ctxName)},

@@ -376,12 +376,16 @@ type Injector struct {
 	// asyncCtxName is the name of the cancellable context variable used for
 	// channel-wait select statements. It is empty when the generated code
 	// must wait on channels unconditionally (non-error-returning builds).
-	asyncCtxName  string
-	Params        []*InjectorParam
-	Args          []*InjectorArgument
-	Vars          []*InjectorParam
-	Stmts         []InjectorStmt
-	IsReturnError bool
+	asyncCtxName string
+	// asyncContextAlias is the import alias allocated for the stdlib context
+	// package. It is set only for error-returning async builds, where the
+	// channel-wait select statements reference context.Cause.
+	asyncContextAlias string
+	Params            []*InjectorParam
+	Args              []*InjectorArgument
+	Vars              []*InjectorParam
+	Stmts             []InjectorStmt
+	IsReturnError     bool
 }
 
 // egName returns the errgroup variable name used in generated async code.

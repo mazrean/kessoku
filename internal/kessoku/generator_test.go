@@ -1124,6 +1124,51 @@ func TestBuildWaitStatement_ContextCause(t *testing.T) {
 	}
 }
 
+// TestBuildWaitStatement_ContextCauseUsesImportAlias is a regression test:
+// when the stdlib context package is imported under an alias (because a user
+// package claimed the name "context"), the generated context.Cause call must
+// use that alias instead of the hardcoded identifier "context".
+func TestBuildWaitStatement_ContextCauseUsesImportAlias(t *testing.T) {
+	t.Parallel()
+
+	stmt := &InjectorProviderCallStmt{}
+	channel := &ast.Ident{Name: "testCh"}
+	returnErrStmts := func(errExpr ast.Expr) []ast.Stmt {
+		return []ast.Stmt{
+			&ast.ReturnStmt{
+				Results: []ast.Expr{ast.NewIdent("zero"), errExpr},
+			},
+		}
+	}
+
+	injector := &Injector{asyncCtxName: "ctx", asyncContextAlias: "context0"}
+	result := stmt.buildWaitStatement(injector, channel, returnErrStmts, false)
+
+	selectStmt, ok := result.(*ast.SelectStmt)
+	if !ok {
+		t.Fatalf("expected *ast.SelectStmt, got %T", result)
+	}
+
+	var causePkg string
+	ast.Inspect(selectStmt, func(n ast.Node) bool {
+		sel, isSel := n.(*ast.SelectorExpr)
+		if !isSel || sel.Sel.Name != "Cause" {
+			return true
+		}
+		if pkgIdent, isIdent := sel.X.(*ast.Ident); isIdent {
+			causePkg = pkgIdent.Name
+		}
+		return false
+	})
+
+	if causePkg == "" {
+		t.Fatal("no context.Cause call found in select statement")
+	}
+	if causePkg != "context0" {
+		t.Errorf("expected Cause to be qualified with import alias %q, got %q", "context0", causePkg)
+	}
+}
+
 func TestInjectorProviderCallStmt_channelsClose(t *testing.T) {
 	t.Parallel()
 
