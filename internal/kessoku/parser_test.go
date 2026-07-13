@@ -299,7 +299,7 @@ import "github.com/mazrean/kessoku"
 func invalid syntax here {
 `,
 			shouldError:   true,
-			errorContains: "parse file",
+			errorContains: "expected",
 		},
 		{
 			// BUG-01: type errors (undefined types) must cause ParseFile to fail, not silently

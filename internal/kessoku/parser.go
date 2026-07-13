@@ -54,8 +54,10 @@ func NewParser() *Parser {
 
 // ParseFile parses a Go file and extracts wire build directives.
 func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*BuildDirective, error) {
+	// Return the raw error unwrapped: processor.go's processFile is the single
+	// place that adds the "parse file %s:" prefix (avoids a duplicated prefix).
 	if _, err := parser.ParseFile(p.fset, filename, nil, parser.ParseComments); err != nil {
-		return nil, nil, fmt.Errorf("parse file %s: %w", filename, err)
+		return nil, nil, err
 	}
 
 	pkg, err := p.initializePackages(filename)

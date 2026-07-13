@@ -1017,6 +1017,7 @@ func TestProcessFile(t *testing.T) {
 		expectedFunctionName string
 		name                 string
 		errorContains        string
+		errorNotContains     string
 		expectedGenerated    bool
 		shouldError          bool
 	}{
@@ -1078,6 +1079,7 @@ func invalid syntax here {
 			expectedGenerated: false,
 			shouldError:       true,
 			errorContains:     "parse file",
+			errorNotContains:  "parse file test.go: parse file",
 		},
 	}
 
@@ -1101,6 +1103,9 @@ func invalid syntax here {
 				}
 				if tt.errorContains != "" && !containsString(err.Error(), tt.errorContains) {
 					t.Errorf("Expected error to contain %q, got %q", tt.errorContains, err.Error())
+				}
+				if tt.errorNotContains != "" && containsString(err.Error(), tt.errorNotContains) {
+					t.Errorf("Expected error to not contain %q, got %q", tt.errorNotContains, err.Error())
 				}
 				return
 			}
