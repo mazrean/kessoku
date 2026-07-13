@@ -121,6 +121,14 @@ func (p *Parser) ExtractPatterns(file *ast.File, info *types.Info, wireAlias str
 					continue
 				}
 
+				// Handle panic(wire.Build(...)) — the alternate injector form
+				// documented in the wire User Guide.
+				if panicIdent, isPanic := call.Fun.(*ast.Ident); isPanic && panicIdent.Name == "panic" && len(call.Args) == 1 {
+					if inner, isCall := call.Args[0].(*ast.CallExpr); isCall {
+						call = inner
+					}
+				}
+
 				// Check if it's a wire.Build call
 				sel, ok := call.Fun.(*ast.SelectorExpr)
 				if !ok {
