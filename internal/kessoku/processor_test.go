@@ -747,6 +747,45 @@ var _ = kessoku.Inject[*Database](
 			expectedGeneratedFiles: []string{"test_band.go"},
 			shouldError:            false,
 		},
+		{
+			name: "struct with multiple fields of same type returns clear error",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Host     string
+	Username string
+}
+
+func NewConfig() *Config {
+	return &Config{Host: "localhost", Username: "admin"}
+}
+
+type DB struct {
+	host     string
+	username string
+}
+
+func NewDB(host, username string) *DB {
+	return &DB{host: host, username: username}
+}
+
+var _ = kessoku.Inject[*DB](
+	"Init",
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewDB),
+)
+`,
+				},
+			},
+			shouldError:   true,
+			errorContains: "same type",
+		},
 	}
 
 	for _, tt := range tests {

@@ -394,7 +394,13 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 			declOrder++
 
 			fieldTypeKey := typeKey(field.Type)
-			if _, ok := fnProviderMap[fieldTypeKey]; ok {
+			if existing, ok := fnProviderMap[fieldTypeKey]; ok {
+				if existing.provider.Type == ProviderTypeFieldAccess && existing.provider.StructType != nil && types.Identical(existing.provider.StructType, structProvider.StructType) {
+					return nil, fmt.Errorf(
+						"struct[%s] has two exported fields of the same type %s (%s and %s): Struct[T] requires all exported fields to have distinct types; use Provide with an explicit constructor instead",
+						structProvider.StructType.String(), fieldTypeKey, existing.provider.SourceField.Name, field.Name,
+					)
+				}
 				return nil, fmt.Errorf("multiple providers provide %s (field %s conflicts with existing provider)", fieldTypeKey, field.Name)
 			}
 
