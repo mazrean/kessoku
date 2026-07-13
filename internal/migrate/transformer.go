@@ -15,7 +15,8 @@ const maxInjectorReturns = 2
 
 // Transformer converts wire patterns to kessoku patterns.
 type Transformer struct {
-	tc *TypeConverter
+	tc       *TypeConverter
+	setIndex map[string]*WireNewSet // var name → WireNewSet for dedup
 }
 
 // NewTransformer creates a new Transformer instance.
@@ -23,25 +24,17 @@ func NewTransformer() *Transformer {
 	return &Transformer{}
 }
 
-// buildSetIndex builds a map from WireNewSet variable name to *WireNewSet for
-// all top-level sets in the patterns list.  This index is passed down to
-// transformNewSet / transformElements so that WireSetRef entries can be
-// resolved when checking for duplicate providers (Bug 3 fix).
-func buildSetIndex(patterns []WirePattern) map[string]*WireNewSet {
-	idx := make(map[string]*WireNewSet)
-	for _, p := range patterns {
-		if ws, ok := p.(*WireNewSet); ok && ws.VarName != "" {
-			idx[ws.VarName] = ws
-		}
-	}
-	return idx
-}
-
 // Transform transforms a list of wire patterns to kessoku patterns.
 // If tc is non-nil, it will be used for proper package-qualified type expressions.
 func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *TypeConverter) ([]KessokuPattern, error) {
 	t.tc = tc
-	setIndex := buildSetIndex(patterns)
+
+	// Build a set index so that transformElements can look up set contents by name.
+	// This is used to deduplicate providers when wire.Build references both a set
+	// and a wire.Bind that covers the same implementation type.
+	t.setIndex = buildSetIndex(patterns)
+	setIndex := t.setIndex
+
 	var result []KessokuPattern
 
 	for _, p := range patterns {

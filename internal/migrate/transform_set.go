@@ -1,8 +1,71 @@
 package migrate
 
-import "maps"
+import (
+	"maps"
 
-import "go/types"
+	"go/types"
+)
+
+// buildSetIndex builds a map from set variable name to *WireNewSet for all top-level sets.
+// This is used by transformElements to look up the contents of WireSetRef elements so that
+// providers that are already covered by a wire.Bind can be deduplicated.
+func buildSetIndex(patterns []WirePattern) map[string]*WireNewSet {
+	idx := make(map[string]*WireNewSet)
+	for _, p := range patterns {
+		if ws, ok := p.(*WireNewSet); ok && ws.VarName != "" {
+			idx[ws.VarName] = ws
+		}
+	}
+	return idx
+}
+
+// allProvidersAreBound returns true if every WireProviderFunc reachable from the
+// given WireNewSet is superseded by one of the bound implementation types in boundTypes.
+// The setIndex is used to resolve nested WireSetRef elements.
+func allProvidersAreBound(ws *WireNewSet, boundTypes map[string]bool, setIndex map[string]*WireNewSet) bool {
+	return setProvidersAllBound(ws.Elements, boundTypes, setIndex)
+}
+
+func setProvidersAllBound(elements []WirePattern, boundTypes map[string]bool, setIndex map[string]*WireNewSet) bool {
+	hasProvider := false
+	for _, elem := range elements {
+		switch we := elem.(type) {
+		case *WireProviderFunc:
+			if we.Func == nil {
+				// Cannot determine — treat as not bound to be safe.
+				return false
+			}
+			sig, ok := we.Func.Type().(*types.Signature)
+			if !ok {
+				return false
+			}
+			results := sig.Results()
+			if results.Len() == 0 {
+				return false
+			}
+			returnType := results.At(0).Type()
+			if !boundTypes[returnType.String()] {
+				return false
+			}
+			hasProvider = true
+		case *WireNewSet:
+			if !setProvidersAllBound(we.Elements, boundTypes, setIndex) {
+				return false
+			}
+		case *WireSetRef:
+			nested, ok := setIndex[we.Name]
+			if !ok {
+				// Unknown set reference — treat as not bound to be safe.
+				return false
+			}
+			if !allProvidersAreBound(nested, boundTypes, setIndex) {
+				return false
+			}
+			hasProvider = true
+		}
+	}
+	return hasProvider
+}
 
 // transformNewSet transforms wire.NewSet to kessoku.Set.
 func (t *Transformer) transformNewSet(ws *WireNewSet, pkg *types.Package, setIndex map[string]*WireNewSet) (*KessokuSet, error) {
@@ -104,13 +167,18 @@ func (t *Transformer) transformElements(elements []WirePattern, pkg *types.Packa
 			}
 			result = append(result, t.transformProviderFunc(we))
 		case *WireSetRef:
-			// Bug 3 fix: skip set references whose providers are entirely superseded
-			// by a wire.Bind in the same element list.  When the referenced set
-			// contributes only concrete types that are bound, the Bind expression
-			// already embeds kessoku.Provide(constructor), so including the set ref
-			// would create duplicate providers that kessoku rejects.
-			if t.isSetRefSupersededByBind(we, boundTypes, setIndex) {
-				continue
+			// Suppress a set reference whose every provider is already covered by a
+			// wire.Bind in the same scope. Without suppression, the Bind's embedded
+			// kessoku.Provide(Ctor) would duplicate the provider already emitted by
+			// the set, causing a "multiple providers provide *T" error (BUG-10).
+			// allProvidersAreBound recurses into nested WireSetRef entries via setIndex
+			// to handle Case 2 (Bind inside a sibling set ref).
+			if t.setIndex != nil {
+				if ws, ok := t.setIndex[we.Name]; ok {
+					if allProvidersAreBound(ws, boundTypes, t.setIndex) {
+						continue
+					}
+				}
 			}
 			result = append(result, t.transformSetRef(we))
 		}
@@ -134,6 +202,15 @@ func (t *Transformer) collectBoundTypes(elements []WirePattern) map[string]bool 
 		case *WireNewSet:
 			// Recursively collect from nested sets
 			maps.Copy(boundTypes, t.collectBoundTypes(we.Elements))
+		case *WireSetRef:
+			// Look up the set in the index and collect bound types from it.
+			// This ensures that a Bind inside a referenced set suppresses the matching
+			// provider from other set references in the same scope (BUG-10 Case 2).
+			if t.setIndex != nil {
+				if ws, ok := t.setIndex[we.Name]; ok {
+					maps.Copy(boundTypes, t.collectBoundTypes(ws.Elements))
+				}
+			}
 		}
 	}
 	return boundTypes
