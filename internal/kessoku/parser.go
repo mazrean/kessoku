@@ -26,6 +26,17 @@ const (
 	asyncProviderMinTypeArgs = 2
 )
 
+// injectorValidationError represents a fatal validation error in a kessoku.Inject call,
+// such as an invalid or empty injector name. Unlike soft parse errors, these cause the
+// tool to exit with an error rather than skipping the directive.
+type injectorValidationError struct {
+	msg string
+}
+
+func (e *injectorValidationError) Error() string {
+	return e.msg
+}
+
 // Parser analyzes Go source code to find wire build directives and providers.
 type Parser struct {
 	fset     *token.FileSet
@@ -248,13 +259,11 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 		return nil, nil
 	}
 
-	var (
-		builds   []*BuildDirective
-		parseErr error
-	)
+	var builds []*BuildDirective
+	var inspectErr error
 
 	ast.Inspect(file, func(n ast.Node) bool {
-		if parseErr != nil {
+		if inspectErr != nil {
 			return false
 		}
 
@@ -297,15 +306,15 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 		build, err := p.parseInjectCall(pkg, kessokuPackageScope, callExpr, imports, fileImports, varPool)
 		if err != nil {
 			pos := p.fset.Position(callExpr.Pos())
-			parseErr = fmt.Errorf("%s: parse kessoku.Inject call: %w", pos, err)
+			inspectErr = fmt.Errorf("%s: parse kessoku.Inject call: %w", pos, err)
 			return false
 		}
 
 		builds = append(builds, build)
 		return false
 	})
-	if parseErr != nil {
-		return nil, parseErr
+	if inspectErr != nil {
+		return nil, inspectErr
 	}
 
 	return builds, nil
@@ -357,6 +366,17 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 	}
 
 	build.InjectorName = constant.StringVal(tv.Value)
+
+	if !token.IsIdentifier(build.InjectorName) {
+		return nil, &injectorValidationError{
+			msg: fmt.Sprintf("injector name %q is not a valid Go identifier", build.InjectorName),
+		}
+	}
+	if token.IsKeyword(build.InjectorName) {
+		return nil, &injectorValidationError{
+			msg: fmt.Sprintf("injector name %q is a Go keyword and cannot be used as a function name", build.InjectorName),
+		}
+	}
 
 	// Parse provider arguments (starting from index 1)
 	for _, arg := range call.Args[1:] {

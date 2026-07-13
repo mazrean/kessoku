@@ -193,6 +193,36 @@ func main() {
 			shouldError:    false,
 		},
 		{
+			name: "empty injector name",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Obj struct{}
+
+func NewObj() *Obj { return &Obj{} }
+
+var _ = kessoku.Inject[*Obj]("", kessoku.Provide(NewObj))
+`,
+			shouldError:   true,
+			errorContains: "injector name",
+		},
+		{
+			name: "injector name that is a Go keyword",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Obj struct{}
+
+func NewObj() *Obj { return &Obj{} }
+
+var _ = kessoku.Inject[*Obj]("func", kessoku.Provide(NewObj))
+`,
+			shouldError:   true,
+			errorContains: "injector name",
+		},
+		{
 			name: "invalid syntax",
 			content: `package main
 
