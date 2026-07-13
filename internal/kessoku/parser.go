@@ -706,9 +706,14 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 		errorIface, _ := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
 		isReturnError := false
 		isReturnCleanup := false
-		provides := make([][]types.Type, 0, providerFnSig.Results().Len())
-		for v := range providerFnSig.Results().Variables() {
+		results := providerFnSig.Results()
+		provides := make([][]types.Type, 0, results.Len())
+		for i := range results.Len() {
+			v := results.At(i)
 			if errorIface != nil && types.Implements(v.Type(), errorIface) {
+				if i != results.Len()-1 {
+					return nil, fmt.Errorf("provider function has error return in non-last position (index %d of %d); error must be the last return value", i, results.Len()-1)
+				}
 				isReturnError = true
 				continue
 			}

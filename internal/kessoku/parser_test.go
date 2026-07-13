@@ -632,6 +632,29 @@ var _ = kessoku.Inject[*Service](
 			expectedBuilds:  0,    // No injector is generated from the invalid directive
 			shouldHaveError: true, // Undefined identifier is a type error → must fail
 		},
+		{
+			name: "provider with error in non-last return position is rejected",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type A struct{}
+type B struct{}
+
+// error is in position 1 (not last), which kessoku must reject at parse time
+// to avoid generating uncompilable code with swapped assignment types.
+func NewAB() (*A, error, *B) {
+	return &A{}, nil, &B{}
+}
+
+var _ = kessoku.Inject[*B](
+	"InitializeB",
+	kessoku.Provide(NewAB),
+)
+`,
+			expectedBuilds:  0,    // No injector is generated from the invalid directive
+			shouldHaveError: true, // Misplaced error return is rejected loudly at parse time
+		},
 	}
 
 	// Run edge case tests
