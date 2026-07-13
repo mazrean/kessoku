@@ -949,6 +949,89 @@ var _ = kessoku.Inject[*Service](
 	}
 }
 
+// TestBindProviderVoidFunctionError is a regression test for QA-14:
+// Bind[I](Provide(voidFn)) produced a blank error message "provided type  does not
+// implement interface X" because result.Provides was empty when the inner function
+// returns only error or nothing.  After the fix, a clear diagnostic is returned.
+func TestBindProviderVoidFunctionError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name: "Bind wrapping error-only return",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type MyInterface interface{ DoThing() }
+
+// InitSideEffect returns only error — no non-error values.
+func InitSideEffect() error { return nil }
+
+type Service struct{}
+func NewService(i MyInterface) *Service { return &Service{} }
+
+var _ = kessoku.Inject[*Service](
+	"Init",
+	kessoku.Bind[MyInterface](kessoku.Provide(InitSideEffect)),
+	kessoku.Provide(NewService),
+)
+`,
+		},
+		{
+			name: "Bind wrapping no-return function",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type MyInterface interface{ DoThing() }
+
+// NoReturn returns nothing at all.
+func NoReturn() {}
+
+type Service struct{}
+func NewService(i MyInterface) *Service { return &Service{} }
+
+var _ = kessoku.Inject[*Service](
+	"Init",
+	kessoku.Bind[MyInterface](kessoku.Provide(NoReturn)),
+	kessoku.Provide(NewService),
+)
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			testFile := filepath.Join(tempDir, "test.go")
+
+			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			parser := NewParser()
+			_, _, err := parser.ParseFile(testFile, NewVarPool())
+
+			// ParseFile must return a hard error because the void-provider guard
+			// returns an error from parseProviderType, which is propagated up.
+			if err == nil {
+				t.Fatal("ParseFile should have returned an error for Bind wrapping a void provider, got nil")
+			}
+
+			// The error message should mention the specific reason.
+			if !containsString(err.Error(), "bind requires a provider that returns at least one non-error value") {
+				t.Errorf("Expected error to mention void provider, got: %v", err)
+			}
+		})
+	}
+}
+
 // TestParseFile_InjectInsideFunction verifies that kessoku.Inject calls placed
 // inside function bodies are silently ignored and do not produce build directives.
 // Only top-level var declarations are valid injection points (QA-9).

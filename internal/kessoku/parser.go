@@ -585,6 +585,10 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 			return nil, fmt.Errorf("parse internal provider type: %w", err)
 		}
 
+		if len(result.Provides) == 0 {
+			return nil, fmt.Errorf("bind requires a provider that returns at least one non-error value; the given provider returns nothing")
+		}
+
 		implementingType := false
 		for i, provide := range result.Provides {
 			for _, providedType := range provide {
