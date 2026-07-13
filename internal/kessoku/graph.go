@@ -541,7 +541,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 			if t == nil {
 				return nil, fmt.Errorf("validator provider has nil required type at index %d", i)
 			}
-			key := t.String()
+			key := typeKey(t)
 			var (
 				n2       *node
 				srcIndex int
@@ -594,7 +594,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 				if t == nil {
 					return nil, fmt.Errorf("provider has nil required type at index %d", i)
 				}
-				key := t.String()
+				key := typeKey(t)
 				var (
 					n2       *node
 					srcIndex int
