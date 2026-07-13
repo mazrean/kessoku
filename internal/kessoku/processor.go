@@ -2,6 +2,9 @@ package kessoku
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -139,6 +142,13 @@ func (p *Processor) generateFile(pf *parsedFile) error {
 
 	slog.Debug("injectors", "injectors", injectors)
 
+	// Detect duplicate injector names across sibling *_band.go files.
+	// This catches the case where kessoku is invoked per-file (go:generate $GOFILE)
+	// and two files in the same package declare the same injector name.
+	if dupErr := checkDuplicateInjectorNames(pf.filename, outputFileName, injectors); dupErr != nil {
+		return dupErr
+	}
+
 	if err := writeAtomically(outputFileName, func(f *os.File) error {
 		return Generate(f, pf.filename, pf.metaData, injectors, pf.varPool)
 	}); err != nil {
@@ -151,4 +161,75 @@ func (p *Processor) generateFile(pf *parsedFile) error {
 func outputFileName(filename string) string {
 	ext := filepath.Ext(filename)
 	return strings.TrimSuffix(filename, ext) + "_band" + ext
+}
+
+// checkDuplicateInjectorNames scans sibling *_band.go files in the same
+// directory for top-level function declarations that conflict with the names
+// of injectors we are about to generate.  It is necessary because the
+// canonical //go:generate invocation runs kessoku once per source file with a
+// fresh Processor, so per-invocation deduplication is insufficient.
+func checkDuplicateInjectorNames(srcFile, ownOutputFile string, injectors []*Injector) error {
+	// Build a set of injector names this invocation will emit.
+	wantNames := make(map[string]struct{}, len(injectors))
+	for _, inj := range injectors {
+		wantNames[inj.Name] = struct{}{}
+	}
+
+	dir := filepath.Dir(srcFile)
+
+	// Collect all *_band.go files in the same directory, excluding the one we
+	// are about to write so that re-running the tool is idempotent.
+	absOwn, err := filepath.Abs(ownOutputFile)
+	if err != nil {
+		absOwn = ownOutputFile
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read dir %s: %w", dir, err)
+	}
+
+	fset := token.NewFileSet()
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, "_band.go") {
+			continue
+		}
+
+		bandPath := filepath.Join(dir, name)
+		absBand, absErr := filepath.Abs(bandPath)
+		if absErr != nil {
+			absBand = bandPath
+		}
+		// Skip the output file we are about to (re)write.
+		if absBand == absOwn {
+			continue
+		}
+
+		astFile, parseErr := parser.ParseFile(fset, bandPath, nil, 0)
+		if parseErr != nil {
+			// If the sibling band file cannot be parsed, skip it rather than
+			// blocking generation — a broken sibling is not our problem.
+			slog.Warn("failed to parse sibling band file", "file", bandPath, "error", parseErr)
+			continue
+		}
+
+		for _, decl := range astFile.Decls {
+			funcDecl, ok := decl.(*ast.FuncDecl)
+			if !ok || funcDecl.Name == nil {
+				continue
+			}
+			if _, clash := wantNames[funcDecl.Name.Name]; clash {
+				return fmt.Errorf(
+					"duplicate injector name %q: already declared in %s",
+					funcDecl.Name.Name, bandPath,
+				)
+			}
+		}
+	}
+
+	return nil
 }

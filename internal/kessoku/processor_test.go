@@ -832,6 +832,84 @@ var _ = kessoku.Inject[*Database](
 	}
 }
 
+// TestDuplicateInjectorNamesAcrossFiles verifies that kessoku detects duplicate
+// injector names when the tool is invoked per-file (the go:generate $GOFILE
+// pattern), where each invocation creates a fresh Processor.  BUG-24.
+func TestDuplicateInjectorNamesAcrossFiles(t *testing.T) {
+	t.Parallel()
+
+	const sharedPkg = `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Value string
+}
+
+func NewConfig() *Config {
+	return &Config{Value: "test"}
+}
+
+type Service struct {
+	config *Config
+}
+
+func NewService(config *Config) *Service {
+	return &Service{config: config}
+}
+`
+
+	// file1.go and file2.go both declare an injector named "InitializeApp".
+	file1Content := sharedPkg + `
+var _ = kessoku.Inject[*Service](
+	"InitializeApp",
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewService),
+)
+`
+	file2Content := sharedPkg + `
+var _ = kessoku.Inject[*Service](
+	"InitializeApp",
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewService),
+)
+`
+
+	tempDir := t.TempDir()
+	file1 := filepath.Join(tempDir, "file1.go")
+	file2 := filepath.Join(tempDir, "file2.go")
+
+	if err := os.WriteFile(file1, []byte(file1Content), 0644); err != nil {
+		t.Fatalf("write file1: %v", err)
+	}
+	if err := os.WriteFile(file2, []byte(file2Content), 0644); err != nil {
+		t.Fatalf("write file2: %v", err)
+	}
+
+	// First invocation: process file1, should succeed.
+	proc1 := NewProcessor()
+	if err := proc1.ProcessFiles([]string{file1}); err != nil {
+		t.Fatalf("first ProcessFiles (file1) failed unexpectedly: %v", err)
+	}
+
+	// Verify file1_band.go was generated.
+	if _, err := os.Stat(filepath.Join(tempDir, "file1_band.go")); os.IsNotExist(err) {
+		t.Fatal("expected file1_band.go to be created")
+	}
+
+	// Second invocation: process file2 with a fresh Processor (simulating
+	// go:generate $GOFILE on the second file).  It must fail because
+	// file1_band.go already declares "InitializeApp".
+	proc2 := NewProcessor()
+	err := proc2.ProcessFiles([]string{file2})
+	if err == nil {
+		t.Fatal("expected ProcessFiles (file2) to fail with duplicate name error, but it succeeded")
+	}
+	if !containsString(err.Error(), "duplicate injector name") {
+		t.Errorf("expected error to mention duplicate injector name, got: %v", err)
+	}
+}
+
 type fileContent struct {
 	content     string
 	shouldWrite *bool // If nil, defaults to true
