@@ -252,7 +252,7 @@ Already using google/wire? Kessoku provides a migration tool to convert your wir
 go tool kessoku migrate
 
 # or specify wire config directory with patterns
-go tool kessoku migrate ./pkg/wire -o kessoku.go
+go tool kessoku migrate ./pkg/wire -o ./pkg/wire/kessoku.go
 ```
 
 <details>

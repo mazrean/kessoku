@@ -1,4 +1,4 @@
-//go:generate go run ../../cmd/kessoku kessoku.go
+//go:generate go tool kessoku $GOFILE
 
 // Package main demonstrates the usage of kessoku.Struct[T]() annotation
 // for automatic struct field expansion as dependencies.

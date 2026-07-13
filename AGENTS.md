@@ -12,8 +12,8 @@
 - `go tool kessoku [files...]` — direct codegen for specific Go files.
 - `go test -v ./...` — run the test suite.
 - `go fmt ./...` — format; mandatory before committing.
-- `go tool tools lint ./...` — run the multi-checker (vet + staticcheck + extras); treat failures as blockers.
-- `go tool tools apicompat <base> <target>` — check API compatibility (e.g., `...@latest` vs current).
+- `go tool lint ./...` — run the multi-checker (vet + staticcheck + extras); treat failures as blockers.
+- `go tool apicompat <base> <target>` — check API compatibility (e.g., `...@latest` vs current).
 
 ## Coding Style & Naming Conventions
 - Let `go fmt` dictate whitespace (tabs) and imports; no manual styling wars.
@@ -29,7 +29,7 @@
 
 ## Commit & Pull Request Guidelines
 - Commit style matches history: short, imperative prefixes like `fix: ...`, `deps: ...`, `ci: ...`; one logical change per commit.
-- Before opening a PR: run `go fmt ./...`, `go test -v ./...`, and `go tool tools lint ./...`; note results in the description.
+- Before opening a PR: run `go fmt ./...`, `go test -v ./...`, and `go tool lint ./...`; note results in the description.
 - PRs should include a concise summary of the change, linked issues (if any), and call out any codegen steps or API-impactful changes (attach `apicompat` output when altering public API).
 
 ## Active Technologies
