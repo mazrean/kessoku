@@ -771,10 +771,12 @@ func (g *Graph) hasAsyncProviders() bool {
 }
 
 // injectContextArg injects context.Context as the first argument when async providers exist.
-// ctx is only injected when there are parallel chain statements (goroutines) AND the injector
-// returns an error, so that context cancellation can actually be propagated to the caller.
+// The parameter is always part of the signature so that callers can pass a context
+// consistently; the generated body only consumes it when there are parallel chain
+// statements (goroutines) and the injector returns an error, since that is the only
+// case where cancellation can be propagated to the caller.
 func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool *VarPool) error {
-	if !g.hasAsyncProviders() || !hasChainStmts(injector) || !injector.IsReturnError {
+	if !g.hasAsyncProviders() {
 		return nil
 	}
 

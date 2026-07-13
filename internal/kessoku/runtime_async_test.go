@@ -355,9 +355,11 @@ func main() {
 }
 
 // TestAsyncRuntimeNoErrorInjectorCancelledContext verifies that an injector
-// without an error return completes with correct values and does not deadlock.
-// After BUG-05, no-error injectors do not receive a ctx parameter (cancellation
-// cannot be propagated to the caller), so the test calls InitApp() without ctx.
+// without an error return completes with correct values and does not deadlock
+// even when called with an already-cancelled context. No-error injectors accept
+// a ctx parameter (async providers always inject one), but the generated body
+// waits on completion channels unconditionally since cancellation cannot be
+// propagated to the caller.
 func TestAsyncRuntimeNoErrorInjectorCancelledContext(t *testing.T) {
 	files := map[string]string{
 		"kessoku.go": `package main
@@ -398,14 +400,18 @@ var _ = kessoku.Inject[*App](
 		"main.go": `package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
 )
 
 func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
 	done := make(chan *App, 1)
-	go func() { done <- InitApp() }()
+	go func() { done <- InitApp(ctx) }()
 
 	select {
 	case app := <-done:
@@ -878,12 +884,13 @@ var _ = kessoku.Inject[*App](
 		"main.go": `package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 )
 
 func main() {
-	app, err := InitApp()
+	app, err := InitApp(context.Background())
 	if err != nil || app.Addr != "h:80" || app.N != 9 {
 		fmt.Printf("FAIL: app=%+v err=%v\n", app, err)
 		os.Exit(1)

@@ -1298,9 +1298,9 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 			expectedArgsCount:      0,
 		},
 		{
-			// BUG-05: async providers without error return and without parallel chains
-			// should NOT inject ctx, because cancellation cannot be propagated to the caller.
-			name: "async providers without error return - no context injection",
+			// Async providers always inject ctx into the signature, even when the
+			// generated body cannot consume it (no error return to propagate cancellation).
+			name: "async providers without error return - context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1323,14 +1323,14 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 					},
 				},
 			},
-			expectError:            false,
-			expectContextInjection: false,
-			expectedArgsCount:      0,
+			expectError:             false,
+			expectContextInjection:  true,
+			expectedArgsCount:       1,
+			expectedContextPosition: 0,
 		},
 		{
-			// BUG-05: mixed async and sync providers without error return
-			// should NOT inject ctx.
-			name: "mixed async and sync providers without error return - no context injection",
+			// Async providers always inject ctx, regardless of which provider is async.
+			name: "mixed async and sync providers without error return - context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1353,13 +1353,14 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 					},
 				},
 			},
-			expectError:            false,
-			expectContextInjection: false,
-			expectedArgsCount:      0,
+			expectError:             false,
+			expectContextInjection:  true,
+			expectedArgsCount:       1,
+			expectedContextPosition: 0,
 		},
 		{
-			// BUG-05: multiple async providers without error return should NOT inject ctx.
-			name: "multiple async providers without error return - no context injection",
+			// Multiple async providers without error return also inject ctx.
+			name: "multiple async providers without error return - context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1382,9 +1383,10 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 					},
 				},
 			},
-			expectError:            false,
-			expectContextInjection: false,
-			expectedArgsCount:      0,
+			expectError:             false,
+			expectContextInjection:  true,
+			expectedArgsCount:       1,
+			expectedContextPosition: 0,
 		},
 	}
 
@@ -1549,10 +1551,9 @@ func TestGraph_Build_ContextInjection_NoDuplicates(t *testing.T) {
 			expectedArgTypes:  []string{"context.Context"},
 		},
 		{
-			// BUG-05: async provider with context.Context as a direct dependency but
-			// without error return — no ctx injection happens, so the natural ordering
-			// (as discovered during graph traversal) is preserved: int first, ctx second.
-			name: "context.Context with other args - no reorder when injection skipped",
+			// Async provider with context.Context as a direct dependency: injection
+			// reuses the existing arg and moves it to the first position.
+			name: "context.Context with other args - moved to first position",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1575,8 +1576,8 @@ func TestGraph_Build_ContextInjection_NoDuplicates(t *testing.T) {
 					},
 				},
 			},
-			expectedArgsCount: 2,                                  // Should have int and context.Context
-			expectedArgTypes:  []string{"int", "context.Context"}, // natural traversal order
+			expectedArgsCount: 2,                                  // Should have context.Context and int
+			expectedArgTypes:  []string{"context.Context", "int"}, // ctx moved to the front
 		},
 	}
 

@@ -2,9 +2,12 @@
 
 package main
 
-import "github.com/mazrean/kessoku"
+import (
+	"context"
+	"github.com/mazrean/kessoku"
+)
 
-func InitializeService() *Service {
+func InitializeService(ctx context.Context) *Service {
 	databaseRepo := kessoku.Async(kessoku.Bind[Repository](kessoku.Provide(NewDatabaseRepo))).Fn()()
 	service := kessoku.Provide(NewService).Fn()(databaseRepo)
 	return service

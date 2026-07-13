@@ -2,9 +2,12 @@
 
 package main
 
-import "github.com/mazrean/kessoku"
+import (
+	"context"
+	"github.com/mazrean/kessoku"
+)
 
-func InitializeApp() (*App, error) {
+func InitializeApp(ctx context.Context) (*App, error) {
 	config := kessoku.Provide(NewConfig).Fn()()
 	var err error
 	database, err := kessoku.Async(kessoku.Provide(NewDatabase)).Fn()(config)
