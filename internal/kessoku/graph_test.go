@@ -254,7 +254,65 @@ func TestNewGraph(t *testing.T) {
 }
 
 func containsError(err, substring string) bool {
-	return len(err) >= len(substring) && err[:len(substring)] == substring
+	return strings.Contains(err, substring)
+}
+
+func TestContainsError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		err       string
+		substring string
+		want      bool
+	}{
+		{
+			name:      "substring at start (prefix)",
+			err:       "dependency cycle detected: A -> B -> A",
+			substring: "dependency cycle detected",
+			want:      true,
+		},
+		{
+			name:      "substring in middle",
+			err:       "create graph: dependency cycle detected: A -> B -> A",
+			substring: "dependency cycle detected",
+			want:      true,
+		},
+		{
+			name:      "substring at end",
+			err:       "error: bad type",
+			substring: "bad type",
+			want:      true,
+		},
+		{
+			name:      "substring not present",
+			err:       "multiple providers provide *pkg.T",
+			substring: "dependency cycle detected",
+			want:      false,
+		},
+		{
+			name:      "empty substring",
+			err:       "some error",
+			substring: "",
+			want:      true,
+		},
+		{
+			name:      "empty error",
+			err:       "",
+			substring: "something",
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := containsError(tt.err, tt.substring)
+			if got != tt.want {
+				t.Errorf("containsError(%q, %q) = %v, want %v", tt.err, tt.substring, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestNewGraphMultiTypeProvider(t *testing.T) {
