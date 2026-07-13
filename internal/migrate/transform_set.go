@@ -69,7 +69,7 @@ func setProvidersAllBound(elements []WirePattern, boundTypes map[string]bool, se
 
 // transformNewSet transforms wire.NewSet to kessoku.Set.
 func (t *Transformer) transformNewSet(ws *WireNewSet, pkg *types.Package, setIndex map[string]*WireNewSet) (*KessokuSet, error) {
-	elements, err := t.transformElements(ws.Elements, pkg, setIndex)
+	elements, err := t.transformElementsWithBoundTypes(ws.Elements, pkg, setIndex, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -112,15 +112,28 @@ func (t *Transformer) mergeFieldsOf(elements []WirePattern) map[string]*WireFiel
 	return result
 }
 
-// collectBoundTypes collects all implementation types from WireBind elements.
 // transformElements transforms a list of wire patterns to kessoku patterns.
 // This is the common logic shared between transformNewSet and transformBuild.
 // setIndex maps WireNewSet variable names to their parsed WireNewSet, used to
 // determine what providers a WireSetRef contributes (for duplicate-provider detection).
 func (t *Transformer) transformElements(elements []WirePattern, pkg *types.Package, setIndex map[string]*WireNewSet) ([]KessokuPattern, error) {
+	return t.transformElementsWithBoundTypes(elements, pkg, setIndex, nil)
+}
+
+// transformElementsWithBoundTypes transforms a list of wire patterns to kessoku patterns,
+// merging any extra bound types from an outer scope into the collected bound types.
+// extraBoundTypes allows callers (e.g. when flattening an inline nested WireNewSet) to
+// pass the outer scope's bound types so that providers that are bound in the outer scope
+// are correctly suppressed inside nested sets.
+func (t *Transformer) transformElementsWithBoundTypes(elements []WirePattern, pkg *types.Package, setIndex map[string]*WireNewSet, extraBoundTypes map[string]bool) ([]KessokuPattern, error) {
 	// First pass: collect all bound implementation types
 	// These are the types for which wire.Bind creates an implicit provider
 	boundTypes := t.collectBoundTypes(elements)
+
+	// Merge extra bound types from outer scope (e.g. sibling wire.Bind)
+	for k := range extraBoundTypes {
+		boundTypes[k] = true
+	}
 
 	// Merge FieldsOf patterns with the same struct type
 	mergedFieldsOf := t.mergeFieldsOf(elements)
@@ -130,13 +143,15 @@ func (t *Transformer) transformElements(elements []WirePattern, pkg *types.Packa
 	for _, elem := range elements {
 		switch we := elem.(type) {
 		case *WireNewSet:
-			// Handle inline nested wire.NewSet
-			nestedSet, err := t.transformNewSet(we, pkg, setIndex)
+			// Handle inline nested wire.NewSet.
+			// Pass the current scope's boundTypes so that a wire.Bind that is a sibling
+			// of the nested set in the outer scope is visible when filtering inner providers.
+			nestedElements, err := t.transformElementsWithBoundTypes(we.Elements, pkg, setIndex, boundTypes)
 			if err != nil {
 				return nil, err
 			}
 			// Flatten nested set elements into parent
-			result = append(result, nestedSet.Elements...)
+			result = append(result, nestedElements...)
 		case *WireBind:
 			transformed, err := t.transformBind(we, pkg, elements)
 			if err != nil {
@@ -203,6 +218,7 @@ func (t *Transformer) transformElements(elements []WirePattern, pkg *types.Packa
 	return result, nil
 }
 
+// collectBoundTypes collects all implementation types from WireBind elements.
 func (t *Transformer) collectBoundTypes(elements []WirePattern) map[string]bool {
 	boundTypes := make(map[string]bool)
 	for _, elem := range elements {
