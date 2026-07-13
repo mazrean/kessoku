@@ -790,6 +790,75 @@ var _ = kessoku.Inject[*ConcreteService](
 	}
 }
 
+// TestBindProviderNonImplementingTypeError is a regression test for BUG-16:
+// Bind[I](Provide(f)) silently dropped when the provided type does not implement I.
+// After the fix, parseProviderType returns an error and the injector is skipped with a warning.
+func TestBindProviderNonImplementingTypeError(t *testing.T) {
+	t.Parallel()
+
+	content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Doer interface {
+	Do()
+}
+
+type MyThing struct{}
+
+// MyThing intentionally does NOT implement Doer (no Do method)
+
+func NewMyThing() *MyThing {
+	return &MyThing{}
+}
+
+type Service struct {
+	doer Doer
+}
+
+func NewService(doer Doer) *Service {
+	return &Service{doer: doer}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitService",
+	kessoku.Bind[Doer](kessoku.Provide(NewMyThing)),
+	kessoku.Provide(NewService),
+)
+`
+
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.go")
+
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	parser := NewParser()
+	metadata, builds, err := parser.ParseFile(testFile, NewVarPool())
+
+	// ParseFile itself should not return a hard error (it logs a warning and skips the injector)
+	if err != nil {
+		t.Fatalf("ParseFile returned unexpected error: %v", err)
+	}
+
+	// metadata is non-nil because the package loaded successfully
+	if metadata == nil {
+		t.Fatal("Expected metadata to be non-nil (package loaded successfully)")
+	}
+
+	// The injector should be skipped because the bind is invalid — builds must be empty
+	if len(builds) != 0 {
+		t.Errorf("Expected 0 build directives (injector should be skipped), got %d", len(builds))
+		for _, b := range builds {
+			t.Logf("  injector %q with %d providers:", b.InjectorName, len(b.Providers))
+			for _, p := range b.Providers {
+				t.Logf("    provides: %v", p.Provides)
+			}
+		}
+	}
+}
+
 // Helper function to check if a string contains a substring
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (len(substr) == 0 || func() bool {

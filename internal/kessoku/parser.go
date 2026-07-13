@@ -533,14 +533,27 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 			return nil, fmt.Errorf("parse internal provider type: %w", err)
 		}
 
+		implementingType := false
 		for i, provide := range result.Provides {
 			for _, providedType := range provide {
 				if types.Implements(providedType, intrfcType) {
-					// If the provided type is the interface type, we can skip it
 					result.Provides[i] = append(result.Provides[i], interfaceType)
+					implementingType = true
 					break
 				}
 			}
+		}
+
+		if !implementingType {
+			// Find the first provided type for a useful error message
+			var providedTypeName string
+			for _, provide := range result.Provides {
+				if len(provide) > 0 {
+					providedTypeName = provide[0].String()
+					break
+				}
+			}
+			return nil, fmt.Errorf("provided type %s does not implement interface %s", providedTypeName, interfaceType)
 		}
 
 		// Propagate struct info through bind wrapper
