@@ -122,7 +122,6 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 
 	slog.Debug("kessoku package", "kessokuPkg", kessokuPkg)
 
-
 	for _, f := range pkg.Syntax {
 		if f == nil {
 			continue
