@@ -1,3 +1,5 @@
+//go:build !wireinject
+
 //go:generate go tool kessoku $GOFILE
 
 package bind_non_new_ctor
