@@ -188,8 +188,12 @@ type KessokuBind struct {
 func (*KessokuBind) kessokuPattern() {}
 
 // KessokuValue represents kessoku.Value(expr) pattern.
+// When TypeExpr is non-nil, the generated code includes an explicit type parameter:
+// kessoku.Value[T](expr). This is required when expr is an untyped nil literal,
+// because Go cannot infer T from untyped nil.
 type KessokuValue struct {
 	Expr      ast.Expr
+	TypeExpr  ast.Expr // optional explicit type parameter (e.g. for nil literals)
 	SourcePos token.Pos
 }
 

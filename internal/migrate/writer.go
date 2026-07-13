@@ -334,16 +334,33 @@ func (w *Writer) bindToExpr(kb *KessokuBind) ast.Expr {
 }
 
 // valueToExpr converts a KessokuValue to kessoku.Value(...) expression.
+// When kv.TypeExpr is non-nil (e.g. for untyped nil literals), the generated
+// expression includes an explicit type parameter: kessoku.Value[T](...).
 func (w *Writer) valueToExpr(kv *KessokuValue) ast.Expr {
 	expr := kv.Expr
 	if expr == nil {
 		expr = ast.NewIdent("nil")
 	}
-	return &ast.CallExpr{
-		Fun: &ast.SelectorExpr{
+
+	var fun ast.Expr
+	if kv.TypeExpr != nil {
+		// Emit kessoku.Value[T](expr)
+		fun = &ast.IndexExpr{
+			X: &ast.SelectorExpr{
+				X:   ast.NewIdent("kessoku"),
+				Sel: ast.NewIdent("Value"),
+			},
+			Index: kv.TypeExpr,
+		}
+	} else {
+		fun = &ast.SelectorExpr{
 			X:   ast.NewIdent("kessoku"),
 			Sel: ast.NewIdent("Value"),
-		},
+		}
+	}
+
+	return &ast.CallExpr{
+		Fun:  fun,
 		Args: []ast.Expr{expr},
 	}
 }
