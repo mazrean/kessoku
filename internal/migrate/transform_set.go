@@ -52,6 +52,10 @@ func setProvidersAllBound(elements []WirePattern, boundTypes map[string]bool, se
 			if !setProvidersAllBound(we.Elements, boundTypes, setIndex) {
 				return false
 			}
+			// The inline nested set contributed providers (setProvidersAllBound returns
+			// true only when it saw at least one, all bound), so this scope has providers
+			// too. Without this, a set containing only nested sets is never suppressed.
+			hasProvider = true
 		case *WireSetRef:
 			nested, ok := setIndex[we.Name]
 			if !ok {
