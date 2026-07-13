@@ -333,10 +333,14 @@ func TestLLMSetupCmd(t *testing.T) {
 }
 
 func TestUsageCmd_Run(t *testing.T) {
+	// Regression test for QA-27: running "llm-setup" with no subcommand must
+	// show the full agent subcommand list, not the hidden "usage" default
+	// subcommand's own usage line.
 	var stdout, stderr bytes.Buffer
 
 	cmd := &LLMSetupCmd{}
 	parser, err := kong.New(cmd,
+		kong.Name("kessoku"),
 		kong.Writers(&stdout, &stderr),
 		kong.Exit(func(int) {}),
 	)
@@ -354,8 +358,27 @@ func TestUsageCmd_Run(t *testing.T) {
 		t.Errorf("UsageCmd.Run() returned error: %v", err)
 	}
 
-	if !strings.Contains(stdout.String(), "Usage:") {
-		t.Errorf("usage output should contain 'Usage:', got: %q", stdout.String())
+	output := stdout.String()
+
+	// Must NOT show "Usage: kessoku usage" — that was the bug (QA-27).
+	if strings.Contains(output, "usage") && strings.HasPrefix(output, "Usage: kessoku usage") {
+		t.Errorf("output must not show hidden 'usage' subcommand usage, got: %q", output)
+	}
+
+	// Must show parent usage summary with <command> placeholder.
+	if !strings.Contains(output, "Usage:") {
+		t.Errorf("output should contain 'Usage:', got: %q", output)
+	}
+	if !strings.Contains(output, "<command>") {
+		t.Errorf("output should contain '<command>' (llm-setup parent usage), got: %q", output)
+	}
+
+	// Must list agent subcommands so the user knows what to run.
+	subcommands := []string{"claude-code", "cursor", "github-copilot"}
+	for _, sub := range subcommands {
+		if !strings.Contains(output, sub) {
+			t.Errorf("output should list subcommand %q, got: %q", sub, output)
+		}
 	}
 }
 

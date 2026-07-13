@@ -22,11 +22,19 @@ type LLMSetupCmd struct {
 	OpenCode      OpenCodeCmd   `kong:"cmd,name='opencode',help='Install OpenCode skills'"`
 }
 
-// UsageCmd is a hidden default command that prints usage (FR-003).
+// UsageCmd is a hidden default command that prints the llm-setup parent usage (FR-003).
 type UsageCmd struct{}
 
-// Run prints usage information and exits with code 0.
+// Run prints the llm-setup usage with the full agent subcommand list.
+//
+// ctx.Selected() points to this hidden "usage" leaf node when called, so we
+// pop it from ctx.Path before calling PrintUsage so that ctx.Selected() returns
+// the llm-setup parent node and the correct usage — including all agent
+// subcommands — is displayed.
 func (c *UsageCmd) Run(ctx *kong.Context) error {
+	if len(ctx.Path) > 0 {
+		ctx.Path = ctx.Path[:len(ctx.Path)-1]
+	}
 	return ctx.PrintUsage(false)
 }
 
