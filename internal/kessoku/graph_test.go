@@ -4,6 +4,7 @@ import (
 	"errors"
 	"go/ast"
 	"go/types"
+	"strings"
 	"testing"
 )
 
@@ -1569,6 +1570,73 @@ func TestGraph_Build_ContextInjection_NoDuplicates(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCycleError_DependsOnDirection is a regression test for BUG-23.
+// It verifies that the cycle error message prints arrows in the "depends-on"
+// direction (A -> B means "A depends on B"), not the "provides-to" direction.
+func TestCycleError_DependsOnDirection(t *testing.T) {
+	t.Parallel()
+
+	// Build types: NodeA depends on NodeC, NodeB depends on NodeA, NodeC depends on NodeB.
+	// Dependency (depends-on) cycle: NodeA -> NodeC -> NodeB -> NodeA
+	nodeAType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "NodeA", nil), types.NewStruct(nil, nil), nil))
+	nodeBType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "NodeB", nil), types.NewStruct(nil, nil), nil))
+	nodeCType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "NodeC", nil), types.NewStruct(nil, nil), nil))
+
+	build := &BuildDirective{
+		InjectorName: "InitializeApp",
+		Return: &Return{
+			Type: nodeAType,
+		},
+		Providers: []*ProviderSpec{
+			{
+				Type:     ProviderTypeFunction,
+				Provides: [][]types.Type{{nodeAType}},
+				Requires: []types.Type{nodeCType}, // NodeA depends on NodeC
+			},
+			{
+				Type:     ProviderTypeFunction,
+				Provides: [][]types.Type{{nodeBType}},
+				Requires: []types.Type{nodeAType}, // NodeB depends on NodeA
+			},
+			{
+				Type:     ProviderTypeFunction,
+				Provides: [][]types.Type{{nodeCType}},
+				Requires: []types.Type{nodeBType}, // NodeC depends on NodeB
+			},
+		},
+	}
+
+	metaData := &MetaData{
+		Package: Package{Name: "test", Path: "test"},
+		Imports: make(map[string]*Import),
+	}
+
+	_, err := NewGraph(metaData, build, NewVarPool())
+	if err == nil {
+		t.Fatal("Expected cycle error but got none")
+	}
+
+	var cycleErr *CycleError
+	if !errors.As(err, &cycleErr) {
+		t.Fatalf("Expected *CycleError, got %T: %v", err, err)
+	}
+
+	msg := cycleErr.Error()
+
+	// The arrow -> must read as "depends on". Verify that each adjacent pair in
+	// the printed cycle is actually a depends-on relationship (not provides-to).
+	//
+	// In the depends-on direction NodeA depends on NodeC, so "*NodeA -> *NodeC"
+	// must appear somewhere in the cycle (with -> reading as depends-on).
+	// In the provides-to direction the erroneous order would be "*NodeC -> *NodeA".
+	if !strings.Contains(msg, "*NodeA -> *NodeC") {
+		t.Errorf("cycle error should show NodeA -> NodeC (depends-on direction), got: %s", msg)
+	}
+	if strings.Contains(msg, "*NodeC -> *NodeA") && !strings.Contains(msg, "*NodeA -> *NodeC") {
+		t.Errorf("cycle error is showing provides-to direction (NodeC -> NodeA) instead of depends-on (NodeA -> NodeC): %s", msg)
 	}
 }
 

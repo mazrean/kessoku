@@ -660,6 +660,7 @@ func (e *CycleError) Error() string {
 		return "circular dependency detected"
 	}
 
+	// Collect type names in the order stored in Cycle (provides-to direction).
 	var providerTypes []string
 	for _, n := range e.Cycle {
 		if n.providerSpec != nil && len(n.providerSpec.Provides) > 0 && len(n.providerSpec.Provides[0]) > 0 {
@@ -672,6 +673,14 @@ func (e *CycleError) Error() string {
 
 	if len(providerTypes) == 0 {
 		return "circular dependency detected"
+	}
+
+	// Reverse the slice so that -> reads as "depends on" (not "provides to").
+	// The DFS traverses edges in provides-to order, so the collected cycle is in
+	// provides-to order: "A provides to B" meaning "B depends on A".
+	// Reversing converts it to depends-on order, which is more natural for users.
+	for i, j := 0, len(providerTypes)-1; i < j; i, j = i+1, j-1 {
+		providerTypes[i], providerTypes[j] = providerTypes[j], providerTypes[i]
 	}
 
 	// Build the cycle path: TypeA -> TypeB -> TypeC -> TypeA
