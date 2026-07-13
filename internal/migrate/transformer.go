@@ -62,7 +62,11 @@ func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *
 		case *WireProviderFunc:
 			result = append(result, t.transformProviderFunc(wp))
 		case *WireSetRef:
-			result = append(result, t.transformSetRef(wp))
+			transformed, err := t.transformSetRef(wp)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, transformed)
 		case *WireBuild:
 			transformed, err := t.transformBuild(wp, pkg)
 			if err != nil {

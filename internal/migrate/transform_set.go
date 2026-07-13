@@ -180,7 +180,11 @@ func (t *Transformer) transformElements(elements []WirePattern, pkg *types.Packa
 					}
 				}
 			}
-			result = append(result, t.transformSetRef(we))
+			transformed, err := t.transformSetRef(we)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, transformed)
 		}
 	}
 
