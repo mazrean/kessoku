@@ -399,6 +399,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 
 	build.InjectorName = constant.StringVal(tv.Value)
 
+	// Validate injector name: must be a valid Go identifier and not a keyword.
 	if !token.IsIdentifier(build.InjectorName) {
 		return nil, &injectorValidationError{
 			msg: fmt.Sprintf("injector name %q is not a valid Go identifier", build.InjectorName),
@@ -407,6 +408,14 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 	if token.IsKeyword(build.InjectorName) {
 		return nil, &injectorValidationError{
 			msg: fmt.Sprintf("injector name %q is a Go keyword and cannot be used as a function name", build.InjectorName),
+		}
+	}
+	// "init" is a predeclared identifier (not a keyword), but the Go spec requires
+	// every func init to have no arguments and no return values. Generating
+	// func init() *T { ... } would therefore fail to compile (QA-25).
+	if build.InjectorName == "init" {
+		return nil, &injectorValidationError{
+			msg: fmt.Sprintf("injector name %q is reserved: func init must have no arguments and no return values", build.InjectorName),
 		}
 	}
 

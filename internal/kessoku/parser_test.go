@@ -574,6 +574,29 @@ var _ = kessoku.Inject[*Service](
 			expectedInjectorName: "InitializeService",
 			shouldError:          false,
 		},
+		{
+			// QA-25: "init" is a predeclared identifier, not a keyword, so token.IsKeyword
+			// returns false. The generator would emit func init() *T { ... } which the
+			// Go compiler rejects because func init must have no arguments and no return values.
+			name: "init as injector name is rejected",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type App struct{}
+
+func NewApp() *App {
+	return &App{}
+}
+
+var _ = kessoku.Inject[*App](
+	"init",
+	kessoku.Provide(NewApp),
+)
+`,
+			shouldError:   true,
+			errorContains: `injector name "init" is reserved`,
+		},
 	}
 
 	// Additional test for edge cases related to Set variable parsing
