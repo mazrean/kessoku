@@ -70,12 +70,16 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 		return nil, nil, nil
 	}
 
-	// Find the syntax file that matches our target filename
+	// Find the syntax file that matches our target filename.
+	// pkg.Syntax corresponds to pkg.CompiledGoFiles (not pkg.GoFiles);
+	// the two slices differ when cgo is present because cgo-generated Go files
+	// are inserted into CompiledGoFiles.  Using GoFiles to index Syntax would
+	// pick the wrong AST node for any cgo-containing package.
 	var targetFile *ast.File
 	absFilename, _ := filepath.Abs(filename)
 	for i, f := range pkg.Syntax {
-		if f != nil && i < len(pkg.GoFiles) {
-			absGoFile, _ := filepath.Abs(pkg.GoFiles[i])
+		if f != nil && i < len(pkg.CompiledGoFiles) {
+			absGoFile, _ := filepath.Abs(pkg.CompiledGoFiles[i])
 			if absGoFile == absFilename {
 				targetFile = f
 				break
@@ -116,6 +120,7 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 	}
 
 	slog.Debug("kessoku package", "kessokuPkg", kessokuPkg)
+
 
 	for _, f := range pkg.Syntax {
 		if f == nil {

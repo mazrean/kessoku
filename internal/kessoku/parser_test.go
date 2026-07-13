@@ -4,7 +4,75 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
 )
+
+// TestSyntaxAlignedWithCompiledGoFiles verifies that pkg.Syntax is indexed by
+// pkg.CompiledGoFiles, not pkg.GoFiles, as required by the golang.org/x/tools/go/packages
+// API contract ("Syntax is kept in the same order as CompiledGoFiles").
+// This is a regression test for QA-11: the parser previously used pkg.GoFiles[i] to
+// find the filename for pkg.Syntax[i], which is incorrect for packages with cgo sources.
+func TestSyntaxAlignedWithCompiledGoFiles(t *testing.T) {
+	t.Parallel()
+
+	content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct{ Value string }
+
+func NewConfig() *Config { return &Config{Value: "test"} }
+
+type Service struct{ config *Config }
+
+func NewService(config *Config) *Service { return &Service{config: config} }
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewService),
+)
+`
+
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.go")
+
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	// Load the package the same way ParseFile does.
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+			packages.NeedImports | packages.NeedTypes | packages.NeedTypesSizes |
+			packages.NeedSyntax | packages.NeedTypesInfo,
+	}
+	pkgs, err := packages.Load(cfg, "file="+testFile)
+	if err != nil || len(pkgs) == 0 {
+		t.Fatalf("packages.Load failed: %v", err)
+	}
+	pkg := pkgs[0]
+
+	// The API guarantee: len(pkg.Syntax) == len(pkg.CompiledGoFiles).
+	// GoFiles may have a different length (e.g., when cgo adds generated Go files).
+	if len(pkg.Syntax) != len(pkg.CompiledGoFiles) {
+		t.Errorf("len(pkg.Syntax)=%d != len(pkg.CompiledGoFiles)=%d; indexing Syntax with GoFiles would be wrong",
+			len(pkg.Syntax), len(pkg.CompiledGoFiles))
+	}
+
+	// Verify that ParseFile correctly identifies the target file using CompiledGoFiles.
+	// If the old (GoFiles) indexing were used on a package where GoFiles and CompiledGoFiles
+	// differ, targetFile would be nil and ParseFile would return an error.
+	parser := NewParser()
+	_, builds, parseErr := parser.ParseFile(testFile, NewVarPool())
+	if parseErr != nil {
+		t.Fatalf("ParseFile failed (target file not found with CompiledGoFiles indexing): %v", parseErr)
+	}
+	if len(builds) != 1 {
+		t.Errorf("Expected 1 build directive, got %d", len(builds))
+	}
+}
 
 func TestNewParser(t *testing.T) {
 	t.Parallel()
