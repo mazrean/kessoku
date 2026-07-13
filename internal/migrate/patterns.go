@@ -217,7 +217,11 @@ type KessokuInject struct {
 	FuncName   string
 	Elements   []KessokuPattern
 	SourcePos  token.Pos
-	HasError   bool
+	// NeedsErrorSentinel is true when the wire injector declared an error
+	// return but none of its providers returns an error, so the generated
+	// kessoku.Inject needs a kessoku.Value((error)(nil)) sentinel to keep
+	// the (*T, error) signature.
+	NeedsErrorSentinel bool
 }
 
 func (*KessokuInject) kessokuPattern() {}

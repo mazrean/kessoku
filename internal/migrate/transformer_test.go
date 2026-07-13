@@ -742,3 +742,75 @@ func TestUniqueParamName(t *testing.T) {
 		}
 	})
 }
+
+// TestAnyProviderReturnsError verifies the sentinel-suppression logic: a
+// kessoku.Value((error)(nil)) sentinel is only needed when no provider
+// reachable from the injector's elements returns an error.
+func TestAnyProviderReturnsError(t *testing.T) {
+	t.Parallel()
+
+	errType := types.Universe.Lookup("error").Type()
+	intType := types.Typ[types.Int]
+
+	newFunc := func(name string, results ...types.Type) *types.Func {
+		vars := make([]*types.Var, 0, len(results))
+		for _, r := range results {
+			vars = append(vars, types.NewVar(token.NoPos, nil, "", r))
+		}
+		sig := types.NewSignatureType(nil, nil, nil, types.NewTuple(), types.NewTuple(vars...), false)
+		return types.NewFunc(token.NoPos, nil, name, sig)
+	}
+
+	errProvider := &WireProviderFunc{Name: "NewDB", Func: newFunc("NewDB", intType, errType)}
+	plainProvider := &WireProviderFunc{Name: "NewApp", Func: newFunc("NewApp", intType)}
+
+	tests := []struct {
+		setIndex map[string]*WireNewSet
+		name     string
+		elements []WirePattern
+		want     bool
+	}{
+		{
+			name:     "provider returns error",
+			elements: []WirePattern{errProvider},
+			want:     true,
+		},
+		{
+			name:     "no provider returns error",
+			elements: []WirePattern{plainProvider, &WireValue{}},
+			want:     false,
+		},
+		{
+			name:     "error provider inside nested set",
+			elements: []WirePattern{&WireNewSet{Elements: []WirePattern{errProvider}}},
+			want:     true,
+		},
+		{
+			name:     "error provider behind set reference",
+			elements: []WirePattern{&WireSetRef{Name: "DBSet"}},
+			setIndex: map[string]*WireNewSet{"DBSet": {Elements: []WirePattern{errProvider}}},
+			want:     true,
+		},
+		{
+			name:     "unresolvable set reference treated as no error",
+			elements: []WirePattern{&WireSetRef{Name: "Unknown"}},
+			want:     false,
+		},
+		{
+			name:     "self-referential set does not loop",
+			elements: []WirePattern{&WireSetRef{Name: "Loop"}},
+			setIndex: map[string]*WireNewSet{"Loop": {Elements: []WirePattern{&WireSetRef{Name: "Loop"}, plainProvider}}},
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := anyProviderReturnsError(tt.elements, tt.setIndex, make(map[string]bool))
+			if got != tt.want {
+				t.Errorf("anyProviderReturnsError() = %v; want %v", got, tt.want)
+			}
+		})
+	}
+}

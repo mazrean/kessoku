@@ -412,7 +412,7 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 	// recognises this as a zero-provides, error-typed provider and sets IsReturnError=true
 	// on the injector, preserving the (*T, error) return signature.
 	sentinelLine := providerStartLine
-	if ki.HasError {
+	if ki.NeedsErrorSentinel {
 		sentinel := w.exprWithPos(errorSentinelExpr(), token.Pos(sentinelLine*lineOffsetBytes))
 		args = append(args, sentinel)
 		sentinelLine++

@@ -51,13 +51,51 @@ func (t *Transformer) transformBuild(wb *WireBuild, pkg *types.Package) (*Kessok
 	}
 
 	return &KessokuInject{
-		FuncName:   wb.FuncName,
-		FuncDecl:   wb.FuncDecl,
-		ReturnType: wb.ReturnTypes[0],
-		HasError:   hasError,
-		Elements:   elements,
-		SourcePos:  wb.Pos,
+		FuncName:           wb.FuncName,
+		FuncDecl:           wb.FuncDecl,
+		ReturnType:         wb.ReturnTypes[0],
+		NeedsErrorSentinel: hasError && !anyProviderReturnsError(wb.Elements, t.setIndex, make(map[string]bool)),
+		Elements:           elements,
+		SourcePos:          wb.Pos,
 	}, nil
+}
+
+// anyProviderReturnsError reports whether any provider function reachable from
+// elements (including through nested sets and same-package set references)
+// returns an error. When it does, the generated injector already carries the
+// error return and no kessoku.Value((error)(nil)) sentinel is needed.
+// Unresolvable references are treated as not returning error, which at worst
+// emits a redundant (but harmless) sentinel.
+func anyProviderReturnsError(elements []WirePattern, setIndex map[string]*WireNewSet, visited map[string]bool) bool {
+	for _, element := range elements {
+		switch we := element.(type) {
+		case *WireProviderFunc:
+			if we.Func == nil {
+				continue
+			}
+			sig, ok := we.Func.Type().(*types.Signature)
+			if !ok {
+				continue
+			}
+			results := sig.Results()
+			if results.Len() > 0 && isErrorType(results.At(results.Len()-1).Type()) {
+				return true
+			}
+		case *WireNewSet:
+			if anyProviderReturnsError(we.Elements, setIndex, visited) {
+				return true
+			}
+		case *WireSetRef:
+			if visited[we.Name] {
+				continue
+			}
+			visited[we.Name] = true
+			if nested, ok := setIndex[we.Name]; ok && anyProviderReturnsError(nested.Elements, setIndex, visited) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isErrorType checks if a type is the built-in error type.
