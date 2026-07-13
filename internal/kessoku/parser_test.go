@@ -655,6 +655,31 @@ var _ = kessoku.Inject[*B](
 			expectedBuilds:  0,    // No injector is generated from the invalid directive
 			shouldHaveError: true, // Misplaced error return is rejected loudly at parse time
 		},
+		{
+			// Wire's cleanup-function pattern: a provider returning (*T, func()).
+			// kessoku cannot hand the cleanup back to the injector's caller, so it
+			// must reject the provider loudly instead of silently discarding the
+			// cleanup (resource leak) or deferring it inside the injector (which
+			// would close the resource before the caller uses it).
+			name: "provider returning wire-style cleanup func is rejected",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type DB struct{}
+
+func NewDB() (*DB, func()) {
+	return &DB{}, func() {}
+}
+
+var _ = kessoku.Inject[*DB](
+	"InitializeDB",
+	kessoku.Provide(NewDB),
+)
+`,
+			expectedBuilds:  0,
+			shouldHaveError: true,
+		},
 	}
 
 	// Run edge case tests
