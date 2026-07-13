@@ -3,6 +3,7 @@ package migrate
 import (
 	"go/ast"
 	"go/types"
+	"strings"
 )
 
 // transformBind transforms wire.Bind to kessoku.Bind.
@@ -64,8 +65,11 @@ func (t *Transformer) transformBind(wb *WireBind, pkg *types.Package, elements [
 
 	// Step 2: if not found in the sibling elements, fall back to searching the
 	// package scope for any function whose first return type matches the impl type.
+	// If multiple candidates are found we cannot pick one deterministically, so we
+	// return an error instead of silently choosing the alphabetically-first name.
 	if constructor == nil && implPkg != nil {
 		scope := implPkg.Scope()
+		var candidates []*types.Func
 		for _, name := range scope.Names() {
 			obj := scope.Lookup(name)
 			fn, ok := obj.(*types.Func)
@@ -86,8 +90,21 @@ func (t *Transformer) transformBind(wb *WireBind, pkg *types.Package, elements [
 				}
 			}
 			if types.Identical(retUnwrapped, named) || types.Identical(retType, wb.Implementation) {
-				constructor = fn
-				break
+				candidates = append(candidates, fn)
+			}
+		}
+		if len(candidates) == 1 {
+			constructor = candidates[0]
+		} else if len(candidates) > 1 {
+			names := make([]string, len(candidates))
+			for i, fn := range candidates {
+				names[i] = fn.Name()
+			}
+			return nil, &ParseError{
+				Kind:    ParseErrorMissingConstructor,
+				File:    wb.File,
+				Pos:     wb.Pos,
+				Message: "ambiguous constructor for type \"" + named.Obj().Name() + "\": multiple candidates found in package scope (" + joinNames(names) + "); specify the constructor explicitly in wire.NewSet",
 			}
 		}
 	}
@@ -129,4 +146,9 @@ func (t *Transformer) transformBind(wb *WireBind, pkg *types.Package, elements [
 		VarName:   wb.VarName,
 		SourcePos: wb.Pos,
 	}, nil
+}
+
+// joinNames joins a slice of function names with ", " for use in error messages.
+func joinNames(names []string) string {
+	return strings.Join(names, ", ")
 }
