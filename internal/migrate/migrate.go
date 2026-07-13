@@ -61,6 +61,22 @@ func (m *Migrator) MigrateFiles(patterns []string, outputPath string) error {
 	}
 
 	for _, pkg := range pkgs {
+		// Pre-populate the transformer's set index with all WireNewSet declarations
+		// from every file in this package. This allows anyProviderReturnsError (called
+		// from transformBuild) to resolve WireSetRef entries that are defined in a
+		// different file than the wire.Build injector, preventing spurious
+		// kessoku.Value((error)(nil)) sentinels in cross-file packages.
+		var allPkgPatterns []WirePattern
+		for _, file := range pkg.Syntax {
+			wireImport := m.parser.FindWireImport(file)
+			if wireImport == "" {
+				continue
+			}
+			filePatterns, _ := m.parser.ExtractPatterns(file, pkg.TypesInfo, wireImport, "")
+			allPkgPatterns = append(allPkgPatterns, filePatterns...)
+		}
+		m.transformer.setIndex = buildSetIndex(allPkgPatterns)
+
 		// Build a map from syntax position to file path
 		syntaxFiles := pkg.CompiledGoFiles
 		if len(syntaxFiles) == 0 {
@@ -121,6 +137,10 @@ func (m *Migrator) MigrateFiles(patterns []string, outputPath string) error {
 				Warnings:      warnings,
 			})
 		}
+
+		// Reset the set index after each package so cross-package contamination
+		// cannot occur when MigrateFiles is called with multi-package patterns.
+		m.transformer.setIndex = nil
 	}
 
 	// Log warnings

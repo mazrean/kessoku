@@ -33,7 +33,21 @@ func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *
 	// Build a set index so that transformElements can look up set contents by name.
 	// This is used to deduplicate providers when wire.Build references both a set
 	// and a wire.Bind that covers the same implementation type (BUG-10).
-	t.setIndex = buildSetIndex(patterns)
+	//
+	// t.setIndex may have been pre-populated by the caller with a package-wide
+	// index (so that set refs in wire.Build can resolve sets defined in other
+	// files of the same package). Merge file-local sets into the existing index
+	// without overwriting entries already present from other files.
+	fileSetIndex := buildSetIndex(patterns)
+	if t.setIndex == nil {
+		t.setIndex = fileSetIndex
+	} else {
+		for k, v := range fileSetIndex {
+			if _, exists := t.setIndex[k]; !exists {
+				t.setIndex[k] = v
+			}
+		}
+	}
 	setIndex := t.setIndex
 
 	// First pass: build a map of top-level WireBind variable names to their
