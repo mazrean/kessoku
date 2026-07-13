@@ -277,6 +277,11 @@ type node struct {
 	providerSpec *ProviderSpec
 	providerArgs []*InjectorCallArgument
 	returnValues []*InjectorParam
+	// argProviderOrder and argRequiresIndex record the discovery order for arg nodes:
+	// the DeclOrder of the first provider that requires this arg, and the index within
+	// that provider's Requires slice. Used to sort external arguments in declaration order.
+	argProviderOrder int
+	argRequiresIndex int
 }
 
 type edgeNode struct {
@@ -495,6 +500,13 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 				if err != nil {
 					return nil, fmt.Errorf("auto add missing dependency as argument: %w", err)
 				}
+
+				// Record the discovery order based on the requiring provider's DeclOrder and
+				// the index within that provider's Requires slice. This preserves a stable,
+				// declaration-relative ordering of external arguments in the generated injector
+				// signature, preventing BFS traversal order from reordering parameters.
+				n2.argProviderOrder = n1.providerSpec.DeclOrder
+				n2.argRequiresIndex = i
 
 				argNodeMap[key] = n2
 				queue.Push(n2)
@@ -1071,6 +1083,11 @@ func (g *Graph) topologicalSortIter() func(yield func(*node) bool) {
 	requireCounts := make(map[*node]*requireCounter)
 	visited := make(map[*node]struct{})
 
+	// Separate arg nodes from provider nodes so we can sort arg nodes by their
+	// discovery order (argProviderOrder, argRequiresIndex). This preserves the
+	// declaration-relative ordering of external arguments in the generated injector
+	// function signature instead of using BFS traversal order.
+	var argNodes []*node
 	for _, n := range g.nodes {
 		requireCount := len(g.reverseEdges[n])
 		requireCounts[n] = &requireCounter{
@@ -1079,8 +1096,33 @@ func (g *Graph) topologicalSortIter() func(yield func(*node) bool) {
 		}
 
 		if requireCount == 0 {
-			waitNodes.Push(n)
+			if n.arg != nil {
+				argNodes = append(argNodes, n)
+			} else {
+				waitNodes.Push(n)
+			}
 		}
+	}
+
+	// Sort arg nodes by (argProviderOrder, argRequiresIndex) to ensure stable,
+	// declaration-relative ordering in the generated function signature.
+	slices.SortStableFunc(argNodes, func(a, b *node) int {
+		if a.argProviderOrder != b.argProviderOrder {
+			if a.argProviderOrder < b.argProviderOrder {
+				return -1
+			}
+			return 1
+		}
+		if a.argRequiresIndex < b.argRequiresIndex {
+			return -1
+		}
+		if a.argRequiresIndex > b.argRequiresIndex {
+			return 1
+		}
+		return 0
+	})
+	for _, n := range argNodes {
+		waitNodes.Push(n)
 	}
 
 	return func(yield func(*node) bool) {
