@@ -1017,6 +1017,113 @@ func TestInjectorProviderCallStmt_buildWaitStatement(t *testing.T) {
 	}
 }
 
+// TestBuildWaitStatement_ContextCause is a regression test for QA-17:
+// when ctx.Done() fires, the generated code must return context.Cause(ctx)
+// (the real provider error) rather than ctx.Err() (context.Canceled).
+func TestBuildWaitStatement_ContextCause(t *testing.T) {
+	t.Parallel()
+
+	stmt := &InjectorProviderCallStmt{}
+	channel := &ast.Ident{Name: "testCh"}
+
+	// returnErrStmts simulates the injector's error-return lambda
+	returnErrStmts := func(errExpr ast.Expr) []ast.Stmt {
+		return []ast.Stmt{
+			&ast.ReturnStmt{
+				Results: []ast.Expr{ast.NewIdent("zero"), errExpr},
+			},
+		}
+	}
+
+	injector := &Injector{asyncCtxName: "ctx"}
+	result := stmt.buildWaitStatement(injector, channel, returnErrStmts, false)
+
+	selectStmt, ok := result.(*ast.SelectStmt)
+	if !ok {
+		t.Fatalf("expected *ast.SelectStmt, got %T", result)
+	}
+
+	// Find the ctx.Done() case clause
+	var ctxDoneBody []ast.Stmt
+	for _, s := range selectStmt.Body.List {
+		cc, isCC := s.(*ast.CaseClause)
+		if !isCC {
+			continue
+		}
+		if len(cc.List) == 1 {
+			if unary, isUnary := cc.List[0].(*ast.UnaryExpr); isUnary {
+				if call, isCall := unary.X.(*ast.CallExpr); isCall {
+					if sel, isSel := call.Fun.(*ast.SelectorExpr); isSel {
+						if sel.Sel.Name == "Done" {
+							ctxDoneBody = cc.Body
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if ctxDoneBody == nil {
+		t.Fatal("could not find ctx.Done() case clause in select statement")
+	}
+
+	// Find the return statement in the ctx.Done() body
+	var returnStmt *ast.ReturnStmt
+	for _, s := range ctxDoneBody {
+		if rs, isRS := s.(*ast.ReturnStmt); isRS {
+			returnStmt = rs
+			break
+		}
+	}
+
+	if returnStmt == nil {
+		t.Fatal("no return statement found in ctx.Done() body")
+	}
+
+	// The last result should be context.Cause(ctx), not ctx.Err()
+	if len(returnStmt.Results) == 0 {
+		t.Fatal("return statement has no results")
+	}
+
+	errResult := returnStmt.Results[len(returnStmt.Results)-1]
+	callExpr, ok := errResult.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected error result to be *ast.CallExpr, got %T", errResult)
+	}
+
+	selExpr, ok := callExpr.Fun.(*ast.SelectorExpr)
+	if !ok {
+		t.Fatalf("expected call fun to be *ast.SelectorExpr, got %T", callExpr.Fun)
+	}
+
+	pkgIdent, ok := selExpr.X.(*ast.Ident)
+	if !ok {
+		t.Fatalf("expected selector X to be *ast.Ident, got %T", selExpr.X)
+	}
+
+	if pkgIdent.Name != "context" {
+		t.Errorf("expected package name %q in error call, got %q (QA-17: must use context.Cause, not ctx.Err)", "context", pkgIdent.Name)
+	}
+
+	if selExpr.Sel.Name != "Cause" {
+		t.Errorf("expected function name %q, got %q (QA-17: must use context.Cause, not ctx.Err)", "Cause", selExpr.Sel.Name)
+	}
+
+	if len(callExpr.Args) != 1 {
+		t.Errorf("expected context.Cause to have 1 argument, got %d", len(callExpr.Args))
+		return
+	}
+
+	argIdent, ok := callExpr.Args[0].(*ast.Ident)
+	if !ok {
+		t.Fatalf("expected context.Cause argument to be *ast.Ident, got %T", callExpr.Args[0])
+	}
+
+	if argIdent.Name != "ctx" {
+		t.Errorf("expected context.Cause argument to be %q, got %q", "ctx", argIdent.Name)
+	}
+}
+
 func TestInjectorProviderCallStmt_channelsClose(t *testing.T) {
 	t.Parallel()
 

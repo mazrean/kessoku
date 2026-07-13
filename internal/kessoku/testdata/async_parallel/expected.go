@@ -46,23 +46,15 @@ func InitializeApp(ctx context.Context) (*App, error) {
 	select {
 	case <-cacheServiceCh:
 	case <-ctx.Done():
-		if err := eg.Wait(); err != nil {
-			var zero *App
-			return zero, err
-		}
 		var zero *App
-		return zero, ctx.Err()
+		return zero, context.Cause(ctx)
 	}
 	userService = kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
 	select {
 	case <-notificationServiceCh:
 	case <-ctx.Done():
-		if err := eg.Wait(); err != nil {
-			var zero *App
-			return zero, err
-		}
 		var zero *App
-		return zero, ctx.Err()
+		return zero, context.Cause(ctx)
 	}
 	app = kessoku.Provide(NewApp).Fn()(userService, notificationService)
 	if err := eg.Wait(); err != nil {

@@ -734,45 +734,6 @@ func (stmt *InjectorProviderCallStmt) buildWaitStatement(injector *Injector, cha
 		}
 	}
 
-	ctxErrExpr := &ast.CallExpr{
-		Fun: &ast.SelectorExpr{
-			X:   ast.NewIdent(ctxName),
-			Sel: ast.NewIdent("Err"),
-		},
-	}
-
-	var doneBody []ast.Stmt
-	if inChain {
-		doneBody = returnErrStmts(ctxErrExpr)
-	} else {
-		// if err := eg.Wait(); err != nil { return zero, err }
-		// return zero, ctx.Err()
-		errIdent := ast.NewIdent("err")
-		doneBody = append(doneBody, &ast.IfStmt{
-			Init: &ast.AssignStmt{
-				Lhs: []ast.Expr{errIdent},
-				Tok: token.DEFINE,
-				Rhs: []ast.Expr{
-					&ast.CallExpr{
-						Fun: &ast.SelectorExpr{
-							X:   ast.NewIdent(injector.egName()),
-							Sel: ast.NewIdent("Wait"),
-						},
-					},
-				},
-			},
-			Cond: &ast.BinaryExpr{
-				X:  errIdent,
-				Op: token.NEQ,
-				Y:  ast.NewIdent("nil"),
-			},
-			Body: &ast.BlockStmt{
-				List: returnErrStmts(errIdent),
-			},
-		})
-		doneBody = append(doneBody, returnErrStmts(ctxErrExpr)...)
-	}
-
 	return &ast.SelectStmt{
 		Body: &ast.BlockStmt{
 			List: []ast.Stmt{
@@ -797,7 +758,13 @@ func (stmt *InjectorProviderCallStmt) buildWaitStatement(injector *Injector, cha
 							},
 						},
 					},
-					Body: doneBody,
+					Body: returnErrStmts(&ast.CallExpr{
+						Fun: &ast.SelectorExpr{
+							X:   ast.NewIdent("context"),
+							Sel: ast.NewIdent("Cause"),
+						},
+						Args: []ast.Expr{ast.NewIdent(ctxName)},
+					}),
 				},
 			},
 		},

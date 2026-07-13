@@ -52,12 +52,8 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		select {
 		case <-ch:
 		case <-ctx.Done():
-			if err := eg.Wait(); err != nil {
-				var zero *App
-				return zero, err
-			}
 			var zero *App
-			return zero, ctx.Err()
+			return zero, context.Cause(ctx)
 		}
 	}
 	app = kessoku.Provide(NewApp).Fn()(database, cache, messaging)
