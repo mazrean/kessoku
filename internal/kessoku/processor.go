@@ -11,6 +11,10 @@ import (
 	"strings"
 )
 
+// generatedFilePerm is the default permission for generated files when the
+// destination does not already exist.
+const generatedFilePerm = os.FileMode(0o644)
+
 // writeAtomically writes content produced by fn to a temporary file in the
 // same directory as dst, then renames the temp file to dst on success.
 // If fn returns an error, the temporary file is removed and dst is left
@@ -34,6 +38,19 @@ func writeAtomically(dst string, fn func(*os.File) error) error {
 		_ = tmp.Close()
 		cleanup()
 		return err
+	}
+
+	// os.CreateTemp creates the file with mode 0o600, which would leak
+	// owner-only permissions onto dst after the rename. Preserve the
+	// existing file's permissions, or default to the usual 0o644.
+	perm := generatedFilePerm
+	if fi, statErr := os.Stat(dst); statErr == nil {
+		perm = fi.Mode().Perm()
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("chmod temp file: %w", err)
 	}
 
 	if err := tmp.Close(); err != nil {

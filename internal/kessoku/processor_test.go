@@ -101,6 +101,60 @@ func TestWriteAtomically(t *testing.T) {
 		}
 	})
 
+	t.Run("success: new file gets 0644 permissions, not CreateTemp's 0600", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "out.go")
+
+		err := writeAtomically(dst, func(f *os.File) error {
+			_, werr := fmt.Fprint(f, "hello")
+			return werr
+		})
+		if err != nil {
+			t.Fatalf("writeAtomically returned unexpected error: %v", err)
+		}
+
+		fi, statErr := os.Stat(dst)
+		if statErr != nil {
+			t.Fatalf("failed to stat destination file: %v", statErr)
+		}
+		if fi.Mode().Perm() != 0o644 {
+			t.Errorf("destination permissions = %v; want %v", fi.Mode().Perm(), os.FileMode(0o644))
+		}
+	})
+
+	t.Run("success: preserves pre-existing destination permissions", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "out.go")
+
+		if err := os.WriteFile(dst, []byte(sentinel), 0o664); err != nil {
+			t.Fatalf("failed to create pre-existing file: %v", err)
+		}
+		// WriteFile's mode is subject to umask; force the exact mode.
+		if err := os.Chmod(dst, 0o664); err != nil {
+			t.Fatalf("failed to chmod pre-existing file: %v", err)
+		}
+
+		err := writeAtomically(dst, func(f *os.File) error {
+			_, werr := fmt.Fprint(f, "hello")
+			return werr
+		})
+		if err != nil {
+			t.Fatalf("writeAtomically returned unexpected error: %v", err)
+		}
+
+		fi, statErr := os.Stat(dst)
+		if statErr != nil {
+			t.Fatalf("failed to stat destination file: %v", statErr)
+		}
+		if fi.Mode().Perm() != 0o664 {
+			t.Errorf("destination permissions = %v; want preserved %v", fi.Mode().Perm(), os.FileMode(0o664))
+		}
+	})
+
 	t.Run("failure: no temp files left behind", func(t *testing.T) {
 		t.Parallel()
 
