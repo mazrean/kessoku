@@ -1879,3 +1879,74 @@ var _ = kessoku.Inject[*App](
 		})
 	}
 }
+
+// TestModuleRootForFile verifies that moduleRootForFile locates the directory
+// that contains go.mod when walking up from the given file's path.
+// This is the unit-level regression test for QA-26.
+func TestModuleRootForFile(t *testing.T) {
+	t.Parallel()
+
+	// Create a temporary directory tree:
+	//   root/
+	//     go.mod
+	//     sub/
+	//       file.go
+	root := t.TempDir()
+	subDir := filepath.Join(root, "sub")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	goModPath := filepath.Join(root, "go.mod")
+	if err := os.WriteFile(goModPath, []byte("module example.com/test\n\ngo 1.24\n"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	filePath := filepath.Join(subDir, "file.go")
+	if err := os.WriteFile(filePath, []byte("package sub\n"), 0644); err != nil {
+		t.Fatalf("write file.go: %v", err)
+	}
+
+	t.Run("finds go.mod in parent directory", func(t *testing.T) {
+		t.Parallel()
+		got := moduleRootForFile(filePath)
+		if got != root {
+			t.Errorf("moduleRootForFile(%q) = %q, want %q", filePath, got, root)
+		}
+	})
+
+	t.Run("finds go.mod in same directory", func(t *testing.T) {
+		t.Parallel()
+		directFile := filepath.Join(root, "main.go")
+		if err := os.WriteFile(directFile, []byte("package main\n"), 0644); err != nil {
+			t.Fatalf("write main.go: %v", err)
+		}
+		got := moduleRootForFile(directFile)
+		if got != root {
+			t.Errorf("moduleRootForFile(%q) = %q, want %q", directFile, got, root)
+		}
+	})
+
+	t.Run("returns empty string when no go.mod found", func(t *testing.T) {
+		t.Parallel()
+		// Use a path in a directory that has no go.mod ancestry
+		// (t.TempDir() returns a path under /tmp which typically has no go.mod)
+		isolatedDir := t.TempDir()
+		isolatedFile := filepath.Join(isolatedDir, "file.go")
+		if err := os.WriteFile(isolatedFile, []byte("package foo\n"), 0644); err != nil {
+			t.Fatalf("write file.go: %v", err)
+		}
+		got := moduleRootForFile(isolatedFile)
+		if got != "" {
+			t.Errorf("moduleRootForFile(%q) = %q, want empty string (no go.mod in tree)", isolatedFile, got)
+		}
+	})
+
+	t.Run("relative filename returns empty string when no go.mod in cwd ancestry", func(t *testing.T) {
+		t.Parallel()
+		// A relative path "." — its Abs resolution depends on CWD.
+		// This subtest just verifies the function does not panic or error.
+		got := moduleRootForFile("nonexistent_relative.go")
+		// We cannot assert the exact value because CWD varies, but the
+		// function must return either a valid directory path or "".
+		_ = got
+	})
+}

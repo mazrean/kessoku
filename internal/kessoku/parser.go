@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"go/types"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -204,18 +205,55 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 	return metaData, builds, nil
 }
 
+// moduleRootForFile walks parent directories of dir looking for a go.mod file
+// and returns the directory that contains it. If no go.mod is found the empty
+// string is returned.
+func moduleRootForFile(filename string) string {
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Dir(absPath)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// reached filesystem root without finding go.mod
+			return ""
+		}
+		dir = parent
+	}
+}
+
 // initializeSSA initializes SSA analysis for a file.
 func (p *Parser) initializePackages(filename string) (*packages.Package, error) {
-	// Load packages using the new packages API
+	// Resolve the filename to an absolute path so that the file= query and
+	// module root detection both work regardless of the process CWD.
+	absFilename, err := filepath.Abs(filename)
+	if err != nil {
+		return nil, fmt.Errorf("get absolute path: %w", err)
+	}
+
+	// Load packages using the new packages API.
+	// Set Dir to the module root that contains the target file so that
+	// go/packages can locate go.mod regardless of the process CWD.  This
+	// allows `kessoku /abs/path/to/file.go` to work even when the CWD is
+	// outside the target module.  When no go.mod is found above the file we
+	// leave Dir empty, preserving the existing behaviour of relying on the
+	// process CWD.
 	cfg := &packages.Config{
+		Dir: moduleRootForFile(absFilename),
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
 			packages.NeedImports | packages.NeedTypes | packages.NeedTypesSizes |
 			packages.NeedSyntax | packages.NeedTypesInfo,
 		Fset: p.fset,
 	}
 
-	// Load the specific file and its dependencies
-	pkgs, err := packages.Load(cfg, "file="+filename)
+	// Use the absolute filename in the file= query so that go/packages
+	// can locate the file regardless of which directory Dir is set to.
+	pkgs, err := packages.Load(cfg, "file="+absFilename)
 	if err != nil {
 		return nil, fmt.Errorf("load packages: %w", err)
 	}
@@ -229,12 +267,6 @@ func (p *Parser) initializePackages(filename string) (*packages.Package, error) 
 	}
 
 	for _, pkg := range pkgs {
-		absFilename, err := filepath.Abs(filename)
-		if err != nil {
-			slog.Debug("failed to get absolute filename", "error", err, "filename", filename)
-			continue
-		}
-
 		for _, goFile := range pkg.GoFiles {
 			absGoFile, err := filepath.Abs(goFile)
 			if err != nil {
