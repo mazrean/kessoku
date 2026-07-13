@@ -297,6 +297,11 @@ type Graph struct {
 	returnValue  *returnVal
 	injectorName string
 	nodes        []*node
+	// hasError is true when any provider in the build directive is a zero-provides
+	// error sentinel (e.g. kessoku.Value((error)(nil))). This forces the generated
+	// injector to return error even when no reachable provider returns an error,
+	// preserving a wire injector's declared (*T, error) signature after migration.
+	hasError bool
 }
 
 func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Graph, error) {
@@ -305,6 +310,17 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 		returnType:   build.Return,
 		edges:        make(map[*node][]*edgeNode),
 		reverseEdges: make(map[*node][]*node),
+	}
+
+	// Upfront pass: detect zero-provides error-only providers (e.g. kessoku.Value((error)(nil))).
+	// These providers are unreachable in graph traversal (they provide nothing needed by the
+	// dependency graph) but they carry the caller's intent: the injector must return error.
+	// We capture that intent here so isReturnError() can see it even if the node is never visited.
+	for _, provider := range build.Providers {
+		if provider.IsReturnError && len(provider.Provides) == 0 {
+			graph.hasError = true
+			break
+		}
 	}
 
 	type fnProvider struct {
@@ -979,6 +995,9 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 }
 
 func (g *Graph) isReturnError() bool {
+	if g.hasError {
+		return true
+	}
 	for _, node := range g.nodes {
 		if node.providerSpec != nil && node.providerSpec.IsReturnError {
 			return true

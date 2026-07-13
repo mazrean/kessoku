@@ -15,8 +15,9 @@ const maxInjectorReturns = 2
 
 // Transformer converts wire patterns to kessoku patterns.
 type Transformer struct {
-	tc       *TypeConverter
-	setIndex map[string]*WireNewSet // var name → WireNewSet for dedup
+	tc           *TypeConverter
+	setIndex     map[string]*WireNewSet // var name → WireNewSet for dedup (BUG-10)
+	bindVarTypes map[string]string      // VarName -> implementation type string for top-level WireBind vars (BUG-14)
 }
 
 // NewTransformer creates a new Transformer instance.
@@ -31,9 +32,26 @@ func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *
 
 	// Build a set index so that transformElements can look up set contents by name.
 	// This is used to deduplicate providers when wire.Build references both a set
-	// and a wire.Bind that covers the same implementation type.
+	// and a wire.Bind that covers the same implementation type (BUG-10).
 	t.setIndex = buildSetIndex(patterns)
 	setIndex := t.setIndex
+
+	// First pass: build a map of top-level WireBind variable names to their
+	// implementation type strings. This lets transformElements know when a
+	// WireSetRef points to a top-level bind variable (so the explicit constructor
+	// call can be suppressed – the bind already wraps the constructor) (BUG-14).
+	t.bindVarTypes = make(map[string]string)
+	for _, p := range patterns {
+		wb, ok := p.(*WireBind)
+		if !ok || wb.VarName == "" {
+			continue
+		}
+		implType := wb.Implementation
+		if ptr, ok2 := implType.(*types.Pointer); ok2 {
+			implType = ptr.Elem()
+		}
+		t.bindVarTypes[wb.VarName] = implType.String()
+	}
 
 	var result []KessokuPattern
 
@@ -46,11 +64,25 @@ func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *
 			}
 			result = append(result, transformed)
 		case *WireBind:
-			transformed, err := t.transformBind(wp, pkg, nil)
-			if err != nil {
-				return nil, err
+			if wp.VarName != "" {
+				// Top-level bind variable: wrap in a kessoku.Set so it can be
+				// declared as a variable and referenced by other sets/injectors (BUG-14).
+				bind, err := t.transformBind(wp, pkg, nil)
+				if err != nil {
+					return nil, err
+				}
+				result = append(result, &KessokuSet{
+					VarName:   wp.VarName,
+					Elements:  []KessokuPattern{bind},
+					SourcePos: wp.Pos,
+				})
+			} else {
+				transformed, err := t.transformBind(wp, pkg, nil)
+				if err != nil {
+					return nil, err
+				}
+				result = append(result, transformed)
 			}
-			result = append(result, transformed)
 		case *WireValue:
 			result = append(result, t.transformValue(wp))
 		case *WireInterfaceValue:

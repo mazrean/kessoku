@@ -365,6 +365,25 @@ func (w *Writer) valueToExpr(kv *KessokuValue) ast.Expr {
 	}
 }
 
+// errorSentinelExpr builds a kessoku.Value((error)(nil)) expression that, when
+// processed by the kessoku code generator, forces the generated injector function
+// to include an error return even when no provider returns an error.
+// This preserves a wire injector's declared (*T, error) return signature after migration.
+func errorSentinelExpr() ast.Expr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   ast.NewIdent("kessoku"),
+			Sel: ast.NewIdent("Value"),
+		},
+		Args: []ast.Expr{
+			&ast.CallExpr{
+				Fun:  &ast.ParenExpr{X: ast.NewIdent("error")},
+				Args: []ast.Expr{ast.NewIdent("nil")},
+			},
+		},
+	}
+}
+
 // injectToDecl converts a KessokuInject to a variable declaration with proper line breaks.
 // kessoku.Inject is used as: var _ = kessoku.Inject[T]("FuncName", providers...)
 func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
@@ -377,10 +396,21 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 		},
 	}
 
-	// Append provider elements
-	args = append(args, w.buildElementArgs(ki.Elements, providerStartLine)...)
+	// When the wire injector declared an error return but no provider returns error,
+	// emit a sentinel kessoku.Value((error)(nil)) provider. The kessoku code generator
+	// recognises this as a zero-provides, error-typed provider and sets IsReturnError=true
+	// on the injector, preserving the (*T, error) return signature.
+	sentinelLine := providerStartLine
+	if ki.HasError {
+		sentinel := w.exprWithPos(errorSentinelExpr(), token.Pos(sentinelLine*lineOffsetBytes))
+		args = append(args, sentinel)
+		sentinelLine++
+	}
 
-	lastLine := providerStartLine + len(ki.Elements) - 1
+	// Append provider elements
+	args = append(args, w.buildElementArgs(ki.Elements, sentinelLine)...)
+
+	lastLine := sentinelLine + len(ki.Elements) - 1
 
 	// Build type parameter for Inject[T]
 	typeExpr := w.typeToExpr(ki.ReturnType)

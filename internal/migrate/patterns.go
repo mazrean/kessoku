@@ -84,6 +84,7 @@ func (*WireNewSet) wirePattern() {}
 type WireBind struct {
 	Interface      types.Type
 	Implementation types.Type
+	VarName        string // non-empty when declared as a package-level variable
 	baseWirePattern
 }
 
@@ -182,6 +183,7 @@ func (*KessokuProvide) kessokuPattern() {}
 type KessokuBind struct {
 	Interface types.Type
 	Provider  KessokuPattern
+	VarName   string // non-empty when this bind is declared as a package-level variable
 	SourcePos token.Pos
 }
 

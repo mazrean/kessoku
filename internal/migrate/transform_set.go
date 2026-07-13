@@ -215,6 +215,12 @@ func (t *Transformer) collectBoundTypes(elements []WirePattern) map[string]bool 
 					maps.Copy(boundTypes, t.collectBoundTypes(ws.Elements))
 				}
 			}
+			// If this ref points to a top-level WireBind variable, the bind already
+			// wraps the constructor, so mark the implementation type as bound to
+			// prevent the constructor from being emitted separately in the same set (BUG-14).
+			if implTypeStr, ok := t.bindVarTypes[we.Name]; ok {
+				boundTypes[implTypeStr] = true
+			}
 		}
 	}
 	return boundTypes

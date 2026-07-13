@@ -160,7 +160,7 @@ func (p *Parser) parseCallExpr(call *ast.CallExpr, info *types.Info, wireAlias s
 	case "NewSet":
 		return p.parseNewSet(call, info, wireAlias, filePath, varName), nil
 	case "Bind":
-		return p.parseBind(call, info, filePath), nil
+		return p.parseBind(call, info, filePath, varName), nil
 	case "Value":
 		return p.parseValue(call, info, filePath), nil
 	case "InterfaceValue":
@@ -279,7 +279,7 @@ func extractStringFields(args []ast.Expr) []string {
 	return fields
 }
 
-func (p *Parser) parseBind(call *ast.CallExpr, info *types.Info, filePath string) *WireBind {
+func (p *Parser) parseBind(call *ast.CallExpr, info *types.Info, filePath, varName string) *WireBind {
 	if len(call.Args) != wireBindArgCount {
 		return nil
 	}
@@ -298,6 +298,7 @@ func (p *Parser) parseBind(call *ast.CallExpr, info *types.Info, filePath string
 		},
 		Interface:      ifaceType,
 		Implementation: implType,
+		VarName:        varName,
 	}
 }
 

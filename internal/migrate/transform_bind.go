@@ -126,6 +126,7 @@ func (t *Transformer) transformBind(wb *WireBind, pkg *types.Package, elements [
 			FuncExpr:  constructorExpr,
 			SourcePos: wb.Pos,
 		},
+		VarName:   wb.VarName,
 		SourcePos: wb.Pos,
 	}, nil
 }
