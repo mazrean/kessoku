@@ -1628,3 +1628,93 @@ func TestVarPool_GetChannel(t *testing.T) {
 		}
 	})
 }
+
+// TestGenerateAsyncInitializationUsesActualErrgroupAlias verifies that when the
+// golang.org/x/sync/errgroup package is already in the imports map under a
+// non-default alias (e.g. "eg"), the generated errgroup declaration uses that
+// actual alias rather than a hardcoded "errgroup" string.
+// Regression test for the bug where generateErrGroupDeclaration hardcoded
+// "errgroup" instead of reading the alias from the Import record.
+func TestGenerateAsyncInitializationUsesActualErrgroupAlias(t *testing.T) {
+	t.Parallel()
+
+	// Simulate a varPool that already has "errgroup" reserved (e.g. by a
+	// file-level declaration `var errgroup = ...`), forcing the package to
+	// receive the alias "errgroup0".
+	varPool := NewVarPool()
+	_ = varPool.GetName("errgroup") // reserves "errgroup"; next call returns "errgroup0"
+
+	// Pre-populate imports: errgroup package is NOT yet in the map so that
+	// generateAsyncInitialization allocates the alias itself via varPool.
+	imports := map[string]*Import{}
+
+	injector := &Injector{
+		Name:          "InitializeApp",
+		Vars:          []*InjectorParam{},
+		Args:          []*InjectorArgument{},
+		Stmts:         []InjectorStmt{},
+		IsReturnError: false,
+	}
+
+	stmts, _, err := generateAsyncInitialization("main", injector, NewVarPool(), varPool, imports)
+	if err != nil {
+		t.Fatalf("generateAsyncInitialization returned error: %v", err)
+	}
+
+	// The import alias actually assigned must be "errgroup0" because "errgroup"
+	// was already reserved in the varPool.
+	imp, ok := imports[errgroupPkgPath]
+	if !ok {
+		t.Fatal("errgroup package was not added to imports map")
+	}
+	if imp.Name != "errgroup0" {
+		t.Errorf("errgroup import alias = %q, want %q", imp.Name, "errgroup0")
+	}
+
+	// The generated errgroup-declaration statement must use the actual alias
+	// ("errgroup0"), not the hardcoded string "errgroup".
+	// The declaration is the last statement (after the var-block).
+	if len(stmts) < 2 {
+		t.Fatalf("expected at least 2 statements, got %d", len(stmts))
+	}
+	egDecl, ok := stmts[len(stmts)-1].(*ast.AssignStmt)
+	if !ok {
+		t.Fatalf("last statement is not *ast.AssignStmt, got %T", stmts[len(stmts)-1])
+	}
+	callExpr, ok := egDecl.Rhs[0].(*ast.UnaryExpr)
+	if !ok {
+		// Could be a CallExpr (WithContext) when ctx is available; handle both.
+		callExprDirect, ok2 := egDecl.Rhs[0].(*ast.CallExpr)
+		if !ok2 {
+			t.Fatalf("errgroup decl RHS is neither *ast.UnaryExpr nor *ast.CallExpr, got %T", egDecl.Rhs[0])
+		}
+		sel, ok3 := callExprDirect.Fun.(*ast.SelectorExpr)
+		if !ok3 {
+			t.Fatalf("call Fun is not *ast.SelectorExpr, got %T", callExprDirect.Fun)
+		}
+		xIdent, ok4 := sel.X.(*ast.Ident)
+		if !ok4 {
+			t.Fatalf("selector X is not *ast.Ident, got %T", sel.X)
+		}
+		if xIdent.Name != "errgroup0" {
+			t.Errorf("errgroup selector uses %q, want %q (actual alias)", xIdent.Name, "errgroup0")
+		}
+	} else {
+		// &errgroup.Group{} case
+		lit, ok2 := callExpr.X.(*ast.CompositeLit)
+		if !ok2 {
+			t.Fatalf("unary X is not *ast.CompositeLit, got %T", callExpr.X)
+		}
+		sel, ok3 := lit.Type.(*ast.SelectorExpr)
+		if !ok3 {
+			t.Fatalf("composite lit type is not *ast.SelectorExpr, got %T", lit.Type)
+		}
+		xIdent, ok4 := sel.X.(*ast.Ident)
+		if !ok4 {
+			t.Fatalf("selector X is not *ast.Ident, got %T", sel.X)
+		}
+		if xIdent.Name != "errgroup0" {
+			t.Errorf("errgroup selector uses %q, want %q (actual alias)", xIdent.Name, "errgroup0")
+		}
+	}
+}
