@@ -1,6 +1,8 @@
 package kessoku
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +34,94 @@ func TestNewProcessor(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWriteAtomically verifies the atomic write semantics required by BUG-09.
+// With the old os.Create approach the destination file was truncated before
+// generation ran, so a failure left a 0-byte file behind.  With writeAtomically
+// the destination is only replaced on success and the original is preserved on
+// failure.
+func TestWriteAtomically(t *testing.T) {
+	t.Parallel()
+
+	const sentinel = "ORIGINAL_CONTENT"
+
+	t.Run("success: creates destination file with written content", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "out.go")
+
+		err := writeAtomically(dst, func(f *os.File) error {
+			_, werr := fmt.Fprint(f, "hello")
+			return werr
+		})
+		if err != nil {
+			t.Fatalf("writeAtomically returned unexpected error: %v", err)
+		}
+
+		got, readErr := os.ReadFile(dst)
+		if readErr != nil {
+			t.Fatalf("failed to read destination file: %v", readErr)
+		}
+		if string(got) != "hello" {
+			t.Errorf("destination content = %q; want %q", string(got), "hello")
+		}
+	})
+
+	t.Run("failure: preserves pre-existing destination file", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "out.go")
+
+		// Pre-create the destination with known content (simulates a valid
+		// band file that was previously generated).
+		if err := os.WriteFile(dst, []byte(sentinel), 0o644); err != nil {
+			t.Fatalf("failed to create pre-existing file: %v", err)
+		}
+
+		writeErr := errors.New("generate failed")
+		err := writeAtomically(dst, func(f *os.File) error {
+			// Write some bytes then fail, mimicking a partial Generate call.
+			_, _ = fmt.Fprint(f, "partial")
+			return writeErr
+		})
+		if err == nil {
+			t.Fatal("writeAtomically should have returned an error")
+		}
+
+		// The original file must be untouched.
+		got, readErr := os.ReadFile(dst)
+		if readErr != nil {
+			t.Fatalf("failed to read destination file after failure: %v", readErr)
+		}
+		if string(got) != sentinel {
+			t.Errorf("destination content after failure = %q; want original %q", string(got), sentinel)
+		}
+	})
+
+	t.Run("failure: no temp files left behind", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "out.go")
+
+		_ = writeAtomically(dst, func(_ *os.File) error {
+			return errors.New("generate failed")
+		})
+
+		// After a failure the directory must contain no .kessoku-tmp-* files.
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("failed to read temp dir: %v", err)
+		}
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".kessoku-tmp-") {
+				t.Errorf("temp file not cleaned up: %s", e.Name())
+			}
+		}
+	})
 }
 
 func TestProcessFiles(t *testing.T) {

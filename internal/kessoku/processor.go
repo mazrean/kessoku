@@ -8,6 +8,43 @@ import (
 	"strings"
 )
 
+// writeAtomically writes content produced by fn to a temporary file in the
+// same directory as dst, then renames the temp file to dst on success.
+// If fn returns an error, the temporary file is removed and dst is left
+// untouched.
+func writeAtomically(dst string, fn func(*os.File) error) error {
+	dir := filepath.Dir(dst)
+	tmp, err := os.CreateTemp(dir, ".kessoku-tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	// cleanup removes the temp file; safe to call after tmp is closed.
+	cleanup := func() {
+		if removeErr := os.Remove(tmpName); removeErr != nil && !os.IsNotExist(removeErr) {
+			slog.Error("Failed to remove temp file", "file", tmpName, "error", removeErr)
+		}
+	}
+
+	if err := fn(tmp); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpName, dst); err != nil {
+		cleanup()
+		return fmt.Errorf("rename temp file to %s: %w", dst, err)
+	}
+	return nil
+}
+
 // Processor handles the overall dependency injection code generation process.
 type Processor struct {
 	parser  *Parser
@@ -93,18 +130,10 @@ func (p *Processor) generateFile(pf *parsedFile) error {
 
 	slog.Debug("injectors", "injectors", injectors)
 
-	f, err := os.Create(outputFileName)
-	if err != nil {
-		return fmt.Errorf("create file %s: %w", outputFileName, err)
-	}
-	defer func() {
-		if closeErr := f.Close(); closeErr != nil {
-			slog.Error("Failed to close file", "error", closeErr)
-		}
-	}()
-
-	if genErr := Generate(f, pf.filename, pf.metaData, injectors, p.varPool); genErr != nil {
-		return fmt.Errorf("generate: %w", genErr)
+	if err := writeAtomically(outputFileName, func(f *os.File) error {
+		return Generate(f, pf.filename, pf.metaData, injectors, p.varPool)
+	}); err != nil {
+		return fmt.Errorf("write %s: %w", outputFileName, err)
 	}
 
 	return nil
