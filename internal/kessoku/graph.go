@@ -1136,7 +1136,17 @@ func (g *Graph) topologicalSortIter() func(yield func(*node) bool) {
 
 	// Sort arg nodes by (argProviderOrder, argRequiresIndex) to ensure stable,
 	// declaration-relative ordering in the generated function signature.
+	// context.Context always sorts first: Go convention puts ctx as the first
+	// parameter, and injectContextArg applies the same rule for async injectors.
 	slices.SortStableFunc(argNodes, func(a, b *node) int {
+		aCtx := a.arg != nil && isContextType(a.arg.Type)
+		bCtx := b.arg != nil && isContextType(b.arg.Type)
+		if aCtx != bCtx {
+			if aCtx {
+				return -1
+			}
+			return 1
+		}
 		if a.argProviderOrder != b.argProviderOrder {
 			if a.argProviderOrder < b.argProviderOrder {
 				return -1
