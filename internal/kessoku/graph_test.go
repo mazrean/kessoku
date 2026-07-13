@@ -1761,3 +1761,157 @@ func TestGraph_DetectCycles(t *testing.T) {
 		})
 	}
 }
+
+// TestNewGraph_ValidatorProvider is a regression test for BUG-08: error-only validator
+// providers (Provides == nil, IsReturnError == true) were silently dropped from the graph
+// because the backward traversal from the return type never reaches them.
+func TestNewGraph_ValidatorProvider(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, _ := createTestTypes()
+
+	// dbType is the type produced by NewDB and consumed by ValidateDB and NewService
+	dbType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "DB", nil), types.NewStruct(nil, nil), nil))
+
+	build := &BuildDirective{
+		InjectorName: "InitializeService",
+		Return: &Return{
+			Type: serviceType,
+		},
+		Providers: []*ProviderSpec{
+			{
+				// NewDB() *DB — no deps, produces *DB
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{dbType}},
+				Requires:      []types.Type{},
+				IsReturnError: false,
+			},
+			{
+				// ValidateDB(db *DB) error — error-only validator, no Provides
+				Type:          ProviderTypeFunction,
+				Provides:      nil,
+				Requires:      []types.Type{dbType},
+				IsReturnError: true,
+			},
+			{
+				// NewService(db *DB) *Service
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{serviceType}},
+				Requires:      []types.Type{dbType},
+				IsReturnError: false,
+			},
+		},
+	}
+
+	metaData := &MetaData{
+		Package: Package{
+			Name: "main",
+			Path: "main",
+		},
+		Imports: make(map[string]*Import),
+	}
+
+	graph, err := NewGraph(metaData, build, NewVarPool())
+	if err != nil {
+		t.Fatalf("unexpected error building graph: %v", err)
+	}
+
+	// The graph must include the validator node (3 provider nodes total,
+	// not 2 as the old code produced by silently dropping ValidateDB).
+	providerCount := 0
+	for _, n := range graph.nodes {
+		if n.providerSpec != nil {
+			providerCount++
+		}
+	}
+	if providerCount != 3 {
+		t.Errorf("expected 3 provider nodes (NewDB + ValidateDB + NewService), got %d", providerCount)
+	}
+
+	// The graph must propagate errors from the validator — isReturnError must be true.
+	if !graph.isReturnError() {
+		t.Error("expected isReturnError() == true because ValidateDB returns error")
+	}
+
+	// Building the injector should succeed and mark IsReturnError.
+	injector, err := graph.Build(metaData, NewVarPool())
+	if err != nil {
+		t.Fatalf("unexpected error building injector: %v", err)
+	}
+	if !injector.IsReturnError {
+		t.Error("injector.IsReturnError should be true because ValidateDB returns error")
+	}
+
+	// The generated statements must include a call for the validator.
+	providerCallCount := countProviderCalls(injector.Stmts)
+	if providerCallCount != 3 {
+		t.Errorf("expected 3 provider call statements, got %d", providerCallCount)
+	}
+
+	// Unused type — suppress lint error
+	_ = configType
+}
+
+// TestNewGraph_ValidatorProvider_OnlyValidator tests an error-only validator whose
+// dependency is not provided by any other provider (must be auto-added as an argument).
+func TestNewGraph_ValidatorProvider_OnlyValidator(t *testing.T) {
+	t.Parallel()
+
+	_, serviceType, _ := createTestTypes()
+
+	dbType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "DB", nil), types.NewStruct(nil, nil), nil))
+
+	build := &BuildDirective{
+		InjectorName: "InitializeService",
+		Return: &Return{
+			Type: serviceType,
+		},
+		Providers: []*ProviderSpec{
+			{
+				// ValidateDB(db *DB) error — validator; *DB has no provider, so it becomes an arg
+				Type:          ProviderTypeFunction,
+				Provides:      nil,
+				Requires:      []types.Type{dbType},
+				IsReturnError: true,
+			},
+			{
+				// NewService() *Service — no deps
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{serviceType}},
+				Requires:      []types.Type{},
+				IsReturnError: false,
+			},
+		},
+	}
+
+	metaData := &MetaData{
+		Package: Package{
+			Name: "main",
+			Path: "main",
+		},
+		Imports: make(map[string]*Import),
+	}
+
+	graph, err := NewGraph(metaData, build, NewVarPool())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !graph.isReturnError() {
+		t.Error("isReturnError() should be true")
+	}
+
+	injector, err := graph.Build(metaData, NewVarPool())
+	if err != nil {
+		t.Fatalf("unexpected error building injector: %v", err)
+	}
+
+	if !injector.IsReturnError {
+		t.Error("injector.IsReturnError should be true")
+	}
+
+	// *DB should have been auto-added as an injector argument
+	if len(injector.Args) == 0 {
+		t.Error("expected *DB to be auto-added as an argument")
+	}
+}

@@ -497,6 +497,126 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 		}
 	}
 
+	// Third pass: include error-only validator providers (Provides == nil, IsReturnError == true)
+	// that are silently dropped by the backward traversal since they produce no consumed types.
+	for _, provider := range build.Providers {
+		if len(provider.Provides) > 0 || !provider.IsReturnError {
+			continue
+		}
+		// Skip struct providers — they always have Provides populated
+		if provider.Type == ProviderTypeStruct {
+			continue
+		}
+		// This is an error-only validator; add it to the graph now.
+		if _, alreadyAdded := providerNodeMap[provider]; alreadyAdded {
+			continue
+		}
+
+		validatorNode := &node{
+			providerSpec: provider,
+			providerArgs: make([]*InjectorCallArgument, len(provider.Requires)),
+		}
+		providerNodeMap[provider] = validatorNode
+		graph.nodes = append(graph.nodes, validatorNode)
+
+		// Resolve dependencies for the validator node.
+		for i, t := range provider.Requires {
+			if t == nil {
+				return nil, fmt.Errorf("validator provider has nil required type at index %d", i)
+			}
+			key := t.String()
+			var (
+				n2       *node
+				srcIndex int
+			)
+			if dep, ok := fnProviderMap[key]; ok {
+				n2, ok = providerNodeMap[dep.provider]
+				if !ok {
+					n2 = &node{
+						providerSpec: dep.provider,
+						providerArgs: make([]*InjectorCallArgument, len(dep.provider.Requires)),
+					}
+					providerNodeMap[dep.provider] = n2
+					queue.Push(n2)
+					graph.nodes = append(graph.nodes, n2)
+				}
+				srcIndex = dep.returnIndex
+			} else if n2, ok = argNodeMap[key]; ok {
+				srcIndex = 0
+			} else {
+				var err error
+				n2, err = graph.autoAddMissingDependencies(metaData, t, varPool)
+				if err != nil {
+					return nil, fmt.Errorf("auto add missing dependency for validator: %w", err)
+				}
+				argNodeMap[key] = n2
+				graph.nodes = append(graph.nodes, n2)
+				srcIndex = 0
+			}
+
+			graph.edges[n2] = append(graph.edges[n2], &edgeNode{
+				node:          validatorNode,
+				provideArgSrc: srcIndex,
+				provideArgDst: i,
+			})
+			graph.reverseEdges[validatorNode] = append(graph.reverseEdges[validatorNode], n2)
+		}
+
+		// Drain any newly queued nodes (in case validator deps needed new provider nodes).
+		for n1 := range queue.Iter {
+			if n1 == nil || visited[n1] {
+				continue
+			}
+			visited[n1] = true
+
+			if n1.providerSpec == nil {
+				continue
+			}
+
+			for i, t := range n1.providerSpec.Requires {
+				if t == nil {
+					return nil, fmt.Errorf("provider has nil required type at index %d", i)
+				}
+				key := t.String()
+				var (
+					n2       *node
+					srcIndex int
+				)
+				if dep, ok := fnProviderMap[key]; ok {
+					n2, ok = providerNodeMap[dep.provider]
+					if !ok {
+						n2 = &node{
+							providerSpec: dep.provider,
+							providerArgs: make([]*InjectorCallArgument, len(dep.provider.Requires)),
+						}
+						providerNodeMap[dep.provider] = n2
+						queue.Push(n2)
+						graph.nodes = append(graph.nodes, n2)
+					}
+					srcIndex = dep.returnIndex
+				} else if n2, ok = argNodeMap[key]; ok {
+					srcIndex = 0
+				} else {
+					var err error
+					n2, err = graph.autoAddMissingDependencies(metaData, t, varPool)
+					if err != nil {
+						return nil, fmt.Errorf("auto add missing dependency as argument: %w", err)
+					}
+					argNodeMap[key] = n2
+					graph.nodes = append(graph.nodes, n2)
+					srcIndex = 0
+				}
+
+				graph.edges[n2] = append(graph.edges[n2], &edgeNode{
+					node:          n1,
+					provideArgSrc: srcIndex,
+					provideArgDst: i,
+				})
+				graph.reverseEdges[n1] = append(graph.reverseEdges[n1], n2)
+			}
+		}
+	}
+
 	// Check for cycles in the dependency graph
 	if err := graph.detectCycles(); err != nil {
 		return nil, fmt.Errorf("dependency cycle detected: %w", err)

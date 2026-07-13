@@ -642,7 +642,10 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 		errorHandleStmt = stmt.buildErrorHandlingStatement(errIdent, returnErrStmts)
 	}
 
-	assignStmt := stmt.buildAssignmentStatement(lhs, rhs, hasChains)
+	// When Returns is empty and IsReturnError is true, the only LHS variable is the
+	// pre-declared "err". Use plain assignment (=) instead of short var decl (:=).
+	onlyErrOnLhs := stmt.Provider.IsReturnError && len(stmt.Returns) == 0
+	assignStmt := stmt.buildAssignmentStatement(lhs, rhs, hasChains || onlyErrOnLhs)
 	stmts = append(stmts, assignStmt)
 
 	if errorHandleStmt != nil {
