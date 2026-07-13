@@ -128,7 +128,7 @@ func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *K
 	}
 
 	// Build accessor function using the real parameter type (value or pointer).
-	funcLit := t.buildFieldAccessor(paramType, fieldInfos)
+	funcLit := t.buildFieldAccessor(paramType, fieldInfos, wf.IsPtrToStruct)
 
 	return &KessokuProvide{
 		FuncExpr:  funcLit,
@@ -195,7 +195,9 @@ func (t *Transformer) buildStructConstructor(structType types.Type, fields []fie
 
 // buildFieldAccessor builds a function literal for field extraction.
 // paramType is the actual parameter type for the accessor (T for new(T), *T for new(*T)).
-func (t *Transformer) buildFieldAccessor(paramType types.Type, fields []fieldInfo) *ast.FuncLit {
+// When isPtrToStruct is true (new(*S) form), wire provides both FieldType and *FieldType
+// for each field, so the generated accessor returns both value and pointer for each field.
+func (t *Transformer) buildFieldAccessor(paramType types.Type, fields []fieldInfo, isPtrToStruct bool) *ast.FuncLit {
 	// Parameter: use the type as-is (value or pointer depending on wire.FieldsOf usage).
 	paramName := "s"
 	param := &ast.Field{
@@ -203,15 +205,29 @@ func (t *Transformer) buildFieldAccessor(paramType types.Type, fields []fieldInf
 		Type:  t.typeExpr(paramType),
 	}
 
-	// Return types
+	// Return types and expressions.
+	// When isPtrToStruct, each field produces two outputs: FieldType and *FieldType.
 	var resultTypes []*ast.Field
 	var returnExprs []ast.Expr
 	for _, f := range fields {
-		resultTypes = append(resultTypes, &ast.Field{Type: t.typeExpr(f.typ)})
-		returnExprs = append(returnExprs, &ast.SelectorExpr{
+		fieldExpr := &ast.SelectorExpr{
 			X:   ast.NewIdent(paramName),
 			Sel: ast.NewIdent(f.name),
-		})
+		}
+		resultTypes = append(resultTypes, &ast.Field{Type: t.typeExpr(f.typ)})
+		returnExprs = append(returnExprs, fieldExpr)
+
+		if isPtrToStruct {
+			// Also provide *FieldType by taking address of the field.
+			resultTypes = append(resultTypes, &ast.Field{Type: &ast.StarExpr{X: t.typeExpr(f.typ)}})
+			returnExprs = append(returnExprs, &ast.UnaryExpr{
+				Op: token.AND,
+				X: &ast.SelectorExpr{
+					X:   ast.NewIdent(paramName),
+					Sel: ast.NewIdent(f.name),
+				},
+			})
+		}
 	}
 
 	return &ast.FuncLit{

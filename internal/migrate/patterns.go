@@ -121,8 +121,9 @@ func (*WireStruct) wirePattern() {}
 // WireFieldsOf represents wire.FieldsOf(new(Type), fields...) pattern.
 type WireFieldsOf struct {
 	baseWirePattern
-	StructType types.Type
-	Fields     []string
+	StructType    types.Type
+	Fields        []string
+	IsPtrToStruct bool // true when new(*S) form is used; wire then provides both FieldType and *FieldType
 }
 
 func (*WireFieldsOf) wirePattern() {}

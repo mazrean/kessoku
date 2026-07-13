@@ -105,6 +105,7 @@ func (t *Transformer) mergeFieldsOf(elements []WirePattern) map[string]*WireFiel
 				baseWirePattern: wf.baseWirePattern,
 				StructType:      wf.StructType,
 				Fields:          append([]string{}, wf.Fields...),
+				IsPtrToStruct:   wf.IsPtrToStruct,
 			}
 		}
 	}

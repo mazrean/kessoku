@@ -9,7 +9,7 @@ import (
 )
 
 var FieldsSet = kessoku.Set(
-	kessoku.Provide(func(s *Config) *string {
+	kessoku.Provide(func(s Config) *string {
 		return s.DB
 	}),
 )

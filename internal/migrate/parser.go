@@ -395,6 +395,15 @@ func (p *Parser) parseFieldsOf(call *ast.CallExpr, info *types.Info, filePath st
 		return nil
 	}
 
+	// Detect new(*S) form: extractTypeFromNew returns **S, so StructType is **S.
+	// In that case wire provides both FieldType and *FieldType for each field.
+	isPtrToStruct := false
+	if ptr, ok := structType.(*types.Pointer); ok {
+		if _, ok := ptr.Elem().(*types.Pointer); ok {
+			isPtrToStruct = true
+		}
+	}
+
 	fields := extractStringFields(call.Args[1:])
 
 	return &WireFieldsOf{
@@ -402,8 +411,9 @@ func (p *Parser) parseFieldsOf(call *ast.CallExpr, info *types.Info, filePath st
 			Pos:  call.Pos(),
 			File: filePath,
 		},
-		StructType: structType,
-		Fields:     fields,
+		StructType:    structType,
+		Fields:        fields,
+		IsPtrToStruct: isPtrToStruct,
 	}
 }
 
