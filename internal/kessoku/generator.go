@@ -382,7 +382,7 @@ func generateAsyncWaitStatements(injector *Injector, parentCtxName string, retur
 		// Guard against the race where goroutines completed via the channel case of a select
 		// just as the caller's context deadline expired.  eg.Wait() returns nil in this case
 		// but the parent context is already cancelled, so we must surface the cancellation error.
-		if parentCtxName != "" && returnErrStmts != nil {
+		if parentCtxName != "" {
 			ctxErrIdent := ast.NewIdent("err")
 			stmts = append(stmts, &ast.IfStmt{
 				Init: &ast.AssignStmt{

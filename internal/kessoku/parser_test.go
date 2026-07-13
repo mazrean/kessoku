@@ -519,7 +519,7 @@ var _ = kessoku.Inject[*Service](
 			// BUG-01: an undefined identifier in a Set argument is a type error;
 			// packages.Load reports it as an error so initializePackages must fail.
 			// Previously the parser silently ignored the injector and exited 0.
-			name:    "undefined Set variable fails loudly",
+			name: "undefined Set variable fails loudly",
 			content: `package main
 
 import "github.com/mazrean/kessoku"

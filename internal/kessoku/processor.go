@@ -63,9 +63,9 @@ func NewProcessor() *Processor {
 // parsedFile holds the parse result for one input file awaiting generation.
 type parsedFile struct {
 	metaData *MetaData
+	varPool  *VarPool
 	filename string
 	builds   []*BuildDirective
-	varPool  *VarPool
 }
 
 // ProcessFiles processes specified Go files for wire generation.
