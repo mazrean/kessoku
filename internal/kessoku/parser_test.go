@@ -204,6 +204,25 @@ func invalid syntax here {
 			errorContains: "parse file",
 		},
 		{
+			// BUG-01: type errors (undefined types) must cause ParseFile to fail, not silently
+			// generate corrupt output with types.Invalid ("invalid" identifiers).
+			name: "undefined type in provider causes error",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Foo struct{}
+
+func NewFoo(b UndefinedType) *Foo {
+	return &Foo{}
+}
+
+var _ = kessoku.Inject[*Foo]("GetFoo", kessoku.Provide(NewFoo))
+`,
+			shouldError:   true,
+			errorContains: "initialize packages",
+		},
+		{
 			name: "kessoku inline Set call",
 			content: `package main
 
@@ -467,7 +486,10 @@ var _ = kessoku.Inject[*Service](
 		shouldHaveError bool
 	}{
 		{
-			name: "undefined Set variable fails loudly",
+			// BUG-01: an undefined identifier in a Set argument is a type error;
+			// packages.Load reports it as an error so initializePackages must fail.
+			// Previously the parser silently ignored the injector and exited 0.
+			name:    "undefined Set variable fails loudly",
 			content: `package main
 
 import "github.com/mazrean/kessoku"
@@ -487,7 +509,7 @@ var _ = kessoku.Inject[*Service](
 )
 `,
 			expectedBuilds:  0,    // No injector is generated from the invalid directive
-			shouldHaveError: true, // Directives that cannot be parsed must abort generation
+			shouldHaveError: true, // Undefined identifier is a type error → must fail
 		},
 	}
 

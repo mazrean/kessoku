@@ -203,10 +203,12 @@ func (p *Parser) initializePackages(filename string) (*packages.Package, error) 
 		return nil, fmt.Errorf("load packages: %w", err)
 	}
 
-	// Allow some errors but continue if we have valid packages
+	// Any package loading or type-checking errors are fatal: continuing with
+	// partially-typed packages lets types.Invalid flow into codegen and produces
+	// syntactically broken *_band.go files (e.g. "func GetFoo(invalid invalid type)").
 	errorCount := packages.PrintErrors(pkgs)
-	if errorCount > 0 && len(pkgs) == 0 {
-		return nil, fmt.Errorf("package loading errors occurred and no packages loaded")
+	if errorCount > 0 {
+		return nil, fmt.Errorf("package loading errors occurred (%d error(s)); fix them before running kessoku", errorCount)
 	}
 
 	for _, pkg := range pkgs {
@@ -570,7 +572,15 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 
 		requires := make([]types.Type, 0, providerFnSig.Params().Len())
 		for v := range providerFnSig.Params().Variables() {
-			requires = append(requires, v.Type())
+			t := v.Type()
+			// Guard against types.Invalid, which occurs when the source has type errors
+			// (e.g. undefined types).  The initializePackages call should have already
+			// returned an error in this case, but we check here as a defence-in-depth
+			// measure to avoid emitting syntactically broken generated code.
+			if basic, ok := t.(*types.Basic); ok && basic.Kind() == types.Invalid {
+				return nil, fmt.Errorf("provider parameter %q has an invalid (unresolved) type; fix type errors in the source first", v.Name())
+			}
+			requires = append(requires, t)
 		}
 
 		isReturnError := false
