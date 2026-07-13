@@ -78,11 +78,14 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) *Kesso
 
 // transformFieldsOf transforms wire.FieldsOf to kessoku.Provide with accessor function.
 func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *KessokuProvide {
-	// Unwrap pointer(s) to get the struct type
-	// wire.FieldsOf(new(T), ...) -> *T, unwrap once -> T
-	// wire.FieldsOf(new(*T), ...) -> **T, unwrap once -> *T, unwrap again -> T
-	structType := unwrapPointer(wf.StructType)
-	// Keep unwrapping if still a pointer
+	// wf.StructType comes from extractTypeFromNew which wraps the new(T) arg in one extra pointer:
+	//   new(T)   -> *T   (paramType = T,  a value type)
+	//   new(*T)  -> **T  (paramType = *T, a pointer type)
+	// Strip exactly the one pointer layer that extractTypeFromNew added to get the real parameter type.
+	paramType := unwrapPointer(wf.StructType)
+
+	// Now strip any remaining pointer layers to reach the plain struct type for field lookup.
+	structType := paramType
 	for {
 		if ptr, ok := structType.(*types.Pointer); ok {
 			structType = ptr.Elem()
@@ -124,8 +127,8 @@ func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *K
 		})
 	}
 
-	// Build accessor function
-	funcLit := t.buildFieldAccessor(structType, fieldInfos)
+	// Build accessor function using the real parameter type (value or pointer).
+	funcLit := t.buildFieldAccessor(paramType, fieldInfos)
 
 	return &KessokuProvide{
 		FuncExpr:  funcLit,
@@ -191,12 +194,13 @@ func (t *Transformer) buildStructConstructor(structType types.Type, fields []fie
 }
 
 // buildFieldAccessor builds a function literal for field extraction.
-func (t *Transformer) buildFieldAccessor(structType types.Type, fields []fieldInfo) *ast.FuncLit {
-	// Parameter: pointer to struct
+// paramType is the actual parameter type for the accessor (T for new(T), *T for new(*T)).
+func (t *Transformer) buildFieldAccessor(paramType types.Type, fields []fieldInfo) *ast.FuncLit {
+	// Parameter: use the type as-is (value or pointer depending on wire.FieldsOf usage).
 	paramName := "s"
 	param := &ast.Field{
 		Names: []*ast.Ident{ast.NewIdent(paramName)},
-		Type:  &ast.StarExpr{X: t.typeExpr(structType)},
+		Type:  t.typeExpr(paramType),
 	}
 
 	// Return types
