@@ -49,12 +49,14 @@ func runGoldenTest(t *testing.T, testdataDir, testName string) {
 	// Generated file path (kessoku.go -> kessoku_band.go)
 	generatedPath := filepath.Join(srcDir, "kessoku_band.go")
 
-	// Clean up generated file after test (unless updating)
-	if !*update {
-		defer func() {
-			_ = os.Remove(generatedPath)
-		}()
-	}
+	// Clean up generated file after test (always, including update mode).
+	// In update mode the generated file is also removed explicitly on the
+	// happy path (line below), but we need a defer so that cleanup still
+	// happens when os.WriteFile fails and t.Fatalf fires (which calls
+	// runtime.Goexit, bypassing any code that follows t.Fatalf).
+	defer func() {
+		_ = os.Remove(generatedPath)
+	}()
 
 	// Run processor directly on the testdata directory
 	// This works because testdata is within the main module
