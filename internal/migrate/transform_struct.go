@@ -6,6 +6,14 @@ import (
 	"go/types"
 )
 
+// sanitizeParamName ensures the name is not a Go keyword by appending "_" if needed.
+func sanitizeParamName(name string) string {
+	if token.Lookup(name).IsKeyword() {
+		return name + "_"
+	}
+	return name
+}
+
 // fieldInfo holds information about a struct field for code generation.
 type fieldInfo struct {
 	typ      types.Type
@@ -41,20 +49,30 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) *Kesso
 		}
 	}
 
-	// Collect fields to include (skip unexported fields from external packages)
+	// Collect fields to include.
+	// When using "*", wire always means exported fields only, regardless of package.
+	// When listing fields by name, unexported fields from external packages are skipped.
 	var fieldInfos []fieldInfo
 	for field := range st.Fields() {
-		if ws.Fields[0] == "*" || contains(ws.Fields, field.Name()) {
+		switch {
+		case ws.Fields[0] == "*":
+			// Skip unexported fields: wire's "*" always means exported fields only
+			if !field.Exported() {
+				continue
+			}
+		case contains(ws.Fields, field.Name()):
 			// Skip unexported fields from external packages
 			if isExternalPkg && !field.Exported() {
 				continue
 			}
-			fieldInfos = append(fieldInfos, fieldInfo{
-				name:     field.Name(),
-				typ:      field.Type(),
-				exported: field.Exported(),
-			})
+		default:
+			continue
 		}
+		fieldInfos = append(fieldInfos, fieldInfo{
+			name:     field.Name(),
+			typ:      field.Type(),
+			exported: field.Exported(),
+		})
 	}
 
 	// Build function literal
@@ -128,7 +146,7 @@ func (t *Transformer) buildStructConstructor(structType types.Type, fields []fie
 	var params []*ast.Field
 	var paramNames []string
 	for _, f := range fields {
-		paramName := toLowerCamel(f.name)
+		paramName := sanitizeParamName(toLowerCamel(f.name))
 		paramNames = append(paramNames, paramName)
 		params = append(params, &ast.Field{
 			Names: []*ast.Ident{ast.NewIdent(paramName)},
