@@ -91,8 +91,7 @@ func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *K
 		}
 	}
 	underlying := structType.Underlying()
-	st, ok := underlying.(*types.Struct)
-	if !ok {
+	if _, ok := underlying.(*types.Struct); !ok {
 		return &KessokuProvide{SourcePos: wf.Pos}
 	}
 
@@ -104,23 +103,25 @@ func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *K
 		}
 	}
 
-	// Collect field types (skip unexported fields from external packages)
+	// Collect field types (skip unexported fields from external packages).
+	// Use LookupFieldOrMethod instead of st.Fields() so that promoted
+	// (embedded) fields are found in addition to direct fields.
 	var fieldInfos []fieldInfo
 	for _, fieldName := range wf.Fields {
-		for field := range st.Fields() {
-			if field.Name() == fieldName {
-				// Skip unexported fields from external packages
-				if isExternalPkg && !field.Exported() {
-					break
-				}
-				fieldInfos = append(fieldInfos, fieldInfo{
-					name:     field.Name(),
-					typ:      field.Type(),
-					exported: field.Exported(),
-				})
-				break
-			}
+		obj, _, _ := types.LookupFieldOrMethod(structType, true, pkg, fieldName)
+		field, ok := obj.(*types.Var)
+		if !ok {
+			continue
 		}
+		// Skip unexported fields from external packages
+		if isExternalPkg && !field.Exported() {
+			continue
+		}
+		fieldInfos = append(fieldInfos, fieldInfo{
+			name:     field.Name(),
+			typ:      field.Type(),
+			exported: field.Exported(),
+		})
 	}
 
 	// Build accessor function
