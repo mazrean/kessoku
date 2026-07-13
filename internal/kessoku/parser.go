@@ -53,8 +53,7 @@ func NewParser() *Parser {
 
 // ParseFile parses a Go file and extracts wire build directives.
 func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*BuildDirective, error) {
-	astFile, err := parser.ParseFile(p.fset, filename, nil, parser.ParseComments)
-	if err != nil {
+	if _, err := parser.ParseFile(p.fset, filename, nil, parser.ParseComments); err != nil {
 		return nil, nil, fmt.Errorf("parse file %s: %w", filename, err)
 	}
 
@@ -71,14 +70,29 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 		return nil, nil, nil
 	}
 
+	// Find the syntax file that matches our target filename
+	var targetFile *ast.File
+	absFilename, _ := filepath.Abs(filename)
+	for i, f := range pkg.Syntax {
+		if f != nil && i < len(pkg.GoFiles) {
+			absGoFile, _ := filepath.Abs(pkg.GoFiles[i])
+			if absGoFile == absFilename {
+				targetFile = f
+				break
+			}
+		}
+	}
+
 	// Dot imports hide the package qualifier the directive scanner relies on,
 	// so Inject calls would be silently ignored. Reject them explicitly.
-	for _, imp := range astFile.Imports {
-		if imp.Name == nil || imp.Name.Name != "." {
-			continue
-		}
-		if path, unquoteErr := strconv.Unquote(imp.Path.Value); unquoteErr == nil && path == kessokuPkgPath {
-			return nil, nil, fmt.Errorf("%s: dot import of %s is not supported; import it with a package qualifier", filename, kessokuPkgPath)
+	if targetFile != nil {
+		for _, imp := range targetFile.Imports {
+			if imp.Name == nil || imp.Name.Name != "." {
+				continue
+			}
+			if path, unquoteErr := strconv.Unquote(imp.Path.Value); unquoteErr == nil && path == kessokuPkgPath {
+				return nil, nil, fmt.Errorf("%s: dot import of %s is not supported; import it with a package qualifier", filename, kessokuPkgPath)
+			}
 		}
 	}
 
@@ -102,19 +116,6 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 	}
 
 	slog.Debug("kessoku package", "kessokuPkg", kessokuPkg)
-
-	// Find the syntax file that matches our target filename
-	var targetFile *ast.File
-	absFilename, _ := filepath.Abs(filename)
-	for i, f := range pkg.Syntax {
-		if f != nil && i < len(pkg.GoFiles) {
-			absGoFile, _ := filepath.Abs(pkg.GoFiles[i])
-			if absGoFile == absFilename {
-				targetFile = f
-				break
-			}
-		}
-	}
 
 	for _, f := range pkg.Syntax {
 		if f == nil {
@@ -190,7 +191,7 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 		return nil, nil, fmt.Errorf("target file not found in package syntax")
 	}
 
-	builds, err := p.findInjectDirectives(targetFile, pkg, kessokuPackageScope, metaData.Imports, astFile.Imports, varPool)
+	builds, err := p.findInjectDirectives(targetFile, pkg, kessokuPackageScope, metaData.Imports, varPool)
 	if err != nil {
 		return nil, nil, fmt.Errorf("find inject directives: %w", err)
 	}
@@ -246,7 +247,7 @@ func (p *Parser) initializePackages(filename string) (*packages.Package, error) 
 }
 
 // FindInjectDirectives finds all kessoku.Inject calls in the AST.
-func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kessokuPackageScope *types.Scope, imports map[string]*Import, fileImports []*ast.ImportSpec, varPool *VarPool) ([]*BuildDirective, error) {
+func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kessokuPackageScope *types.Scope, imports map[string]*Import, varPool *VarPool) ([]*BuildDirective, error) {
 	injectorObj := kessokuPackageScope.Lookup("Inject")
 	if injectorObj == nil || injectorObj.Type() == nil {
 		slog.Warn("kessoku package is imported, but kessoku.Inject function is not found")
@@ -322,7 +323,7 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 					continue
 				}
 
-				build, err := p.parseInjectCall(pkg, kessokuPackageScope, callExpr, imports, fileImports, varPool)
+				build, err := p.parseInjectCall(pkg, kessokuPackageScope, callExpr, imports, varPool)
 				if err != nil {
 					pos := p.fset.Position(callExpr.Pos())
 					return nil, fmt.Errorf("%s: parse kessoku.Inject call: %w", pos, err)
@@ -337,7 +338,7 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 }
 
 // parseInjectCall parses a kessoku.Inject call expression.
-func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *types.Scope, call *ast.CallExpr, imports map[string]*Import, fileImports []*ast.ImportSpec, varPool *VarPool) (*BuildDirective, error) {
+func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *types.Scope, call *ast.CallExpr, imports map[string]*Import, varPool *VarPool) (*BuildDirective, error) {
 	build := &BuildDirective{
 		Providers: make([]*ProviderSpec, 0),
 	}
@@ -406,7 +407,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 
 	// Parse provider arguments (starting from index 1)
 	for _, arg := range call.Args[1:] {
-		if err := p.parseProviderArgument(pkg, kessokuPackageScope, arg, build, imports, fileImports, varPool); err != nil {
+		if err := p.parseProviderArgument(pkg, kessokuPackageScope, arg, build, imports, varPool); err != nil {
 			return nil, fmt.Errorf("parse provider argument: %w", err)
 		}
 	}
@@ -415,7 +416,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 }
 
 // parseProviderArgument parses a provider argument in kessoku.Inject call.
-func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScope *types.Scope, arg ast.Expr, build *BuildDirective, imports map[string]*Import, fileImports []*ast.ImportSpec, varPool *VarPool) error {
+func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScope *types.Scope, arg ast.Expr, build *BuildDirective, imports map[string]*Import, varPool *VarPool) error {
 	providerType := pkg.TypesInfo.TypeOf(arg)
 	if providerType == nil {
 		return fmt.Errorf("get type of argument")
@@ -480,7 +481,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 		}
 
 		for _, setArg := range callExpr.Args {
-			if err := p.parseProviderArgument(pkg, kessokuPackageScope, setArg, build, imports, fileImports, varPool); err != nil {
+			if err := p.parseProviderArgument(pkg, kessokuPackageScope, setArg, build, imports, varPool); err != nil {
 				return fmt.Errorf("parse Set provider argument: %w", err)
 			}
 		}
