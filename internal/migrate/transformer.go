@@ -142,6 +142,30 @@ func toLowerCamel(s string) string {
 	return string(runes)
 }
 
+// sanitizeParamName ensures the name is a valid Go identifier for use as a
+// function parameter. If the name is a Go keyword, it appends "_" to avoid a
+// compile error in the generated code.
+func sanitizeParamName(s string) string {
+	if token.Lookup(s).IsKeyword() {
+		return s + "_"
+	}
+	return s
+}
+
+// uniqueParamName returns a collision-free parameter name by appending a
+// numeric suffix (_2, _3, …) when the candidate name is already in usedNames.
+// The chosen name is recorded in usedNames before returning.
+func uniqueParamName(candidate string, usedNames map[string]int) string {
+	if _, taken := usedNames[candidate]; !taken {
+		usedNames[candidate] = 1
+		return candidate
+	}
+	usedNames[candidate]++
+	next := fmt.Sprintf("%s_%d", candidate, usedNames[candidate])
+	// Recurse in case the suffixed name is itself already taken.
+	return uniqueParamName(next, usedNames)
+}
+
 func typeToExpr(t types.Type) ast.Expr {
 	if t == nil {
 		return nil

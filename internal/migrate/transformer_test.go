@@ -627,3 +627,75 @@ func TestContains(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitizeParamName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "non-keyword identifier unchanged",
+			input: "host",
+			want:  "host",
+		},
+		{
+			name:  "Go keyword gets underscore suffix",
+			input: "type",
+			want:  "type_",
+		},
+		{
+			name:  "another keyword: func",
+			input: "func",
+			want:  "func_",
+		},
+		{
+			name:  "already-suffixed non-keyword unchanged",
+			input: "type_",
+			want:  "type_",
+		},
+		{
+			name:  "empty string unchanged",
+			input: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeParamName(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeParamName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUniqueParamName(t *testing.T) {
+	t.Run("first use of a name is returned as-is", func(t *testing.T) {
+		used := map[string]int{}
+		got := uniqueParamName("host", used)
+		if got != "host" {
+			t.Errorf("uniqueParamName() = %q, want %q", got, "host")
+		}
+		if used["host"] != 1 {
+			t.Errorf("usedNames[host] = %d, want 1", used["host"])
+		}
+	})
+
+	t.Run("collision appends _2 suffix", func(t *testing.T) {
+		used := map[string]int{"type_": 1}
+		got := uniqueParamName("type_", used)
+		if got != "type__2" {
+			t.Errorf("uniqueParamName() = %q, want %q", got, "type__2")
+		}
+	})
+
+	t.Run("second collision appends _3 suffix", func(t *testing.T) {
+		used := map[string]int{"type_": 2, "type__2": 1}
+		got := uniqueParamName("type_", used)
+		if got != "type__3" {
+			t.Errorf("uniqueParamName() = %q, want %q", got, "type__3")
+		}
+	})
+}

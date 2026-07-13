@@ -6,14 +6,6 @@ import (
 	"go/types"
 )
 
-// sanitizeParamName ensures the name is not a Go keyword by appending "_" if needed.
-func sanitizeParamName(name string) string {
-	if token.Lookup(name).IsKeyword() {
-		return name + "_"
-	}
-	return name
-}
-
 // fieldInfo holds information about a struct field for code generation.
 type fieldInfo struct {
 	typ      types.Type
@@ -142,11 +134,12 @@ func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *K
 
 // buildStructConstructor builds a function literal for struct construction.
 func (t *Transformer) buildStructConstructor(structType types.Type, fields []fieldInfo, isPointer bool) *ast.FuncLit {
-	// Build parameter list
+	// Build parameter list, resolving keyword conflicts and name collisions.
+	usedNames := make(map[string]int)
 	var params []*ast.Field
 	var paramNames []string
 	for _, f := range fields {
-		paramName := sanitizeParamName(toLowerCamel(f.name))
+		paramName := uniqueParamName(sanitizeParamName(toLowerCamel(f.name)), usedNames)
 		paramNames = append(paramNames, paramName)
 		params = append(params, &ast.Field{
 			Names: []*ast.Ident{ast.NewIdent(paramName)},
