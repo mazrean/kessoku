@@ -420,16 +420,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 
 	returnProvider, ok := fnProviderMap[returnTypeKey]
 	if !ok {
-		n, err := graph.autoAddMissingDependencies(metaData, build.Return.Type, varPool)
-		if err != nil {
-			return nil, fmt.Errorf("auto add missing return dependency: %w", err)
-		}
-		graph.returnValue = &returnVal{
-			node:        n,
-			returnIndex: 0,
-		}
-		graph.nodes = append(graph.nodes, n)
-		return graph, nil
+		return nil, fmt.Errorf("no provider found for return type %s in injector %q; add kessoku.Provide() for a constructor that returns %s", build.Return.Type, build.InjectorName, build.Return.Type)
 	}
 
 	providerNodeMap := make(map[*ProviderSpec]*node)

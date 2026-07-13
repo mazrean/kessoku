@@ -75,7 +75,7 @@ func TestNewGraph(t *testing.T) {
 			errorContains: "multiple providers provide",
 		},
 		{
-			name: "missing return provider - auto add dependency",
+			name: "missing return provider - error with clear message",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -90,9 +90,8 @@ func TestNewGraph(t *testing.T) {
 					},
 				},
 			},
-			expectError:   false,
-			expectedName:  "InitializeService",
-			expectedNodes: 1, // Only the auto-added argument node
+			expectError:   true,
+			errorContains: "no provider found for return type",
 		},
 		{
 			name: "complex dependency chain",
