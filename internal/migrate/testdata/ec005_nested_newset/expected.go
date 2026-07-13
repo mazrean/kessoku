@@ -1,3 +1,5 @@
+//go:build !wireinject
+
 //go:generate go tool kessoku $GOFILE
 
 package ec005_nested_newset

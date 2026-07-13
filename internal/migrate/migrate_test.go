@@ -159,6 +159,45 @@ type Foo struct{}
 	}
 }
 
+// TestGeneratedOutputHasBuildConstraint verifies that the generated kessoku output
+// contains //go:build !wireinject so that re-running "kessoku migrate ./" is
+// idempotent (BUG-18: second invocation fails with misleading type-check error).
+func TestGeneratedOutputHasBuildConstraint(t *testing.T) {
+	tmpDir := t.TempDir()
+	outputPath := filepath.Join(tmpDir, "kessoku.go")
+
+	inputFile := filepath.Join(tmpDir, "wire.go")
+	inputContent := `package test
+
+import "github.com/google/wire"
+
+var TestSet = wire.NewSet(NewFoo)
+
+func NewFoo() *Foo { return &Foo{} }
+
+type Foo struct{}
+`
+	if err := os.WriteFile(inputFile, []byte(inputContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	migrator := NewMigrator()
+	if err := migrator.MigrateFiles([]string{inputFile}, outputPath); err != nil {
+		t.Fatalf("first migration failed: %v", err)
+	}
+
+	outputBytes, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+
+	// The generated file must start with //go:build !wireinject so that
+	// packages.Load (called with -tags=wireinject) skips it on subsequent runs.
+	if !strings.HasPrefix(string(outputBytes), "//go:build !wireinject\n") {
+		t.Errorf("generated output does not start with //go:build !wireinject; got:\n%s", string(outputBytes))
+	}
+}
+
 // MigrateCmd is imported from config for testing.
 type MigrateCmd struct {
 	Output   string
