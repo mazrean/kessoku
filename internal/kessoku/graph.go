@@ -461,6 +461,18 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 
 				srcIndex = provider.returnIndex
 			} else if n2, ok = argNodeMap[key]; ok {
+				// Check if this provider already depends on this arg node (same type used
+				// at a different parameter position). If so, create a new distinct arg node
+				// so each parameter position receives its own injector argument.
+				if slices.Contains(graph.reverseEdges[n1], n2) {
+					var err error
+					n2, err = graph.autoAddMissingDependencies(metaData, t, varPool)
+					if err != nil {
+						return nil, fmt.Errorf("auto add missing dependency as argument: %w", err)
+					}
+					queue.Push(n2)
+					graph.nodes = append(graph.nodes, n2)
+				}
 				srcIndex = 0
 			} else {
 				// Auto-detect missing dependency and create an argument for it
