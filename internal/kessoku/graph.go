@@ -326,6 +326,10 @@ type Graph struct {
 	// injector to return error even when no reachable provider returns an error,
 	// preserving a wire injector's declared (*T, error) signature after migration.
 	hasError bool
+	// hasAsyncStruct is true when any Async(Struct[T]()) is present. Struct providers
+	// are expanded into synthetic field accessors and never become graph nodes, so
+	// their IsAsync flag must be captured here for hasAsyncProviders to see it.
+	hasAsyncStruct bool
 }
 
 func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Graph, error) {
@@ -397,6 +401,11 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 	for _, structProvider := range structProviders {
 		if structProvider.StructType == nil {
 			return nil, fmt.Errorf("struct provider has nil StructType")
+		}
+
+		// Propagate async flag: Async(Struct[T]()) should trigger ctx injection
+		if structProvider.IsAsync {
+			graph.hasAsyncStruct = true
 		}
 
 		// Find the provider that provides this struct type
@@ -793,6 +802,9 @@ func (g *Graph) buildCyclePath(cycleStart, cycleEnd *node, parent map[*node]*nod
 
 // hasAsyncProviders checks if any providers in the graph are async
 func (g *Graph) hasAsyncProviders() bool {
+	if g.hasAsyncStruct {
+		return true
+	}
 	for _, n := range g.nodes {
 		if n.providerSpec != nil && n.providerSpec.IsAsync {
 			return true
