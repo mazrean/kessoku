@@ -59,8 +59,10 @@ func testAgentCmd[T Agent](t *testing.T, cmdName string, newCmd func(path string
 			t.Fatalf("%sCmd.Run should fail when path is a file", cmdName)
 		}
 
-		if !strings.Contains(stderr.String(), "Error:") {
-			t.Errorf("stderr = %q, want to contain 'Error:'", stderr.String())
+		// AgentCmd.Run must NOT write to stderr itself; main.go is the single
+		// point that prints "Error: %v" so the message appears exactly once.
+		if stderr.Len() > 0 {
+			t.Errorf("AgentCmd.Run wrote to stderr (double-print bug): %q", stderr.String())
 		}
 	})
 }

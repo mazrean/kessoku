@@ -45,7 +45,6 @@ func (c *AgentCmd[T]) Run() error {
 
 	installedPath, err := Install(agent, c.Path, c.User)
 	if err != nil {
-		c.writeError(err)
 		return err
 	}
 
@@ -69,10 +68,6 @@ func (c *AgentCmd[T]) stderr() io.Writer {
 
 func (c *AgentCmd[T]) writeSuccess(path string) {
 	_, _ = fmt.Fprintf(c.stdout(), "Skills installed to: %s\n", path)
-}
-
-func (c *AgentCmd[T]) writeError(err error) {
-	_, _ = fmt.Fprintf(c.stderr(), "Error: %v\n", err)
 }
 
 // ClaudeCodeCmd is the subcommand for installing Claude Code Skills.

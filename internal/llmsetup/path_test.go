@@ -91,6 +91,20 @@ func TestResolvePath(t *testing.T) {
 			userFlag:   false,
 			want:       filepath.Join(cwd, agent.ProjectSubPath()),
 		},
+		{
+			name:       "tilde-only path expands to home directory",
+			customPath: "~",
+			userFlag:   false,
+			skip:       func() bool { return home == "" },
+			want:       home,
+		},
+		{
+			name:       "tilde-prefixed path expands to home directory",
+			customPath: "~/myskills",
+			userFlag:   false,
+			skip:       func() bool { return home == "" },
+			want:       filepath.Join(home, "myskills"),
+		},
 	}
 
 	for _, tt := range tests {
