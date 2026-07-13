@@ -173,9 +173,21 @@ func (t *Transformer) transformElements(elements []WirePattern, pkg *types.Packa
 			// the set, causing a "multiple providers provide *T" error (BUG-10).
 			// allProvidersAreBound recurses into nested WireSetRef entries via setIndex
 			// to handle Case 2 (Bind inside a sibling set ref).
+			//
+			// IMPORTANT: exclude this set's own internal Binds from boundTypes before
+			// calling allProvidersAreBound. A set that contains both a constructor and
+			// a wire.Bind must not suppress itself — only external (sibling) Binds should
+			// cause suppression (QA-18).
 			if t.setIndex != nil {
 				if ws, ok := t.setIndex[we.Name]; ok {
-					if allProvidersAreBound(ws, boundTypes, t.setIndex) {
+					ownBoundTypes := t.collectBoundTypes(ws.Elements)
+					externalBoundTypes := make(map[string]bool, len(boundTypes))
+					for k, v := range boundTypes {
+						if !ownBoundTypes[k] {
+							externalBoundTypes[k] = v
+						}
+					}
+					if allProvidersAreBound(ws, externalBoundTypes, t.setIndex) {
 						continue
 					}
 				}
