@@ -881,6 +881,107 @@ var _ = kessoku.Inject[*Service](
 	}
 }
 
+// TestParseFile_InjectInsideFunction verifies that kessoku.Inject calls placed
+// inside function bodies are silently ignored and do not produce build directives.
+// Only top-level var declarations are valid injection points (QA-9).
+func TestParseFile_InjectInsideFunction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		content        string
+		name           string
+		expectedBuilds int
+	}{
+		{
+			name: "inject inside init function is ignored",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Service struct{}
+
+func NewService() *Service { return &Service{} }
+
+func init() {
+	_ = kessoku.Inject[*Service]("InitService", kessoku.Provide(NewService))
+}
+`,
+			expectedBuilds: 0,
+		},
+		{
+			name: "inject inside regular function is ignored",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Service struct{}
+
+func NewService() *Service { return &Service{} }
+
+func setup() {
+	_ = kessoku.Inject[*Service]("InitService", kessoku.Provide(NewService))
+}
+`,
+			expectedBuilds: 0,
+		},
+		{
+			name: "top-level inject is still found",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Service struct{}
+
+func NewService() *Service { return &Service{} }
+
+var _ = kessoku.Inject[*Service]("InitService", kessoku.Provide(NewService))
+`,
+			expectedBuilds: 1,
+		},
+		{
+			name: "top-level inject found, inject inside function ignored",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Service struct{}
+
+func NewService() *Service { return &Service{} }
+
+var _ = kessoku.Inject[*Service]("InitService", kessoku.Provide(NewService))
+
+func init() {
+	_ = kessoku.Inject[*Service]("InitServiceDup", kessoku.Provide(NewService))
+}
+`,
+			expectedBuilds: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			testFile := filepath.Join(tempDir, "test.go")
+
+			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			parser := NewParser()
+			_, builds, err := parser.ParseFile(testFile, NewVarPool())
+			if err != nil {
+				t.Fatalf("ParseFile failed unexpectedly: %v", err)
+			}
+
+			if len(builds) != tt.expectedBuilds {
+				t.Errorf("Expected %d build directives, got %d", tt.expectedBuilds, len(builds))
+			}
+		})
+	}
+}
+
 // Helper function to check if a string contains a substring
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (len(substr) == 0 || func() bool {

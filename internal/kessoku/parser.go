@@ -260,70 +260,77 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 	}
 
 	var builds []*BuildDirective
-	var inspectErr error
 
-	ast.Inspect(file, func(n ast.Node) bool {
-		if inspectErr != nil {
-			return false
+	// Only inspect top-level var declarations. Using ast.Inspect over the entire
+	// file would also walk function bodies, causing kessoku.Inject calls inside
+	// functions (e.g. init()) to be treated as valid injection points. (QA-9)
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || genDecl.Tok != token.VAR {
+			continue
 		}
 
-		callExpr, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-
-		var baseFunc *ast.SelectorExpr
-
-		callFun := callExpr.Fun
-		for {
-			paren, ok := callFun.(*ast.ParenExpr)
+		for _, spec := range genDecl.Specs {
+			valSpec, ok := spec.(*ast.ValueSpec)
 			if !ok {
-				break
+				continue
 			}
-			callFun = paren.X
-		}
 
-		switch fun := callFun.(type) {
-		case *ast.IndexExpr:
-			if sel, ok := fun.X.(*ast.SelectorExpr); ok {
-				baseFunc = sel
+			for _, val := range valSpec.Values {
+				callExpr, ok := val.(*ast.CallExpr)
+				if !ok {
+					continue
+				}
+
+				var baseFunc *ast.SelectorExpr
+
+				callFun := callExpr.Fun
+				for {
+					paren, ok := callFun.(*ast.ParenExpr)
+					if !ok {
+						break
+					}
+					callFun = paren.X
+				}
+
+				switch fun := callFun.(type) {
+				case *ast.IndexExpr:
+					if sel, ok := fun.X.(*ast.SelectorExpr); ok {
+						baseFunc = sel
+					}
+				case *ast.IndexListExpr:
+					if sel, ok := fun.X.(*ast.SelectorExpr); ok {
+						baseFunc = sel
+					}
+				case *ast.SelectorExpr:
+					baseFunc = fun
+				}
+
+				if baseFunc == nil {
+					slog.Debug("baseFunc is nil", "callExpr", callExpr)
+					continue
+				}
+
+				calleeType := pkg.TypesInfo.TypeOf(baseFunc)
+				if calleeType == nil {
+					slog.Debug("calleeType is nil", "callExpr", callExpr, "baseFunc", baseFunc)
+					continue
+				}
+
+				if !types.Identical(calleeType, injectorType) {
+					slog.Debug("calleeType is not injectorType", "callExpr", callExpr, "calleeType", calleeType, "injectorType", injectorType)
+					continue
+				}
+
+				build, err := p.parseInjectCall(pkg, kessokuPackageScope, callExpr, imports, fileImports, varPool)
+				if err != nil {
+					pos := p.fset.Position(callExpr.Pos())
+					return nil, fmt.Errorf("%s: parse kessoku.Inject call: %w", pos, err)
+				}
+
+				builds = append(builds, build)
 			}
-		case *ast.IndexListExpr:
-			if sel, ok := fun.X.(*ast.SelectorExpr); ok {
-				baseFunc = sel
-			}
-		case *ast.SelectorExpr:
-			baseFunc = fun
 		}
-
-		if baseFunc == nil {
-			slog.Debug("baseFunc is nil", "callExpr", callExpr)
-			return true
-		}
-
-		calleeType := pkg.TypesInfo.TypeOf(baseFunc)
-		if calleeType == nil {
-			slog.Debug("calleeType is nil", "callExpr", callExpr, "baseFunc", baseFunc)
-			return true
-		}
-
-		if !types.Identical(calleeType, injectorType) {
-			slog.Debug("calleeType is not injectorType", "callExpr", callExpr, "calleeType", calleeType, "injectorType", injectorType)
-			return true
-		}
-
-		build, err := p.parseInjectCall(pkg, kessokuPackageScope, callExpr, imports, fileImports, varPool)
-		if err != nil {
-			pos := p.fset.Position(callExpr.Pos())
-			inspectErr = fmt.Errorf("%s: parse kessoku.Inject call: %w", pos, err)
-			return false
-		}
-
-		builds = append(builds, build)
-		return false
-	})
-	if inspectErr != nil {
-		return nil, inspectErr
 	}
 
 	return builds, nil
