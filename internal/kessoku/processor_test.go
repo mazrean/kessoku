@@ -1003,6 +1003,100 @@ var _ = kessoku.Inject[*Service](
 	}
 }
 
+// TestProcessFilesGraphValidationBeforeWrite verifies that a graph-level error
+// (e.g. struct with duplicate field types, which is caught by CreateInjector
+// rather than ParseFile) in a later file does not leave the earlier file's
+// *_band.go on disk.  This is the guarantee expressed by the "all files are
+// parsed and graph-validated before any output is written" comment.
+func TestProcessFilesGraphValidationBeforeWrite(t *testing.T) {
+	t.Parallel()
+
+	// file1.go: valid — should produce file1_band.go on success.
+	file1Content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Value string
+}
+
+func NewConfig() *Config {
+	return &Config{Value: "test"}
+}
+
+type Service struct {
+	config *Config
+}
+
+func NewService(config *Config) *Service {
+	return &Service{config: config}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewService),
+)
+`
+
+	// file2.go: graph-level error — Struct[*Config2] has two fields of type
+	// string, which CreateInjector (not ParseFile) detects.
+	file2Content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config2 struct {
+	Host     string
+	Username string
+}
+
+func NewConfig2() *Config2 {
+	return &Config2{Host: "localhost", Username: "admin"}
+}
+
+type DB struct {
+	host     string
+	username string
+}
+
+func NewDB(host, username string) *DB {
+	return &DB{host: host, username: username}
+}
+
+var _ = kessoku.Inject[*DB](
+	"InitDB",
+	kessoku.Provide(NewConfig2),
+	kessoku.Struct[*Config2](),
+	kessoku.Provide(NewDB),
+)
+`
+
+	tempDir := t.TempDir()
+	file1 := filepath.Join(tempDir, "file1.go")
+	file2 := filepath.Join(tempDir, "file2.go")
+
+	if err := os.WriteFile(file1, []byte(file1Content), 0644); err != nil {
+		t.Fatalf("write file1: %v", err)
+	}
+	if err := os.WriteFile(file2, []byte(file2Content), 0644); err != nil {
+		t.Fatalf("write file2: %v", err)
+	}
+
+	proc := NewProcessor()
+	err := proc.ProcessFiles([]string{file1, file2})
+	if err == nil {
+		t.Fatal("expected ProcessFiles to fail due to graph error in file2")
+	}
+
+	// After the error, no *_band.go files must exist.  The guarantee is that
+	// graph validation for all files completes before writing any output.
+	file1Band := filepath.Join(tempDir, "file1_band.go")
+	if _, statErr := os.Stat(file1Band); statErr == nil {
+		t.Errorf("file1_band.go must not exist after ProcessFiles returned an error; " +
+			"graph validation of file2 must happen before file1 is written")
+	}
+}
+
 type fileContent struct {
 	content     string
 	shouldWrite *bool // If nil, defaults to true

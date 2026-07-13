@@ -79,20 +79,22 @@ func NewProcessor() *Processor {
 
 // parsedFile holds the parse result for one input file awaiting generation.
 type parsedFile struct {
-	metaData *MetaData
-	varPool  *VarPool
-	filename string
-	builds   []*BuildDirective
+	metaData  *MetaData
+	varPool   *VarPool
+	filename  string
+	builds    []*BuildDirective
+	injectors []*Injector // populated after graph validation in ProcessFiles
 }
 
 // ProcessFiles processes specified Go files for wire generation.
-// All files are parsed and validated before any output is written, so a
+// All files are parsed and graph-validated before any output is written, so a
 // failure in one file does not leave partial *_band.go files behind.
 func (p *Processor) ProcessFiles(files []string) error {
 	parsedFiles := make([]*parsedFile, 0, len(files))
 	// injector function names must be unique per package
 	seenNames := make(map[string]string)
 
+	// Phase 1: AST parse + type check every file and record duplicate-name errors.
 	for _, filename := range files {
 		slog.Debug("Processing file", "file", filename)
 
@@ -128,6 +130,22 @@ func (p *Processor) ProcessFiles(files []string) error {
 		})
 	}
 
+	// Phase 2: graph validation (cycle detection, missing providers, etc.) for
+	// all files before writing any output.  This ensures a graph-level error in
+	// one file does not leave previously-written *_band.go files behind.
+	for _, pf := range parsedFiles {
+		injectors := make([]*Injector, 0, len(pf.builds))
+		for _, build := range pf.builds {
+			injector, injectorErr := CreateInjector(pf.metaData, build, pf.varPool)
+			if injectorErr != nil {
+				return fmt.Errorf("create injector: %w", injectorErr)
+			}
+			injectors = append(injectors, injector)
+		}
+		pf.injectors = injectors
+	}
+
+	// Phase 3: write output only after all files have passed graph validation.
 	for _, pf := range parsedFiles {
 		if err := p.generateFile(pf); err != nil {
 			return err
@@ -141,22 +159,14 @@ func (p *Processor) ProcessFiles(files []string) error {
 // It uses pf.varPool (a fresh VarPool created per file in ProcessFiles) for
 // import-alias allocation; Generate creates a per-injector snapshot for local
 // variable names.
+// Callers must populate pf.injectors via CreateInjector before calling this
+// method (ProcessFiles does this in a separate phase so that graph-level errors
+// are caught before any output is written).
 func (p *Processor) generateFile(pf *parsedFile) error {
 	outputFileName := outputFileName(pf.filename)
 	slog.Debug("outputFileName", "outputFileName", outputFileName)
 
-	injectors := make([]*Injector, 0, len(pf.builds))
-	for _, build := range pf.builds {
-		// CreateInjector uses pf.varPool only for new import alias allocation
-		// (package-level names and existing imports are already registered).
-		injector, injectorErr := CreateInjector(pf.metaData, build, pf.varPool)
-		if injectorErr != nil {
-			return fmt.Errorf("create injector: %w", injectorErr)
-		}
-
-		injectors = append(injectors, injector)
-	}
-
+	injectors := pf.injectors
 	slog.Debug("injectors", "injectors", injectors)
 
 	// Detect duplicate injector names across sibling *_band.go files.
