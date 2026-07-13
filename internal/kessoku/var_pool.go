@@ -44,7 +44,13 @@ func (p *VarPool) GetName(baseName string) string {
 		return baseName
 	}
 
-	return fmt.Sprintf("%s%d", baseName, count-1)
+	for n := count - 1; ; n++ {
+		candidate := fmt.Sprintf("%s%d", baseName, n)
+		if p.vars[candidate] == 0 {
+			p.vars[candidate] = 1
+			return candidate
+		}
+	}
 }
 
 func (p *VarPool) Get(t types.Type) string {
@@ -56,17 +62,7 @@ func (p *VarPool) Get(t types.Type) string {
 func (p *VarPool) GetChannel(t types.Type) string {
 	name := p.getBaseName(t) + "Ch"
 
-	count, ok := p.vars[name]
-	if !ok {
-		count = 0
-	}
-	p.vars[name] = count + 1
-
-	if count == 0 {
-		return name
-	}
-
-	return fmt.Sprintf("%s%d", name, count-1)
+	return p.GetName(name)
 }
 
 // getTypeBaseName extracts a base name from a type for argument naming

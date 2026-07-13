@@ -5,6 +5,89 @@ import (
 	"testing"
 )
 
+// TestVarPool_GetName_NoCollision verifies that GetName never returns the same name
+// twice, even when a suffixed name (e.g. "err0") was already registered before the
+// second call for the base name (e.g. "err") would produce that same suffix.
+// Regression test for QA-2.
+func TestVarPool_GetName_NoCollision(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		calls    []string // sequence of baseName arguments to GetName
+		wantUniq bool     // all returned names must be unique
+	}{
+		{
+			name:     "err0 pre-registered then err called twice",
+			calls:    []string{"err0", "err", "err"},
+			wantUniq: true,
+		},
+		{
+			name:     "eg0 pre-registered then eg called twice",
+			calls:    []string{"eg0", "eg", "eg"},
+			wantUniq: true,
+		},
+		{
+			name:     "foo0 and foo1 pre-registered then foo called three times",
+			calls:    []string{"foo0", "foo1", "foo", "foo", "foo"},
+			wantUniq: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pool := NewVarPool()
+			seen := make(map[string]int) // name -> index of first occurrence
+			for i, base := range tt.calls {
+				got := pool.GetName(base)
+				if prev, exists := seen[got]; exists {
+					t.Errorf("call[%d] GetName(%q) = %q collides with call[%d]", i, base, got, prev)
+				}
+				seen[got] = i
+			}
+		})
+	}
+}
+
+// TestVarPool_GetChannel_NoCollision is the equivalent regression test for GetChannel.
+// Regression test for QA-2.
+func TestVarPool_GetChannel_NoCollision(t *testing.T) {
+	t.Parallel()
+
+	makeNamedType := func(name string) types.Type {
+		obj := types.NewTypeName(0, nil, name, nil)
+		return types.NewNamed(obj, types.NewStruct(nil, nil), nil)
+	}
+
+	// GetChannel uses baseName+"Ch" internally; types "Foo0" and "Foo" will produce
+	// base channel names "foo0Ch" and "fooCh". After the first "fooCh" call the
+	// second call should return "fooCh0" — but "fooCh0" must not already be taken.
+	// Simulate by pre-registering "fooCh0" via a direct GetName call, then calling
+	// GetChannel twice with *Foo.
+	t.Run("fooCh0 pre-registered then fooCh called twice", func(t *testing.T) {
+		t.Parallel()
+		pool := NewVarPool()
+
+		// Pre-register "fooCh0"
+		pre := pool.GetName("fooCh0")
+		if pre != "fooCh0" {
+			t.Fatalf("pre-registration GetName(fooCh0) = %q, want %q", pre, "fooCh0")
+		}
+
+		fooType := makeNamedType("Foo")
+		ch1 := pool.GetChannel(fooType)
+		ch2 := pool.GetChannel(fooType)
+
+		if ch1 == ch2 {
+			t.Errorf("GetChannel called twice returned same name %q", ch1)
+		}
+		if ch1 == pre || ch2 == pre {
+			t.Errorf("GetChannel returned %q or %q which collides with pre-registered %q", ch1, ch2, pre)
+		}
+	})
+}
+
 func TestVarPool_GetBaseName(t *testing.T) {
 	t.Parallel()
 
