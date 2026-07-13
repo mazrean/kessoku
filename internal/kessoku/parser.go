@@ -274,7 +274,16 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 
 		var baseFunc *ast.SelectorExpr
 
-		switch fun := callExpr.Fun.(type) {
+		callFun := callExpr.Fun
+		for {
+			paren, ok := callFun.(*ast.ParenExpr)
+			if !ok {
+				break
+			}
+			callFun = paren.X
+		}
+
+		switch fun := callFun.(type) {
 		case *ast.IndexExpr:
 			if sel, ok := fun.X.(*ast.SelectorExpr); ok {
 				baseFunc = sel
@@ -326,8 +335,18 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 		Providers: make([]*ProviderSpec, 0),
 	}
 
-	// Extract return type from generic parameter
-	switch fun := call.Fun.(type) {
+	// Extract return type from generic parameter.
+	// Unwrap any parentheses around the function expression (e.g. (kessoku.Inject[*T])(...)).
+	callFun := call.Fun
+	for {
+		paren, ok := callFun.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		callFun = paren.X
+	}
+
+	switch fun := callFun.(type) {
 	case *ast.IndexExpr:
 		returnType := pkg.TypesInfo.TypeOf(fun.Index)
 		build.Return = &Return{
@@ -337,7 +356,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 		// Collect dependencies from return type expression
 		fun.Index, _ = p.collectDependencies(fun.Index, pkg.TypesInfo, imports, varPool)
 	case *ast.IndexListExpr:
-		if len(call.Fun.(*ast.IndexListExpr).Indices) == 0 {
+		if len(fun.Indices) == 0 {
 			return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
 		}
 		returnType := pkg.TypesInfo.TypeOf(fun.Indices[0])
