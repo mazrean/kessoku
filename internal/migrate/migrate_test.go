@@ -198,6 +198,61 @@ type Foo struct{}
 	}
 }
 
+// TestOutputPackageConflict tests that migration fails when the generated package name
+// does not match the existing package in the output directory.
+// This is the regression test for the bug where running 'kessoku migrate' from the repo
+// root with default output 'kessoku.go' would write a 'package main' file into a directory
+// containing 'package kessoku' files, breaking the entire build.
+func TestOutputPackageConflict(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create output directory with an existing Go file using a different package name
+	existingFile := filepath.Join(tmpDir, "existing.go")
+	existingContent := `package kessoku
+
+// Some existing declaration
+func Foo() {}
+`
+	if err := os.WriteFile(existingFile, []byte(existingContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a wire input file with 'package main'
+	inputDir := filepath.Join(tmpDir, "input")
+	if err := os.MkdirAll(inputDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	inputFile := filepath.Join(inputDir, "wire.go")
+	inputContent := `package main
+
+import "github.com/google/wire"
+
+var MainSet = wire.NewSet(NewBar)
+
+func NewBar() *Bar { return &Bar{} }
+
+type Bar struct{}
+`
+	if err := os.WriteFile(inputFile, []byte(inputContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Output file goes into tmpDir which has 'package kessoku' but wire file is 'package main'
+	outputPath := filepath.Join(tmpDir, "kessoku.go")
+
+	migrator := NewMigrator()
+	err := migrator.MigrateFiles([]string{inputFile}, outputPath)
+	if err == nil {
+		t.Fatal("expected error due to package name conflict, but got nil")
+	}
+
+	// The output file must NOT have been created (would corrupt the destination package)
+	if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+		t.Error("output file should not have been created when package names conflict")
+	}
+}
+
 // MigrateCmd is imported from config for testing.
 type MigrateCmd struct {
 	Output   string

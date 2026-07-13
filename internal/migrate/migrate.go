@@ -3,7 +3,11 @@ package migrate
 import (
 	"fmt"
 	"go/ast"
+	"go/parser"
+	"go/token"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -136,12 +140,66 @@ func (m *Migrator) MigrateFiles(patterns []string, outputPath string) error {
 		return err
 	}
 
+	// Validate that the generated package name matches the existing package in the output directory.
+	// This prevents writing a file with a conflicting package declaration (e.g., 'package main'
+	// into a directory that already contains 'package kessoku' files), which would break builds.
+	if err := m.validateOutputPackage(outputPath, merged.Package); err != nil {
+		return err
+	}
+
 	// Write output
 	if err := writer.Write(merged, outputPath); err != nil {
 		return err
 	}
 
 	slog.Info("Generated kessoku configuration", "output", outputPath)
+	return nil
+}
+
+// validateOutputPackage checks that the generated package name matches the existing package
+// declarations in the output directory (excluding the output file itself, if it exists).
+// Returns an error if any existing Go file in the directory declares a different package name.
+func (m *Migrator) validateOutputPackage(outputPath string, generatedPkg string) error {
+	outputDir := filepath.Dir(outputPath)
+	outputBase := filepath.Base(outputPath)
+
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Output directory doesn't exist yet; nothing to conflict with.
+			return nil
+		}
+		return fmt.Errorf("failed to read output directory %s: %w", outputDir, err)
+	}
+
+	fset := token.NewFileSet()
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// Skip non-Go files and the output file itself (it may already exist from a previous run).
+		if !strings.HasSuffix(name, ".go") || name == outputBase {
+			continue
+		}
+
+		filePath := filepath.Join(outputDir, name)
+		f, err := parser.ParseFile(fset, filePath, nil, parser.PackageClauseOnly)
+		if err != nil {
+			// Skip files that cannot be parsed (e.g., test build constraints).
+			continue
+		}
+
+		existingPkg := f.Name.Name
+		if existingPkg != generatedPkg {
+			return fmt.Errorf(
+				"package name conflict: output file would declare %q but %s already declares %q; "+
+					"use -o to choose an output path in the correct directory or ensure the wire source uses the right package name",
+				generatedPkg, filePath, existingPkg,
+			)
+		}
+	}
+
 	return nil
 }
 
