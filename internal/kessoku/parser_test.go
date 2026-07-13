@@ -835,27 +835,19 @@ var _ = kessoku.Inject[*Service](
 	}
 
 	parser := NewParser()
-	metadata, builds, err := parser.ParseFile(testFile, NewVarPool())
+	_, _, err := parser.ParseFile(testFile, NewVarPool())
 
-	// ParseFile itself should not return a hard error (it logs a warning and skips the injector)
-	if err != nil {
-		t.Fatalf("ParseFile returned unexpected error: %v", err)
+	// ParseFile must return an error when Bind[I](Provide(f)) is used and the
+	// provided type does not implement the interface. Since commit 141475e,
+	// parseInjectCall failures are propagated as hard errors (not WARN+skip).
+	if err == nil {
+		t.Fatal("ParseFile should have returned an error for non-implementing Bind type, got nil")
 	}
 
-	// metadata is non-nil because the package loaded successfully
-	if metadata == nil {
-		t.Fatal("Expected metadata to be non-nil (package loaded successfully)")
-	}
-
-	// The injector should be skipped because the bind is invalid — builds must be empty
-	if len(builds) != 0 {
-		t.Errorf("Expected 0 build directives (injector should be skipped), got %d", len(builds))
-		for _, b := range builds {
-			t.Logf("  injector %q with %d providers:", b.InjectorName, len(b.Providers))
-			for _, p := range b.Providers {
-				t.Logf("    provides: %v", p.Provides)
-			}
-		}
+	// The error message should mention the type mismatch
+	errMsg := err.Error()
+	if !containsString(errMsg, "does not implement interface") {
+		t.Errorf("Expected error to mention 'does not implement interface', got: %v", err)
 	}
 }
 
