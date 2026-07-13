@@ -201,6 +201,42 @@ func TestTypeToExpr(t *testing.T) {
 			},
 			wantText: "MyType",
 		},
+		{
+			name: "instantiated generic type single type arg",
+			typeFunc: func() types.Type {
+				pkg := types.NewPackage("example.com/foo", "foo")
+				tName := types.NewTypeName(token.NoPos, nil, "T", nil)
+				tParam := types.NewTypeParam(tName, types.NewInterfaceType(nil, nil))
+				boxTypeName := types.NewTypeName(token.NoPos, pkg, "Box", nil)
+				boxNamed := types.NewNamed(boxTypeName, types.NewStruct(nil, nil), nil)
+				boxNamed.SetTypeParams([]*types.TypeParam{tParam})
+				ctx := types.NewContext()
+				inst, err := types.Instantiate(ctx, boxNamed, []types.Type{types.Typ[types.Int]}, true)
+				if err != nil {
+					panic(err)
+				}
+				return inst
+			},
+			wantText: "Box[int]",
+		},
+		{
+			name: "instantiated generic type two type args",
+			typeFunc: func() types.Type {
+				pkg := types.NewPackage("example.com/foo", "foo")
+				k := types.NewTypeParam(types.NewTypeName(token.NoPos, nil, "K", nil), types.NewInterfaceType(nil, nil))
+				v := types.NewTypeParam(types.NewTypeName(token.NoPos, nil, "V", nil), types.NewInterfaceType(nil, nil))
+				pairTypeName := types.NewTypeName(token.NoPos, pkg, "Pair", nil)
+				pairNamed := types.NewNamed(pairTypeName, types.NewStruct(nil, nil), nil)
+				pairNamed.SetTypeParams([]*types.TypeParam{k, v})
+				ctx := types.NewContext()
+				inst, err := types.Instantiate(ctx, pairNamed, []types.Type{types.Typ[types.String], types.Typ[types.Int]}, true)
+				if err != nil {
+					panic(err)
+				}
+				return inst
+			},
+			wantText: "Pair[string, int]",
+		},
 	}
 
 	for _, tt := range tests {

@@ -149,21 +149,24 @@ func (tc *TypeConverter) TypeToExpr(t types.Type) ast.Expr {
 		obj := typ.Obj()
 		if obj.Pkg() == nil {
 			// Built-in type (e.g., error)
-			return ast.NewIdent(obj.Name())
+			return wrapTypeArgs(ast.NewIdent(obj.Name()), typ.TypeArgs(), tc.TypeToExpr)
 		}
 		// Check if this type is from an external package
+		var baseExpr ast.Expr
 		if tc.currentPkg != nil && obj.Pkg() != tc.currentPkg {
 			// External package - add import and generate SelectorExpr
 			pkgPath := obj.Pkg().Path()
 			pkgName := obj.Pkg().Name()
 			actualName := tc.AddImport(pkgPath, pkgName)
-			return &ast.SelectorExpr{
+			baseExpr = &ast.SelectorExpr{
 				X:   ast.NewIdent(actualName),
 				Sel: ast.NewIdent(obj.Name()),
 			}
+		} else {
+			// Same package - just use the type name
+			baseExpr = ast.NewIdent(obj.Name())
 		}
-		// Same package - just use the type name
-		return ast.NewIdent(obj.Name())
+		return wrapTypeArgs(baseExpr, typ.TypeArgs(), tc.TypeToExpr)
 	case *types.Pointer:
 		return &ast.StarExpr{X: tc.TypeToExpr(typ.Elem())}
 	case *types.Slice:
@@ -205,6 +208,30 @@ func (tc *TypeConverter) TypeToExpr(t types.Type) ast.Expr {
 		}
 	default:
 		return ast.NewIdent(t.String())
+	}
+}
+
+// wrapTypeArgs wraps base with type argument indices if typeArgs is non-empty.
+// For a single type argument, it returns ast.IndexExpr{X: base, Index: arg}.
+// For multiple type arguments, it returns ast.IndexListExpr{X: base, Indices: args}.
+// The conv function converts each types.Type argument to ast.Expr.
+func wrapTypeArgs(base ast.Expr, typeArgs *types.TypeList, conv func(types.Type) ast.Expr) ast.Expr {
+	if typeArgs == nil || typeArgs.Len() == 0 {
+		return base
+	}
+	if typeArgs.Len() == 1 {
+		return &ast.IndexExpr{
+			X:     base,
+			Index: conv(typeArgs.At(0)),
+		}
+	}
+	indices := make([]ast.Expr, typeArgs.Len())
+	for i := range typeArgs.Len() {
+		indices[i] = conv(typeArgs.At(i))
+	}
+	return &ast.IndexListExpr{
+		X:       base,
+		Indices: indices,
 	}
 }
 

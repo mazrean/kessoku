@@ -140,6 +140,62 @@ func TestTypeConverterTypeToExpr(t *testing.T) {
 			},
 			wantText: "unsafe.Pointer",
 		},
+		{
+			name: "instantiated generic type same package (single type arg)",
+			typeFunc: func() types.Type {
+				tName := types.NewTypeName(token.NoPos, nil, "T", nil)
+				tParam := types.NewTypeParam(tName, types.NewInterfaceType(nil, nil))
+				boxTypeName := types.NewTypeName(token.NoPos, currentPkg, "Box", nil)
+				boxNamed := types.NewNamed(boxTypeName, types.NewStruct(nil, nil), nil)
+				boxNamed.SetTypeParams([]*types.TypeParam{tParam})
+				ctx := types.NewContext()
+				inst, err := types.Instantiate(ctx, boxNamed, []types.Type{types.Typ[types.Int]}, true)
+				if err != nil {
+					panic(err)
+				}
+				return inst
+			},
+			currentPkg: currentPkg,
+			wantText:   "Box[int]",
+		},
+		{
+			name: "instantiated generic type same package (two type args)",
+			typeFunc: func() types.Type {
+				t1Name := types.NewTypeName(token.NoPos, nil, "K", nil)
+				t1Param := types.NewTypeParam(t1Name, types.NewInterfaceType(nil, nil))
+				t2Name := types.NewTypeName(token.NoPos, nil, "V", nil)
+				t2Param := types.NewTypeParam(t2Name, types.NewInterfaceType(nil, nil))
+				pairTypeName := types.NewTypeName(token.NoPos, currentPkg, "Pair", nil)
+				pairNamed := types.NewNamed(pairTypeName, types.NewStruct(nil, nil), nil)
+				pairNamed.SetTypeParams([]*types.TypeParam{t1Param, t2Param})
+				ctx := types.NewContext()
+				inst, err := types.Instantiate(ctx, pairNamed, []types.Type{types.Typ[types.String], types.Typ[types.Int]}, true)
+				if err != nil {
+					panic(err)
+				}
+				return inst
+			},
+			currentPkg: currentPkg,
+			wantText:   "Pair[string, int]",
+		},
+		{
+			name: "instantiated generic type external package (single type arg)",
+			typeFunc: func() types.Type {
+				tName := types.NewTypeName(token.NoPos, nil, "T", nil)
+				tParam := types.NewTypeParam(tName, types.NewInterfaceType(nil, nil))
+				boxTypeName := types.NewTypeName(token.NoPos, externalPkg, "Box", nil)
+				boxNamed := types.NewNamed(boxTypeName, types.NewStruct(nil, nil), nil)
+				boxNamed.SetTypeParams([]*types.TypeParam{tParam})
+				ctx := types.NewContext()
+				inst, err := types.Instantiate(ctx, boxNamed, []types.Type{types.Typ[types.Int]}, true)
+				if err != nil {
+					panic(err)
+				}
+				return inst
+			},
+			currentPkg: currentPkg,
+			wantText:   "pkg.Box[int]",
+		},
 	}
 
 	for _, tt := range tests {

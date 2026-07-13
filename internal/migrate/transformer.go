@@ -173,13 +173,8 @@ func typeToExpr(t types.Type) ast.Expr {
 	switch typ := t.(type) {
 	case *types.Named:
 		obj := typ.Obj()
-		if obj.Pkg() == nil {
-			// Built-in type (e.g., error)
-			return ast.NewIdent(obj.Name())
-		}
-		// Note: For cross-package types, this loses the package qualifier.
-		// In practice, wire migrations typically use same-package types.
-		return ast.NewIdent(obj.Name())
+		base := ast.NewIdent(obj.Name())
+		return wrapTypeArgs(base, typ.TypeArgs(), typeToExpr)
 	case *types.Pointer:
 		return &ast.StarExpr{X: typeToExpr(typ.Elem())}
 	case *types.Slice:
