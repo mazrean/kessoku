@@ -92,6 +92,9 @@ type ProviderSpec struct {
 	// element of Requires is then the variadic slice type and the generated
 	// call site must expand it with `...`.
 	IsVariadic bool
+	// IsReturnCleanup indicates this provider returns a cleanup func() that should
+	// be deferred rather than treated as a provided dependency.
+	IsReturnCleanup bool
 }
 
 type Return struct {
@@ -288,9 +291,10 @@ type InjectorCallArgument struct {
 }
 
 type InjectorProviderCallStmt struct {
-	Provider  *ProviderSpec
-	Arguments []*InjectorCallArgument
-	Returns   []*InjectorParam
+	Provider     *ProviderSpec
+	CleanupParam *InjectorParam
+	Arguments    []*InjectorCallArgument
+	Returns      []*InjectorParam
 }
 
 func (stmt *InjectorProviderCallStmt) HasAsync() bool {

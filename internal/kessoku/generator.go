@@ -639,6 +639,15 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 	// Generate assignment statement
 	lhs := stmt.buildLhsExpressions(varPool)
 
+	// If this provider returns a cleanup func(), include it in the LHS so it
+	// receives a real variable name, then emit a defer statement for it.
+	var cleanupIdent *ast.Ident
+	if stmt.CleanupParam != nil {
+		cleanupName := stmt.CleanupParam.Name(varPool)
+		cleanupIdent = ast.NewIdent(cleanupName)
+		lhs = append(lhs, cleanupIdent)
+	}
+
 	var errorHandleStmt ast.Stmt
 	if stmt.Provider.IsReturnError {
 		errIdentName := varPool.GetName("err")
@@ -668,6 +677,16 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 
 	if errorHandleStmt != nil {
 		stmts = append(stmts, errorHandleStmt)
+	}
+
+	// Emit defer cleanupN() immediately after the assignment (and after error
+	// handling) so the cleanup is always called when the injector returns.
+	if cleanupIdent != nil {
+		stmts = append(stmts, &ast.DeferStmt{
+			Call: &ast.CallExpr{
+				Fun: cleanupIdent,
+			},
+		})
 	}
 
 	// Add channel cleanup for async scenarios

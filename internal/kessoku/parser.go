@@ -564,6 +564,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 			Provides:          result.Provides,
 			Requires:          result.Requires,
 			IsReturnError:     result.IsReturnError,
+			IsReturnCleanup:   result.IsReturnCleanup,
 			IsAsync:           result.IsAsync,
 			ReferencedImports: referencedImports,
 		})
@@ -574,6 +575,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 			Provides:          result.Provides,
 			Requires:          result.Requires,
 			IsReturnError:     result.IsReturnError,
+			IsReturnCleanup:   result.IsReturnCleanup,
 			IsAsync:           result.IsAsync,
 			IsVariadic:        result.IsVariadic,
 			ReferencedImports: referencedImports,
@@ -583,15 +585,24 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 	return nil
 }
 
+// isCleanupFunc reports whether t is a wire-style cleanup function: func() with no
+// parameters and no return values. Such functions are deferred automatically by
+// the generated injector instead of being injected as ordinary dependencies.
+func isCleanupFunc(t types.Type) bool {
+	sig, ok := t.Underlying().(*types.Signature)
+	return ok && sig.Params().Len() == 0 && sig.Results().Len() == 0
+}
+
 // parseProviderTypeResult holds the result of parsing a provider type.
 type parseProviderTypeResult struct {
-	StructType    types.Type
-	Requires      []types.Type
-	Provides      [][]types.Type
-	IsReturnError bool
-	IsAsync       bool
-	IsStruct      bool
-	IsVariadic    bool
+	StructType      types.Type
+	Requires        []types.Type
+	Provides        [][]types.Type
+	IsReturnError   bool
+	IsReturnCleanup bool
+	IsAsync         bool
+	IsStruct        bool
+	IsVariadic      bool
 }
 
 func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Type, varPool *VarPool) (*parseProviderTypeResult, error) {
@@ -694,6 +705,7 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 
 		errorIface, _ := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
 		isReturnError := false
+		isReturnCleanup := false
 		provides := make([][]types.Type, 0, providerFnSig.Results().Len())
 		for v := range providerFnSig.Results().Variables() {
 			if errorIface != nil && types.Implements(v.Type(), errorIface) {
@@ -701,16 +713,25 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 				continue
 			}
 
+			// A bare func() with no parameters and no return values is treated as a
+			// wire-style cleanup function: it is deferred rather than injected as a
+			// dependency, so it must not appear in the provided-type map.
+			if isCleanupFunc(v.Type()) {
+				isReturnCleanup = true
+				continue
+			}
+
 			provides = append(provides, []types.Type{v.Type()})
 		}
 
 		return &parseProviderTypeResult{
-			Requires:      requires,
-			Provides:      provides,
-			IsReturnError: isReturnError,
-			IsAsync:       false,
-			IsStruct:      false,
-			IsVariadic:    providerFnSig.Variadic(),
+			Requires:        requires,
+			Provides:        provides,
+			IsReturnError:   isReturnError,
+			IsReturnCleanup: isReturnCleanup,
+			IsAsync:         false,
+			IsStruct:        false,
+			IsVariadic:      providerFnSig.Variadic(),
 		}, nil
 	case "structProvider":
 		if typeArgs.Len() < 1 {

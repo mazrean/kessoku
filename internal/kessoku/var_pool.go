@@ -105,6 +105,13 @@ func (p *VarPool) getBaseName(t types.Type) string {
 		default:
 			baseName = strings.ToLowerCamel(t.Name())
 		}
+	case *types.Signature:
+		// A bare func() with no parameters and no results is a wire-style cleanup
+		// function; give it a descriptive name so generated code is readable.
+		if t.Params().Len() == 0 && t.Results().Len() == 0 {
+			return "cleanup"
+		}
+		baseName = "fn"
 	default:
 		baseName = "val"
 	}

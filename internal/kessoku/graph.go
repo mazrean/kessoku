@@ -275,6 +275,7 @@ type argument struct {
 type node struct {
 	arg          *argument
 	providerSpec *ProviderSpec
+	cleanupParam *InjectorParam
 	providerArgs []*InjectorCallArgument
 	returnValues []*InjectorParam
 	// argProviderOrder and argRequiresIndex record the discovery order for arg nodes:
@@ -947,6 +948,16 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 				returnValues = append(returnValues, param)
 			}
 
+			if n.providerSpec.IsReturnCleanup {
+				// Create a dedicated param for the cleanup func(); it will receive a
+				// variable name via varPool and a defer statement will be emitted for it.
+				cleanupType := types.NewSignatureType(nil, nil, nil, nil, nil, false)
+				cleanupParam := NewInjectorParamWithImports([]types.Type{cleanupType}, false, metaData.Package.Path, metaData.Imports, varPool)
+				// Ref(false) so varPool assigns a real name instead of "_".
+				cleanupParam.Ref(false)
+				n.cleanupParam = cleanupParam
+			}
+
 			if n.providerSpec.IsReturnError {
 				injector.IsReturnError = true
 			}
@@ -1413,9 +1424,10 @@ func (g *Graph) buildPoolStmtsSimple(pool []*node) ([]InjectorStmt, error) {
 			})
 		} else {
 			stmts = append(stmts, &InjectorProviderCallStmt{
-				Provider:  n.providerSpec,
-				Arguments: n.providerArgs,
-				Returns:   n.returnValues,
+				Provider:     n.providerSpec,
+				Arguments:    n.providerArgs,
+				Returns:      n.returnValues,
+				CleanupParam: n.cleanupParam,
 			})
 		}
 	}
