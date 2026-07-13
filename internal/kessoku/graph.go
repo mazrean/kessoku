@@ -439,6 +439,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 		node:        returnNode,
 		returnIndex: returnProvider.returnIndex,
 	}
+	providerNodeMap[returnProvider.provider] = returnNode
 	queue.Push(returnNode)
 	graph.nodes = append(graph.nodes, returnNode)
 

@@ -1830,6 +1830,88 @@ func TestGraph_DetectCycles(t *testing.T) {
 	}
 }
 
+// TestGraph_ReturnNodeInProviderNodeMap is a regression test for BUG-28:
+// returnNode was never added to providerNodeMap, so when the return type
+// participates in a cycle a duplicate node was created instead of reusing
+// the existing returnNode. This produced a disconnected returnNode with no
+// outgoing edges and a stray duplicate node in the cycle path.
+func TestGraph_ReturnNodeInProviderNodeMap(t *testing.T) {
+	t.Parallel()
+
+	// Build a 3-node cycle: NodeA(NodeC), NodeB(NodeA), NodeC(NodeB), Inject[*NodeA]
+	// NodeA is the return type AND participates in the cycle.
+	nodeAType := types.NewNamed(types.NewTypeName(0, nil, "NodeA", nil), types.NewStruct(nil, nil), nil)
+	nodeBType := types.NewNamed(types.NewTypeName(0, nil, "NodeB", nil), types.NewStruct(nil, nil), nil)
+	nodeCType := types.NewNamed(types.NewTypeName(0, nil, "NodeC", nil), types.NewStruct(nil, nil), nil)
+
+	nodeAProvider := &ProviderSpec{
+		Type:     ProviderTypeFunction,
+		Provides: [][]types.Type{{nodeAType}},
+		Requires: []types.Type{nodeCType}, // NodeA requires NodeC
+	}
+
+	build := &BuildDirective{
+		InjectorName: "InitializeNodeA",
+		Return: &Return{
+			Type: nodeAType,
+		},
+		Providers: []*ProviderSpec{
+			nodeAProvider,
+			{
+				Type:     ProviderTypeFunction,
+				Provides: [][]types.Type{{nodeBType}},
+				Requires: []types.Type{nodeAType}, // NodeB requires NodeA (the return type)
+			},
+			{
+				Type:     ProviderTypeFunction,
+				Provides: [][]types.Type{{nodeCType}},
+				Requires: []types.Type{nodeBType}, // NodeC requires NodeB
+			},
+		},
+	}
+
+	metaData := &MetaData{
+		Package: Package{Name: "test", Path: "test"},
+		Imports: make(map[string]*Import),
+	}
+
+	_, err := NewGraph(metaData, build, NewVarPool())
+	if err == nil {
+		t.Fatal("Expected cycle error but got none")
+	}
+
+	var cycleErr *CycleError
+	if !errors.As(err, &cycleErr) {
+		t.Fatalf("Expected CycleError but got %T: %v", err, err)
+	}
+
+	// Before the fix, returnNode was missing from providerNodeMap, so when
+	// nodeB required NodeA the BFS created a duplicate node (nodeA2) instead
+	// of reusing returnNode. The cycle then ran through nodeA2 (the
+	// duplicate) while returnNode was left with no edges – a disconnected
+	// orphan node in the graph. Verify that every node in the cycle path
+	// is backed by a distinct ProviderSpec (no two nodes share the same
+	// ProviderSpec, which would indicate a duplicate).
+	seen := make(map[*ProviderSpec]bool)
+	for _, n := range cycleErr.Cycle {
+		if n.providerSpec == nil {
+			continue
+		}
+		if seen[n.providerSpec] {
+			t.Errorf("duplicate ProviderSpec found in cycle path (BUG-28: returnNode not added to providerNodeMap); cycle: %v", cycleErr.Cycle)
+			return
+		}
+		seen[n.providerSpec] = true
+	}
+
+	// Additionally verify that the cycle path starts with the return type's
+	// provider. Before the fix the first node was an intermediate provider
+	// (e.g. NodeC) rather than NodeA.
+	if len(cycleErr.Cycle) == 0 || cycleErr.Cycle[0].providerSpec != nodeAProvider {
+		t.Errorf("expected cycle to start with the return type provider (NodeA); got cycle: %v", cycleErr.Cycle)
+	}
+}
+
 // TestNewGraph_ValidatorProvider is a regression test for BUG-08: error-only validator
 // providers (Provides == nil, IsReturnError == true) were silently dropped from the graph
 // because the backward traversal from the return type never reaches them.
