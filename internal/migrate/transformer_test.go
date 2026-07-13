@@ -183,6 +183,13 @@ func TestTypeToExpr(t *testing.T) {
 			wantText: "(x int)",
 		},
 		{
+			name: "unsafe.Pointer type",
+			typeFunc: func() types.Type {
+				return types.Typ[types.UnsafePointer]
+			},
+			wantText: "unsafe.Pointer",
+		},
+		{
 			name: "named type with package",
 			typeFunc: func() types.Type {
 				pkg := types.NewPackage("example.com/foo", "foo")

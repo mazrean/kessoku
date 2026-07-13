@@ -174,6 +174,10 @@ func (tc *TypeConverter) TypeToExpr(t types.Type) ast.Expr {
 			Value: tc.TypeToExpr(typ.Elem()),
 		}
 	case *types.Basic:
+		if typ.Kind() == types.UnsafePointer {
+			tc.AddImport("unsafe", "unsafe")
+			return &ast.SelectorExpr{X: ast.NewIdent("unsafe"), Sel: ast.NewIdent("Pointer")}
+		}
 		return ast.NewIdent(typ.Name())
 	case *types.Interface:
 		if typ.Empty() {

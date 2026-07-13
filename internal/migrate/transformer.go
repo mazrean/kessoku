@@ -190,6 +190,9 @@ func typeToExpr(t types.Type) ast.Expr {
 			Value: typeToExpr(typ.Elem()),
 		}
 	case *types.Basic:
+		if typ.Kind() == types.UnsafePointer {
+			return &ast.SelectorExpr{X: ast.NewIdent("unsafe"), Sel: ast.NewIdent("Pointer")}
+		}
 		return ast.NewIdent(typ.Name())
 	case *types.Interface:
 		if typ.Empty() {

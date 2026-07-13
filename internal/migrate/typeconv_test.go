@@ -133,6 +133,13 @@ func TestTypeConverterTypeToExpr(t *testing.T) {
 			currentPkg: currentPkg,
 			wantText:   "CurrentType",
 		},
+		{
+			name: "unsafe.Pointer type",
+			typeFunc: func() types.Type {
+				return types.Typ[types.UnsafePointer]
+			},
+			wantText: "unsafe.Pointer",
+		},
 	}
 
 	for _, tt := range tests {
