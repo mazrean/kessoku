@@ -1233,9 +1233,6 @@ func (g *Graph) findOptimalPool(n *node, pools [][]*node, poolProvidedNodes []ma
 					continue POOL_LOOP
 				}
 			}
-			if poolIdx == 0 {
-				return 0
-			}
 		}
 	}
 
