@@ -497,7 +497,7 @@ func TestGenerateStmts(t *testing.T) {
 
 			varPool := NewVarPool()
 			existingImports := make(map[string]*Import)
-			stmts, err := generateStmts(varPool, "", tt.injector, existingImports)
+			stmts, err := generateStmts(varPool, varPool, "", tt.injector, existingImports)
 			if err != nil {
 				if !tt.expectErrorHandling {
 					t.Errorf("Unexpected error: %v", err)
@@ -1224,7 +1224,7 @@ func TestGenerateVariableSpecs(t *testing.T) {
 
 			varPool := NewVarPool()
 			existingImports := make(map[string]*Import)
-			specs, err := generateVariableSpecs("test", tt.injector, varPool, existingImports)
+			specs, err := generateVariableSpecs("test", tt.injector, varPool, varPool, existingImports)
 
 			if tt.expectError {
 				if err == nil {

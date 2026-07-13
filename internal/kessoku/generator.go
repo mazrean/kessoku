@@ -21,10 +21,15 @@ func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Inj
 		Name: ast.NewIdent(metaData.Package.Name),
 	}
 
-	// Generate injector function declarations
+	// Generate injector function declarations.
+	// Each injector gets a fresh snapshot of the file-level VarPool so that
+	// local variable names (config, err, eg, ...) are allocated independently
+	// per injector function.  The file-level varPool is still passed for any
+	// import-alias allocations that may happen during code generation.
 	var funcDecls []ast.Decl
 	for _, injector := range injectors {
-		funcDecl, err := generateInjectorDecl(metaData, injector, varPool)
+		injectorVarPool := varPool.Snapshot()
+		funcDecl, err := generateInjectorDecl(metaData, injector, injectorVarPool, varPool)
 		if err != nil {
 			return fmt.Errorf("generate injector declaration for %s: %w", injector.Name, err)
 		}
@@ -124,22 +129,26 @@ func ensureImport(imports map[string]*Import, varPool *VarPool, pkgPath, pkgName
 // their providers return errors), so their generated code waits on completion
 // channels unconditionally instead of selecting on context cancellation.
 // This keeps them deadlock-free even when called with a cancelled context.
-func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Stmt, string, error) {
+//
+// localVarPool is used for local variable name allocation (eg, cancel, ctx, parentCtx);
+// fileVarPool is used for import-alias allocation (errgroup, context) that must be
+// unique across the entire output file.
+func generateAsyncInitialization(pkg string, injector *Injector, localVarPool *VarPool, fileVarPool *VarPool, imports map[string]*Import) ([]ast.Stmt, string, error) {
 	var stmts []ast.Stmt
 
-	errgroupAlias := ensureImport(imports, varPool, errgroupPkgPath, errgroupPkgName)
+	errgroupAlias := ensureImport(imports, fileVarPool, errgroupPkgPath, errgroupPkgName)
 
 	// Find context parameter name if available
 	var ctxParamName string
 	for _, arg := range injector.Args {
 		if isContextType(arg.Type) {
-			ctxParamName = arg.Param.Name(varPool)
+			ctxParamName = arg.Param.Name(localVarPool)
 			break
 		}
 	}
 
 	// Generate variable declarations for async access
-	varSpecs, err := generateVariableSpecs(pkg, injector, varPool, imports)
+	varSpecs, err := generateVariableSpecs(pkg, injector, localVarPool, fileVarPool, imports)
 	if err != nil {
 		return nil, "", fmt.Errorf("generate variable declarations: %w", err)
 	}
@@ -151,7 +160,7 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 		},
 	})
 
-	injector.asyncEgName = varPool.GetName("eg")
+	injector.asyncEgName = localVarPool.GetName("eg")
 
 	if !injector.IsReturnError {
 		// Unconditional channel waits: no cancellable context needed.
@@ -161,8 +170,8 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 		return stmts, "", nil
 	}
 
-	contextAlias := ensureImport(imports, varPool, contextPkgPath, contextPkgName)
-	injector.asyncCancelName = varPool.GetName("cancel")
+	contextAlias := ensureImport(imports, fileVarPool, contextPkgPath, contextPkgName)
+	injector.asyncCancelName = localVarPool.GetName("cancel")
 
 	// ctx, cancel := context.WithCancel(ctx)
 	// (falls back to context.Background() when the injector has no context
@@ -176,7 +185,7 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 	var parentCtxExpr ast.Expr
 	if ctxParamName != "" {
 		injector.asyncCtxName = ctxParamName
-		parentCtxName = varPool.GetName("parentCtx")
+		parentCtxName = localVarPool.GetName("parentCtx")
 		// parentCtx := ctx
 		stmts = append(stmts, &ast.AssignStmt{
 			Lhs: []ast.Expr{ast.NewIdent(parentCtxName)},
@@ -185,7 +194,7 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 		})
 		parentCtxExpr = ast.NewIdent(ctxParamName)
 	} else {
-		injector.asyncCtxName = varPool.GetName("ctx")
+		injector.asyncCtxName = localVarPool.GetName("ctx")
 		parentCtxExpr = &ast.CallExpr{
 			Fun: &ast.SelectorExpr{
 				X:   ast.NewIdent(contextAlias),
@@ -287,12 +296,14 @@ func generateErrGroupDeclaration(egName, ctxName, errgroupAlias string) *ast.Ass
 	}
 }
 
-// generateVariableSpecs creates variable declarations for async access
-func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Spec, error) {
+// generateVariableSpecs creates variable declarations for async access.
+// localVarPool is used for local variable name allocation; fileVarPool is used
+// for import-alias allocation in createASTTypeExpr.
+func generateVariableSpecs(pkg string, injector *Injector, localVarPool *VarPool, fileVarPool *VarPool, imports map[string]*Import) ([]ast.Spec, error) {
 	var specs []ast.Spec
 
 	for _, param := range injector.Vars {
-		paramName := param.Name(varPool)
+		paramName := param.Name(localVarPool)
 		if paramName == "_" {
 			continue
 		}
@@ -302,7 +313,7 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imp
 			imp.IsUsed = true
 		}
 
-		typeExpr, err := createASTTypeExpr(pkg, param.Type(), varPool, imports)
+		typeExpr, err := createASTTypeExpr(pkg, param.Type(), fileVarPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("create AST type expression for %s: %w", paramName, err)
 		}
@@ -317,7 +328,7 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imp
 		}
 
 		specs = append(specs, &ast.ValueSpec{
-			Names: []*ast.Ident{ast.NewIdent(param.ChannelName(varPool))},
+			Names: []*ast.Ident{ast.NewIdent(param.ChannelName(localVarPool))},
 			Values: []ast.Expr{
 				&ast.CallExpr{
 					Fun: ast.NewIdent("make"),
@@ -431,7 +442,11 @@ func generateImportDecl(imporSpecs []*ast.ImportSpec) *ast.GenDecl {
 	}
 }
 
-func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPool) (ast.Decl, error) {
+// generateInjectorDecl generates a function declaration for an injector.
+// localVarPool is a per-injector pool used for local variable name allocation
+// (params, err, eg, channels, …).  fileVarPool is the file-scoped pool used
+// for any new import-alias allocation that may be needed during generation.
+func generateInjectorDecl(metaData *MetaData, injector *Injector, localVarPool *VarPool, fileVarPool *VarPool) (ast.Decl, error) {
 	paramFields := make([]*ast.Field, 0, len(injector.Args)+1)
 
 	// Add parameters
@@ -442,7 +457,7 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 				imp.IsUsed = true
 			}
 			paramFields = append(paramFields, &ast.Field{
-				Names: []*ast.Ident{ast.NewIdent(arg.Param.Name(varPool))},
+				Names: []*ast.Ident{ast.NewIdent(arg.Param.Name(localVarPool))},
 				Type:  arg.ASTTypeExpr,
 			})
 		}
@@ -504,7 +519,7 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 		Results: results,
 	}
 
-	stmts, err := generateStmts(varPool, metaData.Package.Path, injector, metaData.Imports)
+	stmts, err := generateStmts(localVarPool, fileVarPool, metaData.Package.Path, injector, metaData.Imports)
 	if err != nil {
 		return nil, fmt.Errorf("generate statements: %w", err)
 	}
@@ -520,8 +535,10 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 	return funcDecl, nil
 }
 
-// generateStmts generates statements with parallel execution support using errgroup
-func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map[string]*Import) ([]ast.Stmt, error) {
+// generateStmts generates statements with parallel execution support using errgroup.
+// localVarPool is the per-injector pool for local variable names; fileVarPool is
+// the file-scoped pool used for any import-alias allocation during generation.
+func generateStmts(localVarPool *VarPool, fileVarPool *VarPool, pkg string, injector *Injector, imports map[string]*Import) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
 
 	hasChains := hasChainStmts(injector)
@@ -531,7 +548,7 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map
 
 	// Initialize async components if needed
 	if hasChains {
-		asyncStmts, pCtx, err := generateAsyncInitialization(pkg, injector, varPool, imports)
+		asyncStmts, pCtx, err := generateAsyncInitialization(pkg, injector, localVarPool, fileVarPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("generate async initialization: %w", err)
 		}
@@ -575,7 +592,7 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map
 
 	// Process statements and collect completion channels
 	for _, stmt := range injector.Stmts {
-		newStmts, _ := stmt.Stmt(varPool, injector, returnErrStmts, false)
+		newStmts, _ := stmt.Stmt(localVarPool, injector, returnErrStmts, false)
 		stmts = append(stmts, newStmts...)
 	}
 
@@ -588,7 +605,7 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map
 	// Add return statement
 	returnExprs := make([]ast.Expr, 0, maxInjectorReturnValues)
 	if injector.Return != nil && injector.Return.Param != nil {
-		returnExprs = append(returnExprs, ast.NewIdent(injector.Return.Param.Name(varPool)))
+		returnExprs = append(returnExprs, ast.NewIdent(injector.Return.Param.Name(localVarPool)))
 	}
 	if injector.IsReturnError {
 		returnExprs = append(returnExprs, ast.NewIdent("nil"))

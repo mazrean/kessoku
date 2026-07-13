@@ -47,15 +47,13 @@ func writeAtomically(dst string, fn func(*os.File) error) error {
 
 // Processor handles the overall dependency injection code generation process.
 type Processor struct {
-	parser  *Parser
-	varPool *VarPool
+	parser *Parser
 }
 
 // NewProcessor creates a new processor instance.
 func NewProcessor() *Processor {
 	return &Processor{
-		parser:  NewParser(),
-		varPool: NewVarPool(),
+		parser: NewParser(),
 	}
 }
 
@@ -64,6 +62,7 @@ type parsedFile struct {
 	metaData *MetaData
 	filename string
 	builds   []*BuildDirective
+	varPool  *VarPool
 }
 
 // ProcessFiles processes specified Go files for wire generation.
@@ -77,7 +76,11 @@ func (p *Processor) ProcessFiles(files []string) error {
 	for _, filename := range files {
 		slog.Debug("Processing file", "file", filename)
 
-		metaData, builds, err := p.parser.ParseFile(filename, p.varPool)
+		// Create a fresh VarPool per file so import aliases and package-level
+		// name reservations from one file do not contaminate another file.
+		fileVarPool := NewVarPool()
+
+		metaData, builds, err := p.parser.ParseFile(filename, fileVarPool)
 		if err != nil {
 			return fmt.Errorf("parse file %s: %w", filename, err)
 		}
@@ -101,6 +104,7 @@ func (p *Processor) ProcessFiles(files []string) error {
 			metaData: metaData,
 			filename: filename,
 			builds:   builds,
+			varPool:  fileVarPool,
 		})
 	}
 
@@ -114,13 +118,18 @@ func (p *Processor) ProcessFiles(files []string) error {
 }
 
 // generateFile generates the *_band.go file for a parsed input file.
+// It uses pf.varPool (a fresh VarPool created per file in ProcessFiles) for
+// import-alias allocation; Generate creates a per-injector snapshot for local
+// variable names.
 func (p *Processor) generateFile(pf *parsedFile) error {
 	outputFileName := outputFileName(pf.filename)
 	slog.Debug("outputFileName", "outputFileName", outputFileName)
 
 	injectors := make([]*Injector, 0, len(pf.builds))
 	for _, build := range pf.builds {
-		injector, injectorErr := CreateInjector(pf.metaData, build, p.varPool)
+		// CreateInjector uses pf.varPool only for new import alias allocation
+		// (package-level names and existing imports are already registered).
+		injector, injectorErr := CreateInjector(pf.metaData, build, pf.varPool)
 		if injectorErr != nil {
 			return fmt.Errorf("create injector: %w", injectorErr)
 		}
@@ -131,7 +140,7 @@ func (p *Processor) generateFile(pf *parsedFile) error {
 	slog.Debug("injectors", "injectors", injectors)
 
 	if err := writeAtomically(outputFileName, func(f *os.File) error {
-		return Generate(f, pf.filename, pf.metaData, injectors, p.varPool)
+		return Generate(f, pf.filename, pf.metaData, injectors, pf.varPool)
 	}); err != nil {
 		return fmt.Errorf("write %s: %w", outputFileName, err)
 	}

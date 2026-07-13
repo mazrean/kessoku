@@ -3,6 +3,7 @@ package kessoku
 import (
 	"fmt"
 	"go/types"
+	"maps"
 
 	"github.com/mazrean/kessoku/internal/pkg/strings"
 )
@@ -23,6 +24,16 @@ func NewVarPool() *VarPool {
 	return &VarPool{
 		vars: vars,
 	}
+}
+
+// Snapshot returns a new VarPool that is a copy of the current pool.
+// The snapshot starts with all names already registered in the parent pool,
+// so it can safely allocate fresh local variable names without conflicting
+// with import aliases or package-level identifiers from the parent.
+func (p *VarPool) Snapshot() *VarPool {
+	vars := make(map[string]int, len(p.vars))
+	maps.Copy(vars, p.vars)
+	return &VarPool{vars: vars}
 }
 
 func (p *VarPool) GetName(baseName string) string {
