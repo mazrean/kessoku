@@ -73,6 +73,36 @@ func namedASTTypeExpr(pkg string, obj *types.TypeName, typeArgs *types.TypeList,
 	}, nil
 }
 
+// typeKey returns a canonical string key for a types.Type that is stable under
+// type aliases. It recursively resolves aliases so that, for example, *Database
+// and *DB produce the same key when Database = DB.
+func typeKey(t types.Type) string {
+	switch typ := t.(type) {
+	case *types.Alias:
+		return typeKey(types.Unalias(typ))
+	case *types.Pointer:
+		return "*" + typeKey(typ.Elem())
+	case *types.Slice:
+		return "[]" + typeKey(typ.Elem())
+	case *types.Array:
+		return fmt.Sprintf("[%d]%s", typ.Len(), typeKey(typ.Elem()))
+	case *types.Map:
+		return fmt.Sprintf("map[%s]%s", typeKey(typ.Key()), typeKey(typ.Elem()))
+	case *types.Chan:
+		switch typ.Dir() {
+		case types.SendOnly:
+			return "chan<- " + typeKey(typ.Elem())
+		case types.RecvOnly:
+			return "<-chan " + typeKey(typ.Elem())
+		case types.SendRecv:
+			return "chan " + typeKey(typ.Elem())
+		}
+		return t.String()
+	default:
+		return t.String()
+	}
+}
+
 // createASTTypeExpr creates an AST type expression from a types.Type and updates existingImports
 func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[string]*Import) (ast.Expr, error) {
 	switch typ := t.(type) {
@@ -302,7 +332,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 				if t == nil {
 					return nil, fmt.Errorf("provider has nil type at group %d, index %d", groupIndex, typeIndex)
 				}
-				key := t.String()
+				key := typeKey(t)
 
 				if existing, ok := fnProviderMap[key]; ok {
 					// Allow the same provider to provide multiple types (e.g., concrete and interface)
@@ -330,7 +360,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 		}
 
 		// Find the provider that provides this struct type
-		structTypeKey := structProvider.StructType.String()
+		structTypeKey := typeKey(structProvider.StructType)
 		if _, ok := fnProviderMap[structTypeKey]; !ok {
 			return nil, fmt.Errorf("no provider for struct type %s", structTypeKey)
 		}
@@ -347,7 +377,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 			}
 			declOrder++
 
-			fieldTypeKey := field.Type.String()
+			fieldTypeKey := typeKey(field.Type)
 			if _, ok := fnProviderMap[fieldTypeKey]; ok {
 				return nil, fmt.Errorf("multiple providers provide %s (field %s conflicts with existing provider)", fieldTypeKey, field.Name)
 			}
@@ -364,7 +394,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 	if build.Return.Type == nil {
 		return nil, fmt.Errorf("return type is nil")
 	}
-	returnTypeKey := build.Return.Type.String()
+	returnTypeKey := typeKey(build.Return.Type)
 
 	returnProvider, ok := fnProviderMap[returnTypeKey]
 	if !ok {
@@ -412,7 +442,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 			if t == nil {
 				return nil, fmt.Errorf("provider has nil required type at index %d", i)
 			}
-			key := t.String()
+			key := typeKey(t)
 			var (
 				n2       *node
 				srcIndex int
