@@ -692,10 +692,11 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 			requires = append(requires, t)
 		}
 
+		errorIface, _ := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
 		isReturnError := false
 		provides := make([][]types.Type, 0, providerFnSig.Results().Len())
 		for v := range providerFnSig.Results().Variables() {
-			if types.Identical(v.Type(), types.Universe.Lookup("error").Type()) {
+			if errorIface != nil && types.Implements(v.Type(), errorIface) {
 				isReturnError = true
 				continue
 			}
