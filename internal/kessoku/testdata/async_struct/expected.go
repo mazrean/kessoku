@@ -4,12 +4,9 @@
 
 package main
 
-import (
-	"context"
-	"github.com/mazrean/kessoku"
-)
+import "github.com/mazrean/kessoku"
 
-func InitializeService(ctx context.Context) *Service {
+func InitializeService() *Service {
 	config := kessoku.Async(kessoku.Provide(NewConfig)).Fn()()
 	str := config.APIKey
 	num := config.CacheTTL

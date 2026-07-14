@@ -27,26 +27,26 @@ func InitializeComplexApp(ctx context.Context) *App {
 	eg := &errgroup.Group{}
 	eg.Go(func() error {
 		<-configCh
+		messagingService = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(config)
+		for _, ch := range []<-chan struct{}{userServiceCh, sessionServiceCh} {
+			<-ch
+		}
+		notificationService = kessoku.Async(kessoku.Provide(NewNotificationService)).Fn()(userService, sessionService, messagingService)
+		app = kessoku.Provide(NewComplexApp).Fn()(notificationService)
+		return nil
+	})
+	eg.Go(func() error {
+		<-configCh
 		databaseService = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()(config)
 		userService = kessoku.Async(kessoku.Provide(NewUserService)).Fn()(databaseService)
 		close(userServiceCh)
 		return nil
 	})
-	eg.Go(func() error {
-		<-configCh
-		cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()(config)
-		sessionService = kessoku.Async(kessoku.Provide(NewSessionService)).Fn()(cacheService)
-		close(sessionServiceCh)
-		return nil
-	})
 	config = kessoku.Provide(NewConfig).Fn()()
 	close(configCh)
-	messagingService = kessoku.Async(kessoku.Provide(NewMessagingService)).Fn()(config)
-	for _, ch := range []<-chan struct{}{userServiceCh, sessionServiceCh} {
-		<-ch
-	}
-	notificationService = kessoku.Async(kessoku.Provide(NewNotificationService)).Fn()(userService, sessionService, messagingService)
-	app = kessoku.Provide(NewComplexApp).Fn()(notificationService)
+	cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()(config)
+	sessionService = kessoku.Async(kessoku.Provide(NewSessionService)).Fn()(cacheService)
+	close(sessionServiceCh)
 	_ = eg.Wait()
 	return app
 }

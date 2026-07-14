@@ -1371,9 +1371,10 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 			expectedArgsCount:      0,
 		},
 		{
-			// Async providers always inject ctx into the signature, even when the
-			// generated body cannot consume it (no error return to propagate cancellation).
-			name: "async providers without error return - context injected",
+			// A single async provider in a linear chain (A async -> B sync) cannot run in
+			// parallel with anything; the pool-assignment logic places it in the same pool,
+			// so no goroutine is emitted and ctx must NOT be injected.
+			name: "single async provider in linear chain - no context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1396,14 +1397,15 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 					},
 				},
 			},
-			expectError:             false,
-			expectContextInjection:  true,
-			expectedArgsCount:       1,
-			expectedContextPosition: 0,
+			expectError:            false,
+			expectContextInjection: false,
+			expectedArgsCount:      0,
 		},
 		{
-			// Async providers always inject ctx, regardless of which provider is async.
-			name: "mixed async and sync providers without error return - context injected",
+			// A sync provider followed by a single async provider (A sync -> B async) is
+			// also a linear chain with no sibling to parallelize; no goroutine is emitted
+			// and ctx must NOT be injected.
+			name: "mixed async and sync providers in linear chain - no context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1426,14 +1428,14 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 					},
 				},
 			},
-			expectError:             false,
-			expectContextInjection:  true,
-			expectedArgsCount:       1,
-			expectedContextPosition: 0,
+			expectError:            false,
+			expectContextInjection: false,
+			expectedArgsCount:      0,
 		},
 		{
-			// Multiple async providers without error return also inject ctx.
-			name: "multiple async providers without error return - context injected",
+			// Two async providers in a linear chain (A async -> B async) cannot run in
+			// parallel; no goroutine is emitted and ctx must NOT be injected.
+			name: "multiple async providers in linear chain - no context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1456,6 +1458,59 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 					},
 				},
 			},
+			expectError:            false,
+			expectContextInjection: false,
+			expectedArgsCount:      0,
+		},
+		{
+			// Diamond pattern: Config(sync) -> {DB(async), Cache(sync)} -> App(sync).
+			// DB and Cache can run in parallel, so a goroutine IS emitted and ctx MUST
+			// be injected. This is the canonical regression case for the POOL_LOOP bug.
+			name: "diamond pattern with async sibling - context injected",
+			build: func() *BuildDirective {
+				dbType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "DB", nil), types.NewStruct(nil, nil), nil))
+				appType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "App", nil), types.NewStruct(nil, nil), nil))
+				return &BuildDirective{
+					InjectorName: "InitializeApp",
+					Return: &Return{
+						Type: appType,
+					},
+					Providers: []*ProviderSpec{
+						// Config (sync, no deps)
+						{
+							Type:          ProviderTypeFunction,
+							Provides:      [][]types.Type{{configType}},
+							Requires:      []types.Type{},
+							IsReturnError: false,
+							IsAsync:       false,
+						},
+						// DB (async, depends on Config)
+						{
+							Type:          ProviderTypeFunction,
+							Provides:      [][]types.Type{{dbType}},
+							Requires:      []types.Type{configType},
+							IsReturnError: false,
+							IsAsync:       true,
+						},
+						// Cache (sync, depends on Config — sibling of DB)
+						{
+							Type:          ProviderTypeFunction,
+							Provides:      [][]types.Type{{serviceType}},
+							Requires:      []types.Type{configType},
+							IsReturnError: false,
+							IsAsync:       false,
+						},
+						// App (sync, depends on DB and Cache)
+						{
+							Type:          ProviderTypeFunction,
+							Provides:      [][]types.Type{{appType}},
+							Requires:      []types.Type{dbType, serviceType},
+							IsReturnError: false,
+							IsAsync:       false,
+						},
+					},
+				}
+			}(),
 			expectError:             false,
 			expectContextInjection:  true,
 			expectedArgsCount:       1,

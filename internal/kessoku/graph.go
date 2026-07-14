@@ -879,13 +879,14 @@ func (g *Graph) hasAsyncProviders() bool {
 	return false
 }
 
-// injectContextArg injects context.Context as the first argument when async providers exist.
-// The parameter is always part of the signature so that callers can pass a context
-// consistently; the generated body only consumes it when there are parallel chain
-// statements (goroutines) and the injector returns an error, since that is the only
-// case where cancellation can be propagated to the caller.
+// injectContextArg injects context.Context as the first argument when the injector
+// actually emits parallel chain statements (goroutines). This check is intentionally
+// based on the generated statements rather than on the presence of IsAsync flags,
+// because the pool-assignment logic may collapse all async nodes into a single pool
+// (e.g. when there is only one async provider and no siblings to parallelize with),
+// in which case no goroutines are emitted and ctx would be added but never used.
 func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool *VarPool) error {
-	if !g.hasAsyncProviders() {
+	if !hasChainStmts(injector) {
 		return nil
 	}
 
@@ -1299,22 +1300,14 @@ func (g *Graph) findOptimalPool(n *node, pools [][]*node, poolProvidedNodes []ma
 		return 0
 	}
 
-	if maxProvidedCount == len(dependencies) {
-	POOL_LOOP:
+	// For sync providers only: if all dependencies are satisfied by a single pool,
+	// place the node in that pool to avoid unnecessary goroutine overhead.
+	// Async providers are intentionally excluded from this optimization: they
+	// must be placed in a separate (possibly empty) pool so that siblings that
+	// share the same dependency can be scheduled in parallel goroutines.
+	if maxProvidedCount == len(dependencies) && !n.providerSpec.IsAsync {
 		for _, poolIdx := range maxProvidedPools {
-			if !n.providerSpec.IsAsync {
-				return poolIdx
-			}
-
-			for i := range pools[poolIdx] {
-				nd := pools[poolIdx][len(pools[poolIdx])-1-i]
-				if slices.Contains(dependencies, nd) {
-					return poolIdx
-				}
-				if nd.providerSpec.IsAsync {
-					continue POOL_LOOP
-				}
-			}
+			return poolIdx
 		}
 	}
 
