@@ -168,15 +168,33 @@ func (p *Parser) parseCallExpr(call *ast.CallExpr, info *types.Info, wireAlias s
 	case "NewSet":
 		return p.parseNewSet(call, info, wireAlias, filePath, varName), nil
 	case "Bind":
-		return p.parseBind(call, info, filePath, varName), nil
+		// Guard against typed-nil interface pitfall: parseBind returns *WireBind,
+		// which when nil and stored in a WirePattern interface is non-nil.
+		// Check the concrete pointer before assigning to the interface.
+		if wb := p.parseBind(call, info, filePath, varName); wb != nil {
+			return wb, nil
+		}
+		return nil, nil
 	case "Value":
-		return p.parseValue(call, info, filePath), nil
+		if wv := p.parseValue(call, info, filePath); wv != nil {
+			return wv, nil
+		}
+		return nil, nil
 	case "InterfaceValue":
-		return p.parseInterfaceValue(call, info, filePath), nil
+		if wiv := p.parseInterfaceValue(call, info, filePath); wiv != nil {
+			return wiv, nil
+		}
+		return nil, nil
 	case "Struct":
-		return p.parseStruct(call, info, filePath), nil
+		if ws := p.parseStruct(call, info, filePath); ws != nil {
+			return ws, nil
+		}
+		return nil, nil
 	case "FieldsOf":
-		return p.parseFieldsOf(call, info, filePath), nil
+		if wf := p.parseFieldsOf(call, info, filePath); wf != nil {
+			return wf, nil
+		}
+		return nil, nil
 	case "Build":
 		// wire.Build is handled separately in ExtractPatterns for function declarations
 		return nil, nil
