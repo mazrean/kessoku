@@ -649,13 +649,24 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 		errIdent := ast.NewIdent(errIdentName)
 		lhs = append(lhs, errIdent)
 
+		// Use the provider's exact error return type for the var declaration.
+		// When a provider returns a concrete type (e.g. *MyError) rather than
+		// the error interface, declaring `var err error` would cause nil-interface
+		// false positives: a nil *MyError assigned to an error interface becomes
+		// non-nil. Using the concrete type avoids that pitfall.
+		errTypeExpr := stmt.Provider.ErrorTypeExpr
+		if errTypeExpr == nil {
+			// Fallback: should not happen in practice, but keep behaviour safe.
+			errTypeExpr = ast.NewIdent("error")
+		}
+
 		stmts = append(stmts, &ast.DeclStmt{
 			Decl: &ast.GenDecl{
 				Tok: token.VAR,
 				Specs: []ast.Spec{
 					&ast.ValueSpec{
 						Names: []*ast.Ident{errIdent},
-						Type:  ast.NewIdent("error"),
+						Type:  errTypeExpr,
 					},
 				},
 			},

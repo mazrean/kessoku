@@ -350,6 +350,28 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 		}
 	}
 
+	// Populate ErrorTypeExpr for all providers that return an error. When the
+	// provider returns a concrete type (e.g. *MyError) instead of the error
+	// interface, the generated var declaration must use that concrete type so
+	// that a nil return value is not wrapped in a non-nil interface.
+	errorIfaceType := types.Universe.Lookup("error").Type()
+	for _, provider := range build.Providers {
+		if !provider.IsReturnError || provider.ErrorType == nil {
+			continue
+		}
+		if types.Identical(provider.ErrorType, errorIfaceType) {
+			// The provider returns the error interface itself — use the bare identifier.
+			provider.ErrorTypeExpr = ast.NewIdent("error")
+		} else {
+			// Concrete type implementing error: generate the exact AST type expression.
+			expr, err := createASTTypeExpr(metaData.Package.Path, provider.ErrorType, varPool, metaData.Imports)
+			if err != nil {
+				return nil, fmt.Errorf("create error type expression for provider: %w", err)
+			}
+			provider.ErrorTypeExpr = expr
+		}
+	}
+
 	type fnProvider struct {
 		provider    *ProviderSpec
 		returnIndex int
