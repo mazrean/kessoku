@@ -941,7 +941,10 @@ func (stmt *InjectorProviderCallStmt) buildProviderCall(args []ast.Expr) []ast.E
 
 	// Variadic providers receive the last dependency as a slice that must be
 	// expanded at the call site: fn(a, opts...).
-	if stmt.Provider.IsVariadic && len(args) > 0 {
+	// When the variadic last parameter was matched via an element-type provider
+	// (e.g. NewOption() Option satisfying ...Option), the value is already a
+	// plain element — no spread is needed.
+	if stmt.Provider.IsVariadic && !stmt.VariadicElemMatch && len(args) > 0 {
 		callExpr.Ellipsis = token.Pos(1)
 	}
 

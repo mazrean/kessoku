@@ -300,6 +300,10 @@ type node struct {
 	// that provider's Requires slice. Used to sort external arguments in declaration order.
 	argProviderOrder int
 	argRequiresIndex int
+	// variadicElemMatch is true when the variadic last parameter of this provider was
+	// satisfied by an element-type provider (e.g. NewOption() Option satisfies ...Option).
+	// In this case the generated call must NOT use the `...` spread operator.
+	variadicElemMatch bool
 }
 
 type edgeNode struct {
@@ -515,6 +519,22 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 				n2       *node
 				srcIndex int
 			)
+
+			// For the last parameter of a variadic provider, the stored requirement is
+			// the slice type []T (from types.Signature.Params().At(last).Type()).  If
+			// no []T provider exists, check whether an element-type T provider is
+			// available and use it directly (the call site must then omit `...`).
+			isLastVariadic := n1.providerSpec.IsVariadic && i == len(n1.providerSpec.Requires)-1
+			var elemTypeProvider *fnProvider
+			if isLastVariadic {
+				if sliceT, ok := t.(*types.Slice); ok {
+					elemKey := typeKey(sliceT.Elem())
+					if ep, ok := fnProviderMap[elemKey]; ok {
+						elemTypeProvider = ep
+					}
+				}
+			}
+
 			if provider, ok := fnProviderMap[key]; ok {
 				n2, ok = providerNodeMap[provider.provider]
 				if !ok {
@@ -528,6 +548,21 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 				}
 
 				srcIndex = provider.returnIndex
+			} else if elemTypeProvider != nil {
+				// The variadic last parameter is satisfied by a single element-type
+				// provider.  Use it directly; the call site must NOT use `...`.
+				n1.variadicElemMatch = true
+				n2, ok = providerNodeMap[elemTypeProvider.provider]
+				if !ok {
+					n2 = &node{
+						providerSpec: elemTypeProvider.provider,
+						providerArgs: make([]*InjectorCallArgument, len(elemTypeProvider.provider.Requires)),
+					}
+					providerNodeMap[elemTypeProvider.provider] = n2
+					queue.Push(n2)
+					graph.nodes = append(graph.nodes, n2)
+				}
+				srcIndex = elemTypeProvider.returnIndex
 			} else if n2, ok = argNodeMap[key]; ok {
 				// Check if this provider already depends on this arg node (same type used
 				// at a different parameter position). If so, create a new distinct arg node
@@ -1472,9 +1507,10 @@ func (g *Graph) buildPoolStmtsSimple(pool []*node) ([]InjectorStmt, error) {
 			})
 		} else {
 			stmts = append(stmts, &InjectorProviderCallStmt{
-				Provider:  n.providerSpec,
-				Arguments: n.providerArgs,
-				Returns:   n.returnValues,
+				Provider:          n.providerSpec,
+				Arguments:         n.providerArgs,
+				Returns:           n.returnValues,
+				VariadicElemMatch: n.variadicElemMatch,
 			})
 		}
 	}
