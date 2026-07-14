@@ -1718,3 +1718,57 @@ func TestGenerateAsyncInitializationUsesActualErrgroupAlias(t *testing.T) {
 		}
 	}
 }
+
+// TestGenerateAsyncInitializationReservesErrgroupAliasInLocalPool verifies that
+// generateAsyncInitialization reserves the errgroup import alias in localVarPool
+// so that a user-provided type whose lowerCamel base name equals that alias
+// (e.g. *Errgroup → "errgroup") is allocated a distinct name in the var block.
+//
+// Regression test: before the fix, localVarPool had no reservation for the
+// errgroup alias at the point generateVariableSpecs ran, so a *Errgroup
+// provider variable would be named "errgroup" — the same as the package alias —
+// producing a compile error in the generated code.
+func TestGenerateAsyncInitializationReservesErrgroupAliasInLocalPool(t *testing.T) {
+	t.Parallel()
+
+	// Start with completely fresh pools: no pre-existing "errgroup" reservation.
+	// This simulates the first-ever code-generation run where no *_band.go file
+	// (and thus no errgroup import) exists yet to seed the varPool.
+	fileVarPool := NewVarPool()
+	localVarPool := fileVarPool.Snapshot() // no "errgroup" in either pool
+
+	imports := map[string]*Import{}
+
+	injector := &Injector{
+		Name:          "InitializeApp",
+		Vars:          []*InjectorParam{},
+		Args:          []*InjectorArgument{},
+		Stmts:         []InjectorStmt{},
+		IsReturnError: false,
+	}
+
+	_, _, err := generateAsyncInitialization("main", injector, localVarPool, fileVarPool, imports)
+	if err != nil {
+		t.Fatalf("generateAsyncInitialization returned error: %v", err)
+	}
+
+	// Confirm the errgroup alias was registered in the file-scoped pool.
+	imp, ok := imports[errgroupPkgPath]
+	if !ok {
+		t.Fatal("errgroup package was not added to imports map")
+	}
+	// The alias must be "errgroup" because nothing else reserved it.
+	if imp.Name != "errgroup" {
+		t.Errorf("errgroup import alias = %q, want %q", imp.Name, "errgroup")
+	}
+
+	// The critical property: localVarPool must now treat "errgroup" as reserved
+	// so that a subsequent GetName("errgroup") call (from generateVariableSpecs
+	// naming a *Errgroup provider variable) returns a distinct name.
+	nextName := localVarPool.GetName("errgroup")
+	if nextName == "errgroup" {
+		t.Errorf("localVarPool.GetName(\"errgroup\") = %q after generateAsyncInitialization; "+
+			"want a suffix like \"errgroup0\" — the package alias is not reserved in localVarPool, "+
+			"so a *Errgroup provider variable would shadow the import", nextName)
+	}
+}

@@ -53,6 +53,16 @@ func (p *VarPool) GetName(baseName string) string {
 	}
 }
 
+// Reserve marks name as taken in this pool without allocating it as a new
+// local variable name.  If name is already reserved the call is a no-op.
+// This is used to prevent user-type variable names from shadowing import
+// aliases that are allocated later in a different (file-scoped) pool.
+func (p *VarPool) Reserve(name string) {
+	if p.vars[name] == 0 {
+		p.vars[name] = 1
+	}
+}
+
 func (p *VarPool) Get(t types.Type) string {
 	name := p.getBaseName(t)
 
