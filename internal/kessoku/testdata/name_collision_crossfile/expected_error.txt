@@ -1,0 +1,1 @@
+injector name "NewFoo" conflicts with an existing package-level declaration
