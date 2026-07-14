@@ -120,7 +120,7 @@ func (m *Migrator) MigrateFiles(patterns []string, outputPath string) error {
 			}
 
 			// Extract source imports for package reference resolution
-			sourceImports := m.parser.ExtractImports(file)
+			sourceImports, explicitAliasPaths := m.parser.ExtractImports(file)
 
 			// Extract patterns
 			patterns, warnings := m.parser.ExtractPatterns(file, pkg.TypesInfo, wireImport, filePath)
@@ -142,13 +142,14 @@ func (m *Migrator) MigrateFiles(patterns []string, outputPath string) error {
 			}
 
 			results = append(results, MigrationResult{
-				SourceFile:    filePath,
-				Package:       pkg.Name,
-				TypesPackage:  pkg.Types,
-				SourceImports: sourceImports,
-				Imports:       nil, // Imports are computed based on actual usage
-				Patterns:      kessokuPatterns,
-				Warnings:      warnings,
+				SourceFile:         filePath,
+				Package:            pkg.Name,
+				TypesPackage:       pkg.Types,
+				SourceImports:      sourceImports,
+				ExplicitAliasPaths: explicitAliasPaths,
+				Imports:            nil, // Imports are computed based on actual usage
+				Patterns:           kessokuPatterns,
+				Warnings:           warnings,
 			})
 		}
 
@@ -302,11 +303,12 @@ func (m *Migrator) mergeResults(results []MigrationResult, typeConverter *TypeCo
 	}
 
 	// Collect imports from expressions in patterns (provider functions, values, etc.)
-	// Use each file's own source imports to correctly resolve same-named packages from different files
+	// Use each file's own source imports to correctly resolve same-named packages from different files.
+	// Also pass the explicit alias paths so that Imports() knows which aliases must always be emitted.
 	if typeConverter != nil {
 		for _, r := range results {
 			for _, p := range r.Patterns {
-				typeConverter.CollectPatternImports(p, r.SourceImports)
+				typeConverter.CollectPatternImports(p, r.SourceImports, r.ExplicitAliasPaths)
 			}
 		}
 	}

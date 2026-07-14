@@ -225,7 +225,7 @@ import "github.com/traPtitech/traQ/repository/gorm2/v1"
 				t.Fatalf("failed to parse: %v", err)
 			}
 
-			got := p.ExtractImports(file)
+			got, _ := p.ExtractImports(file)
 			if len(got) != len(tt.want) {
 				t.Errorf("ExtractImports() got %d imports, want %d", len(got), len(tt.want))
 			}

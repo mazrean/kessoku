@@ -440,7 +440,7 @@ func TestTypeConverterCollectExprImports(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := NewTypeConverter(nil)
-			tc.CollectExprImports(tt.expr, tt.sourceImports)
+			tc.CollectExprImports(tt.expr, tt.sourceImports, nil)
 
 			got := make(map[string]string)
 			for _, imp := range tc.Imports() {
@@ -536,7 +536,7 @@ func TestTypeConverterCollectPatternImports(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := NewTypeConverter(nil)
-			tc.CollectPatternImports(tt.pattern, sourceImports)
+			tc.CollectPatternImports(tt.pattern, sourceImports, nil)
 
 			got := tc.Imports()
 			gotPaths := make(map[string]bool)

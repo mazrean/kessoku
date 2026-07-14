@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"go/ast"
 	"go/token"
 	"go/types"
 	"testing"
@@ -239,6 +240,84 @@ func TestTypeConverterImportsDedup(t *testing.T) {
 	imports := tc.Imports()
 	if len(imports) != 1 {
 		t.Errorf("expected 1 import after dedup, got %d", len(imports))
+	}
+}
+
+// TestTypeConverterImportsV2ModuleExplicitAlias reproduces the bug where
+// Imports() drops the alias when an explicit alias happens to equal the last
+// path element of a v2 module path.
+//
+// Scenario:
+//
+//	import v2 "example.com/bar/v2"   // package declares: package bar
+//
+// lastPathElement("example.com/bar/v2") == "v2" == alias "v2", so the old
+// code suppressed the alias.  The generated import became
+// `"example.com/bar/v2"` (no alias), which Go resolves to "bar", not "v2".
+// Any reference to v2.Service then becomes "undefined: v2".
+//
+// After the fix, CollectExprImports marks source-provided aliases as explicit,
+// and Imports() always emits the alias for explicit entries.
+func TestTypeConverterImportsV2ModuleExplicitAlias(t *testing.T) {
+	tc := NewTypeConverter(nil)
+
+	// Simulate the source import map produced by parser.ExtractImports for:
+	//   import v2 "example.com/bar/v2"
+	// The key is the local alias "v2", value is the import path.
+	sourceImports := map[string]string{
+		"v2": "example.com/bar/v2",
+	}
+	// ExtractImports also returns the set of paths with explicit aliases.
+	explicitAliasPaths := map[string]bool{
+		"example.com/bar/v2": true,
+	}
+
+	// Simulate an AST expression that references v2.Service.
+	pkgIdent := &ast.Ident{Name: "v2"}
+	sel := &ast.SelectorExpr{
+		X:   pkgIdent,
+		Sel: &ast.Ident{Name: "Service"},
+	}
+	tc.CollectExprImports(sel, sourceImports, explicitAliasPaths)
+
+	specs := tc.Imports()
+	if len(specs) != 1 {
+		t.Fatalf("expected 1 import spec, got %d: %v", len(specs), specs)
+	}
+	got := specs[0]
+	if got.Path != "example.com/bar/v2" {
+		t.Errorf("import path: got %q, want %q", got.Path, "example.com/bar/v2")
+	}
+	// The alias "v2" must be present: without it Go resolves to the package
+	// declaration name "bar", leaving all "v2.X" references undefined.
+	if got.Name != "v2" {
+		t.Errorf("import alias: got %q, want %q (must not be suppressed for v2 module with explicit alias)", got.Name, "v2")
+	}
+}
+
+// TestTypeConverterImportsNonExplicitAlias verifies that when an import is
+// added via TypeToExpr (i.e. from the package's declared name, not from an
+// explicit source alias), the alias is still omitted when it matches the last
+// path element — preserving the existing "no redundant alias" behaviour.
+func TestTypeConverterImportsNonExplicitAlias(t *testing.T) {
+	// package path "github.com/example/foo", declared name "foo"
+	// lastPathElement == "foo" == declared name → alias should be omitted.
+	fooPkg := types.NewPackage("github.com/example/foo", "foo")
+	mainPkg := types.NewPackage("example.com/app", "main")
+
+	fooTypeName := types.NewTypeName(token.NoPos, fooPkg, "Bar", nil)
+	fooType := types.NewNamed(fooTypeName, types.Typ[types.Int], nil)
+
+	tc := NewTypeConverter(mainPkg)
+	_ = tc.TypeToExpr(fooType)
+
+	specs := tc.Imports()
+	if len(specs) != 1 {
+		t.Fatalf("expected 1 import spec, got %d", len(specs))
+	}
+	// Alias should be empty: "foo" matches lastPathElement("github.com/example/foo").
+	if specs[0].Name != "" {
+		t.Errorf("import alias: got %q, want %q (should be omitted for non-explicit alias matching last path element)", specs[0].Name, "")
 	}
 }
 
