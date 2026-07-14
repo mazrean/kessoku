@@ -346,19 +346,50 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 				}
 
 				if baseFunc == nil {
-					slog.Debug("baseFunc is nil", "callExpr", callExpr)
-					continue
-				}
+					// callFun is neither *ast.IndexExpr, *ast.IndexListExpr, nor *ast.SelectorExpr.
+					// It may be an *ast.Ident when the user stores kessoku.Inject[*T] in a variable
+					// and calls it indirectly (e.g. var injectFn = kessoku.Inject[*T]; injectFn(...)).
+					// Detect this pattern by checking TypesInfo.Instances: any generic function
+					// instantiation whose origin is kessoku.Inject and whose instantiated type
+					// matches the type of callFun is a variable holding an injector.
+					ident, isIdent := callFun.(*ast.Ident)
+					if !isIdent {
+						slog.Debug("baseFunc is nil and callFun is not an identifier", "callExpr", callExpr)
+						continue
+					}
+					identType := pkg.TypesInfo.TypeOf(ident)
+					if identType == nil {
+						slog.Debug("baseFunc is nil, callFun type unknown", "callExpr", callExpr)
+						continue
+					}
+					foundInjector := false
+					for instIdent, inst := range pkg.TypesInfo.Instances {
+						useObj := pkg.TypesInfo.Uses[instIdent]
+						if useObj == nil || !types.Identical(useObj.Type(), injectorType) {
+							continue
+						}
+						if types.Identical(inst.Type, identType) {
+							foundInjector = true
+							break
+						}
+					}
+					if !foundInjector {
+						slog.Debug("callFun identifier does not hold a kessoku.Inject instantiation", "callExpr", callExpr)
+						continue
+					}
+					// Fall through to parseInjectCall; the *ast.Ident case there will
+					// recover the return type from TypesInfo.Instances.
+				} else {
+					calleeType := pkg.TypesInfo.TypeOf(baseFunc)
+					if calleeType == nil {
+						slog.Debug("calleeType is nil", "callExpr", callExpr, "baseFunc", baseFunc)
+						continue
+					}
 
-				calleeType := pkg.TypesInfo.TypeOf(baseFunc)
-				if calleeType == nil {
-					slog.Debug("calleeType is nil", "callExpr", callExpr, "baseFunc", baseFunc)
-					continue
-				}
-
-				if !types.Identical(calleeType, injectorType) {
-					slog.Debug("calleeType is not injectorType", "callExpr", callExpr, "calleeType", calleeType, "injectorType", injectorType)
-					continue
+					if !types.Identical(calleeType, injectorType) {
+						slog.Debug("calleeType is not injectorType", "callExpr", callExpr, "calleeType", calleeType, "injectorType", injectorType)
+						continue
+					}
 				}
 
 				build, err := p.parseInjectCall(pkg, kessokuPackageScope, callExpr, imports, varPool)
@@ -412,6 +443,42 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 		}
 		// Collect dependencies from return type expression
 		fun.Indices[0], _ = p.collectDependencies(fun.Indices[0], pkg.TypesInfo, imports, varPool)
+	case *ast.Ident:
+		// Variable indirection: the user stored kessoku.Inject[*T] in a variable and
+		// calls it as injectFn("Name", providers...).  There is no type-argument AST
+		// node in the call expression itself, so we recover the type argument from
+		// TypesInfo.Instances, which records every instantiation of a generic function.
+		injectorObj := kessokuPackageScope.Lookup("Inject")
+		if injectorObj == nil {
+			return nil, fmt.Errorf("kessoku.Inject not found in kessoku package scope")
+		}
+		injType := injectorObj.Type()
+		identType := pkg.TypesInfo.TypeOf(fun)
+		if identType == nil {
+			return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
+		}
+		var typeArg types.Type
+		for instIdent, inst := range pkg.TypesInfo.Instances {
+			useObj := pkg.TypesInfo.Uses[instIdent]
+			if useObj == nil || !types.Identical(useObj.Type(), injType) {
+				continue
+			}
+			if types.Identical(inst.Type, identType) && inst.TypeArgs != nil && inst.TypeArgs.Len() > 0 {
+				typeArg = inst.TypeArgs.At(0)
+				break
+			}
+		}
+		if typeArg == nil {
+			return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
+		}
+		astExpr, err := createASTTypeExpr(pkg.Types.Path(), typeArg, varPool, imports)
+		if err != nil {
+			return nil, fmt.Errorf("create AST type expression for return type: %w", err)
+		}
+		build.Return = &Return{
+			Type:        typeArg,
+			ASTTypeExpr: astExpr,
+		}
 	default:
 		return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
 	}
