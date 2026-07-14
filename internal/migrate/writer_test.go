@@ -638,6 +638,86 @@ func TestBuildElementArgsWithNilPattern(t *testing.T) {
 	}
 }
 
+// TestWriteAtomicNoPersistentTempFiles verifies that Write does not leave
+// stale temporary files in the destination directory after a successful write.
+// With the atomic temp-file-then-rename strategy, the temp file must be either
+// renamed to the final path or removed on failure; no leftover should remain.
+func TestWriteAtomicNoPersistentTempFiles(t *testing.T) {
+	w := NewWriter(nil)
+
+	tmpDir := t.TempDir()
+	outputPath := filepath.Join(tmpDir, "output.go")
+
+	output := &MergedOutput{
+		Package: "test",
+		Imports: []ImportSpec{{Path: "github.com/mazrean/kessoku"}},
+		TopLevelDecls: []ast.Decl{
+			w.PatternToDecl(&KessokuSet{
+				VarName:  "TestSet",
+				Elements: []KessokuPattern{},
+			}),
+		},
+	}
+
+	if err := w.Write(output, outputPath); err != nil {
+		t.Fatalf("Write() failed: %v", err)
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadDir() failed: %v", err)
+	}
+
+	// Only output.go should be present; no stale temp files.
+	if len(entries) != 1 {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name()
+		}
+		t.Errorf("expected 1 file in dir, got %d: %v", len(entries), names)
+	}
+	if len(entries) > 0 && entries[0].Name() != "output.go" {
+		t.Errorf("unexpected file in dir: %q", entries[0].Name())
+	}
+}
+
+// TestWriteOverwritesExistingFileContent verifies that a second call to Write
+// on an already-existing output file replaces the file's content correctly.
+// This is a regression guard for the atomic-write refactor.
+func TestWriteOverwritesExistingFileContent(t *testing.T) {
+	w := NewWriter(nil)
+
+	tmpDir := t.TempDir()
+	outputPath := filepath.Join(tmpDir, "output.go")
+
+	// Seed the file with arbitrary content.
+	if err := os.WriteFile(outputPath, []byte("// old content\n"), 0644); err != nil {
+		t.Fatalf("setup WriteFile: %v", err)
+	}
+
+	output := &MergedOutput{
+		Package: "newpkg",
+		Imports: []ImportSpec{{Path: "github.com/mazrean/kessoku"}},
+	}
+
+	if err := w.Write(output, outputPath); err != nil {
+		t.Fatalf("Write() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("ReadFile() failed: %v", err)
+	}
+
+	content := string(data)
+	if content == "// old content\n" {
+		t.Error("Write() did not update the file content")
+	}
+	if len(content) == 0 {
+		t.Error("Write() left the file empty")
+	}
+}
+
 func TestBuildImportDeclDedup(t *testing.T) {
 	w := NewWriter(nil)
 

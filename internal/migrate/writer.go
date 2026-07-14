@@ -2,12 +2,15 @@ package migrate
 
 import (
 	"bytes"
+	"fmt"
 	"go/ast"
 	"go/format"
 	"go/token"
 	"go/types"
 	"io/fs"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 )
 
@@ -155,7 +158,58 @@ func (w *Writer) Write(output *MergedOutput, path string) error {
 		return err
 	}
 
-	return os.WriteFile(path, buf.Bytes(), filePermissions)
+	return writeAtomically(path, buf.Bytes())
+}
+
+// writeAtomically writes content to a temporary file in the same directory as
+// dst, sets the file's permissions to match dst (if it exists) or
+// filePermissions otherwise, and renames the temp file to dst on success.
+// If any step fails the temporary file is removed and dst is left untouched,
+// protecting against the data-loss that would occur if os.WriteFile truncated
+// dst on open and then a subsequent write or close failed.
+func writeAtomically(dst string, content []byte) error {
+	dir := filepath.Dir(dst)
+
+	tmp, err := os.CreateTemp(dir, ".kessoku-migrate-tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	cleanup := func() {
+		if removeErr := os.Remove(tmpName); removeErr != nil && !os.IsNotExist(removeErr) {
+			slog.Error("failed to remove migrate temp file", "file", tmpName, "error", removeErr)
+		}
+	}
+
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+
+	// Preserve existing file permissions, or fall back to the default.
+	perm := filePermissions
+	if fi, statErr := os.Stat(dst); statErr == nil {
+		perm = fi.Mode().Perm()
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpName, dst); err != nil {
+		cleanup()
+		return fmt.Errorf("rename temp file to %s: %w", dst, err)
+	}
+
+	return nil
 }
 
 // buildFile builds an AST file from the merged output.
