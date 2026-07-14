@@ -48,14 +48,25 @@ func (p *Parser) FindWireImport(file *ast.File) string {
 // to derive the default key for un-aliased imports. This is necessary for major-version suffix
 // paths (e.g. "example.com/lib/v2" whose package name is "lib", not "v2") and for
 // gopkg.in-style paths (e.g. "gopkg.in/yaml.v3" whose package name is "yaml", not "yaml.v3").
-func (p *Parser) ExtractImports(file *ast.File, pkgNameByPath map[string]string) map[string]string {
+// It also returns the set of import paths that carry an explicit alias in the source — i.e. imports
+// written as `alias "path"`.  This distinction is used by TypeConverter.CollectExprImports to
+// decide whether the alias must always be emitted in the generated output.
+func (p *Parser) ExtractImports(file *ast.File, pkgNameByPath map[string]string) (map[string]string, map[string]bool) {
 	imports := make(map[string]string)
+	explicitAliasPaths := make(map[string]bool) // import path -> true when alias is explicit
 	for _, imp := range file.Imports {
 		path := strings.Trim(imp.Path.Value, "\"")
 		var name string
 		switch {
 		case imp.Name != nil:
 			name = imp.Name.Name
+			// Record that this path has an explicit alias in the source.
+			// We must emit the alias in generated code: Go resolves an unaliased import using
+			// the package's declared name, which may differ from lastPathElement(path) (e.g.
+			// `v2 "example.com/bar/v2"` where package declares `package bar`).
+			if name != "." && name != "_" {
+				explicitAliasPaths[path] = true
+			}
 		case pkgNameByPath != nil:
 			if actualName, ok := pkgNameByPath[path]; ok {
 				name = actualName
@@ -72,7 +83,7 @@ func (p *Parser) ExtractImports(file *ast.File, pkgNameByPath map[string]string)
 			imports[name] = path
 		}
 	}
-	return imports
+	return imports, explicitAliasPaths
 }
 
 // ExtractPatterns extracts wire patterns from the file.

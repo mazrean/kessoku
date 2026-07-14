@@ -262,7 +262,7 @@ import mylib "example.com/lib/v2"
 				t.Fatalf("failed to parse: %v", err)
 			}
 
-			got := p.ExtractImports(file, tt.pkgNameByPath)
+			got, _ := p.ExtractImports(file, tt.pkgNameByPath)
 			if len(got) != len(tt.want) {
 				t.Errorf("ExtractImports() got %d imports, want %d", len(got), len(tt.want))
 			}

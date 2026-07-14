@@ -35,6 +35,9 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		var err error
 		db, err = kessoku.Async(kessoku.Provide(NewDB)).Fn()(config)
 		if err != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				return cause
+			}
 			return err
 		}
 		select {
@@ -53,7 +56,7 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		var zero *App
 		return zero, err
 	}
-	if err := parentCtx.Err(); err != nil {
+	if err := context.Cause(parentCtx); err != nil {
 		var zero *App
 		return zero, err
 	}

@@ -62,7 +62,10 @@ func (t *Transformer) transformBind(wb *WireBind, pkg *types.Package, elements [
 			// wire.Bind(new(I), new(*T)) -> use the pointer-returning FuncLit.
 			// wire.Bind(new(I), new(T))  -> use the value-returning FuncLit.
 			_, implIsPointer := wb.Implementation.(*types.Pointer)
-			patterns := t.transformStruct(ws, pkg)
+			patterns, err := t.transformStruct(ws, pkg)
+			if err != nil {
+				return nil, err
+			}
 			// transformStruct returns [valueFuncLit, ptrFuncLit] when !IsPointer,
 			// and [ptrFuncLit] when IsPointer.  We need the pointer variant when
 			// the implementation type is a pointer, value variant otherwise.
