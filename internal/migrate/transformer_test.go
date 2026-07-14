@@ -62,6 +62,68 @@ func TestIsErrorType(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			// *MyError where MyError is a named struct with an Error() string method.
+			// types.Identical only matches the exact error interface; types.Implements
+			// is needed to recognise concrete implementors.
+			name: "pointer to concrete error type",
+			typeFunc: func() types.Type {
+				pkg := types.NewPackage("example.com/app", "app")
+				// struct MyError{}
+				myErrorStruct := types.NewStruct(nil, nil)
+				myErrorNamed := types.NewNamed(
+					types.NewTypeName(token.NoPos, pkg, "MyError", nil),
+					myErrorStruct,
+					nil,
+				)
+				// func (*MyError) Error() string
+				recv := types.NewVar(token.NoPos, pkg, "", types.NewPointer(myErrorNamed))
+				errMethod := types.NewFunc(
+					token.NoPos,
+					pkg,
+					"Error",
+					types.NewSignatureType(
+						recv,
+						nil, nil,
+						types.NewTuple(),
+						types.NewTuple(types.NewVar(token.NoPos, nil, "", types.Typ[types.String])),
+						false,
+					),
+				)
+				myErrorNamed.AddMethod(errMethod)
+				return types.NewPointer(myErrorNamed)
+			},
+			want: true,
+		},
+		{
+			// MyError (non-pointer) with value receiver Error() string.
+			name: "concrete named error type (value receiver)",
+			typeFunc: func() types.Type {
+				pkg := types.NewPackage("example.com/app", "app")
+				myErrorStruct := types.NewStruct(nil, nil)
+				myErrorNamed := types.NewNamed(
+					types.NewTypeName(token.NoPos, pkg, "MyError", nil),
+					myErrorStruct,
+					nil,
+				)
+				recv := types.NewVar(token.NoPos, pkg, "", myErrorNamed)
+				errMethod := types.NewFunc(
+					token.NoPos,
+					pkg,
+					"Error",
+					types.NewSignatureType(
+						recv,
+						nil, nil,
+						types.NewTuple(),
+						types.NewTuple(types.NewVar(token.NoPos, nil, "", types.Typ[types.String])),
+						false,
+					),
+				)
+				myErrorNamed.AddMethod(errMethod)
+				return myErrorNamed
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -183,6 +245,13 @@ func TestTypeToExpr(t *testing.T) {
 			wantText: "(x int)",
 		},
 		{
+			name: "unsafe.Pointer type",
+			typeFunc: func() types.Type {
+				return types.Typ[types.UnsafePointer]
+			},
+			wantText: "unsafe.Pointer",
+		},
+		{
 			name: "named type with package",
 			typeFunc: func() types.Type {
 				pkg := types.NewPackage("example.com/foo", "foo")
@@ -193,6 +262,42 @@ func TestTypeToExpr(t *testing.T) {
 				)
 			},
 			wantText: "MyType",
+		},
+		{
+			name: "instantiated generic type single type arg",
+			typeFunc: func() types.Type {
+				pkg := types.NewPackage("example.com/foo", "foo")
+				tName := types.NewTypeName(token.NoPos, nil, "T", nil)
+				tParam := types.NewTypeParam(tName, types.NewInterfaceType(nil, nil))
+				boxTypeName := types.NewTypeName(token.NoPos, pkg, "Box", nil)
+				boxNamed := types.NewNamed(boxTypeName, types.NewStruct(nil, nil), nil)
+				boxNamed.SetTypeParams([]*types.TypeParam{tParam})
+				ctx := types.NewContext()
+				inst, err := types.Instantiate(ctx, boxNamed, []types.Type{types.Typ[types.Int]}, true)
+				if err != nil {
+					panic(err)
+				}
+				return inst
+			},
+			wantText: "Box[int]",
+		},
+		{
+			name: "instantiated generic type two type args",
+			typeFunc: func() types.Type {
+				pkg := types.NewPackage("example.com/foo", "foo")
+				k := types.NewTypeParam(types.NewTypeName(token.NoPos, nil, "K", nil), types.NewInterfaceType(nil, nil))
+				v := types.NewTypeParam(types.NewTypeName(token.NoPos, nil, "V", nil), types.NewInterfaceType(nil, nil))
+				pairTypeName := types.NewTypeName(token.NoPos, pkg, "Pair", nil)
+				pairNamed := types.NewNamed(pairTypeName, types.NewStruct(nil, nil), nil)
+				pairNamed.SetTypeParams([]*types.TypeParam{k, v})
+				ctx := types.NewContext()
+				inst, err := types.Instantiate(ctx, pairNamed, []types.Type{types.Typ[types.String], types.Typ[types.Int]}, true)
+				if err != nil {
+					panic(err)
+				}
+				return inst
+			},
+			wantText: "Pair[string, int]",
 		},
 	}
 
@@ -397,7 +502,7 @@ func TestTypeConverterCollectExprImports(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := NewTypeConverter(nil)
-			tc.CollectExprImports(tt.expr, tt.sourceImports)
+			tc.CollectExprImports(tt.expr, tt.sourceImports, nil)
 
 			got := make(map[string]string)
 			for _, imp := range tc.Imports() {
@@ -493,7 +598,7 @@ func TestTypeConverterCollectPatternImports(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := NewTypeConverter(nil)
-			tc.CollectPatternImports(tt.pattern, sourceImports)
+			tc.CollectPatternImports(tt.pattern, sourceImports, nil)
 
 			got := tc.Imports()
 			gotPaths := make(map[string]bool)
@@ -623,6 +728,184 @@ func TestContains(t *testing.T) {
 			got := contains(tt.slice, tt.s)
 			if got != tt.want {
 				t.Errorf("contains(%v, %q) = %v, want %v", tt.slice, tt.s, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeParamName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "non-keyword identifier unchanged",
+			input: "host",
+			want:  "host",
+		},
+		{
+			name:  "Go keyword gets underscore suffix",
+			input: "type",
+			want:  "type_",
+		},
+		{
+			name:  "another keyword: func",
+			input: "func",
+			want:  "func_",
+		},
+		{
+			name:  "already-suffixed non-keyword unchanged",
+			input: "type_",
+			want:  "type_",
+		},
+		{
+			name:  "empty string unchanged",
+			input: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeParamName(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeParamName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUniqueParamName(t *testing.T) {
+	t.Run("first use of a name is returned as-is", func(t *testing.T) {
+		used := map[string]int{}
+		got := uniqueParamName("host", used)
+		if got != "host" {
+			t.Errorf("uniqueParamName() = %q, want %q", got, "host")
+		}
+		if used["host"] != 1 {
+			t.Errorf("usedNames[host] = %d, want 1", used["host"])
+		}
+	})
+
+	t.Run("collision appends _2 suffix", func(t *testing.T) {
+		used := map[string]int{"type_": 1}
+		got := uniqueParamName("type_", used)
+		if got != "type__2" {
+			t.Errorf("uniqueParamName() = %q, want %q", got, "type__2")
+		}
+	})
+
+	t.Run("second collision appends _3 suffix", func(t *testing.T) {
+		used := map[string]int{"type_": 2, "type__2": 1}
+		got := uniqueParamName("type_", used)
+		if got != "type__3" {
+			t.Errorf("uniqueParamName() = %q, want %q", got, "type__3")
+		}
+	})
+}
+
+// TestAnyProviderReturnsError verifies the sentinel-suppression logic: a
+// kessoku.Value((error)(nil)) sentinel is only needed when no provider
+// reachable from the injector's elements returns an error.
+func TestAnyProviderReturnsError(t *testing.T) {
+	t.Parallel()
+
+	errType := types.Universe.Lookup("error").Type()
+	intType := types.Typ[types.Int]
+
+	newFunc := func(name string, results ...types.Type) *types.Func {
+		vars := make([]*types.Var, 0, len(results))
+		for _, r := range results {
+			vars = append(vars, types.NewVar(token.NoPos, nil, "", r))
+		}
+		sig := types.NewSignatureType(nil, nil, nil, types.NewTuple(), types.NewTuple(vars...), false)
+		return types.NewFunc(token.NoPos, nil, name, sig)
+	}
+
+	errProvider := &WireProviderFunc{Name: "NewDB", Func: newFunc("NewDB", intType, errType)}
+	plainProvider := &WireProviderFunc{Name: "NewApp", Func: newFunc("NewApp", intType)}
+
+	// Build *MyError: a named struct with a pointer-receiver Error() string method.
+	concreteErrType := func() types.Type {
+		pkg := types.NewPackage("example.com/app", "app")
+		myErrorStruct := types.NewStruct(nil, nil)
+		myErrorNamed := types.NewNamed(
+			types.NewTypeName(token.NoPos, pkg, "MyError", nil),
+			myErrorStruct,
+			nil,
+		)
+		recv := types.NewVar(token.NoPos, pkg, "", types.NewPointer(myErrorNamed))
+		errMethod := types.NewFunc(
+			token.NoPos,
+			pkg,
+			"Error",
+			types.NewSignatureType(
+				recv,
+				nil, nil,
+				types.NewTuple(),
+				types.NewTuple(types.NewVar(token.NoPos, nil, "", types.Typ[types.String])),
+				false,
+			),
+		)
+		myErrorNamed.AddMethod(errMethod)
+		return types.NewPointer(myErrorNamed)
+	}()
+	concreteErrProvider := &WireProviderFunc{Name: "NewApp", Func: newFunc("NewApp", intType, concreteErrType)}
+
+	tests := []struct {
+		setIndex map[string]*WireNewSet
+		name     string
+		elements []WirePattern
+		want     bool
+	}{
+		{
+			name:     "provider returns error",
+			elements: []WirePattern{errProvider},
+			want:     true,
+		},
+		{
+			name:     "no provider returns error",
+			elements: []WirePattern{plainProvider, &WireValue{}},
+			want:     false,
+		},
+		{
+			name:     "error provider inside nested set",
+			elements: []WirePattern{&WireNewSet{Elements: []WirePattern{errProvider}}},
+			want:     true,
+		},
+		{
+			name:     "error provider behind set reference",
+			elements: []WirePattern{&WireSetRef{Name: "DBSet"}},
+			setIndex: map[string]*WireNewSet{"DBSet": {Elements: []WirePattern{errProvider}}},
+			want:     true,
+		},
+		{
+			name:     "unresolvable set reference treated as no error",
+			elements: []WirePattern{&WireSetRef{Name: "Unknown"}},
+			want:     false,
+		},
+		{
+			name:     "self-referential set does not loop",
+			elements: []WirePattern{&WireSetRef{Name: "Loop"}},
+			setIndex: map[string]*WireNewSet{"Loop": {Elements: []WirePattern{&WireSetRef{Name: "Loop"}, plainProvider}}},
+			want:     false,
+		},
+		{
+			// Provider that returns (*App, *MyError) where *MyError implements error
+			// but is NOT the predeclared error interface — requires types.Implements.
+			name:     "provider returns concrete error type",
+			elements: []WirePattern{concreteErrProvider},
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := anyProviderReturnsError(tt.elements, tt.setIndex, make(map[string]bool))
+			if got != tt.want {
+				t.Errorf("anyProviderReturnsError() = %v; want %v", got, tt.want)
 			}
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -40,21 +41,31 @@ func runGoldenTest(t *testing.T, testdataDir, testName string) {
 
 	srcDir := filepath.Join(testdataDir, testName)
 
-	// Validate kessoku.go exists
+	// Validate kessoku.go exists; skip empty stub directories.
 	kessokuPath := filepath.Join(srcDir, "kessoku.go")
 	if _, err := os.Stat(kessokuPath); os.IsNotExist(err) {
-		t.Fatalf("test case %s: missing kessoku.go", testName)
+		t.Skipf("test case %s: missing kessoku.go (empty stub directory)", testName)
+	}
+
+	// If expected_error.txt exists, this is an error-case golden test: the
+	// processor must fail and the error message must contain the expected text.
+	expectedErrPath := filepath.Join(srcDir, "expected_error.txt")
+	if _, statErr := os.Stat(expectedErrPath); statErr == nil {
+		runGoldenErrorTest(t, testName, kessokuPath, expectedErrPath)
+		return
 	}
 
 	// Generated file path (kessoku.go -> kessoku_band.go)
 	generatedPath := filepath.Join(srcDir, "kessoku_band.go")
 
-	// Clean up generated file after test (unless updating)
-	if !*update {
-		defer func() {
-			_ = os.Remove(generatedPath)
-		}()
-	}
+	// Clean up generated file after test (always, including update mode).
+	// In update mode the generated file is also removed explicitly on the
+	// happy path (line below), but we need a defer so that cleanup still
+	// happens when os.WriteFile fails and t.Fatalf fires (which calls
+	// runtime.Goexit, bypassing any code that follows t.Fatalf).
+	defer func() {
+		_ = os.Remove(generatedPath)
+	}()
 
 	// Run processor directly on the testdata directory
 	// This works because testdata is within the main module
@@ -90,5 +101,28 @@ func runGoldenTest(t *testing.T, testdataDir, testName string) {
 	if string(actual) != string(expected) {
 		t.Errorf("test case %s: output mismatch:\n--- expected ---\n%s\n--- got ---\n%s",
 			testName, string(expected), string(actual))
+	}
+}
+
+// runGoldenErrorTest handles test cases where generation is expected to fail.
+// The expected_error.txt file contains a substring that must appear in the error.
+func runGoldenErrorTest(t *testing.T, testName, kessokuPath, expectedErrPath string) {
+	t.Helper()
+
+	expectedErrBytes, err := os.ReadFile(expectedErrPath)
+	if err != nil {
+		t.Fatalf("test case %s: failed to read expected_error.txt: %v", testName, err)
+	}
+	expectedErrSubstr := strings.TrimSpace(string(expectedErrBytes))
+
+	processor := NewProcessor()
+	genErr := processor.ProcessFiles([]string{kessokuPath})
+	if genErr == nil {
+		t.Fatalf("test case %s: expected generation to fail (containing %q) but it succeeded", testName, expectedErrSubstr)
+	}
+
+	if !strings.Contains(genErr.Error(), expectedErrSubstr) {
+		t.Errorf("test case %s: error message mismatch:\n  want substring: %q\n  got:            %q",
+			testName, expectedErrSubstr, genErr.Error())
 	}
 }

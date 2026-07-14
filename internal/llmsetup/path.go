@@ -4,13 +4,37 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// expandTilde replaces a leading ~ with the user's home directory.
+// It handles "~" alone and "~/..." paths. Other paths are returned as-is.
+func expandTilde(path string) (string, error) {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w (use an absolute path instead of ~)", err)
+	}
+
+	if path == "~" {
+		return home, nil
+	}
+
+	return filepath.Join(home, path[2:]), nil
+}
 
 // ResolvePath resolves the installation path based on flags and agent configuration.
 // Priority: customPath > userFlag > project-level (default)
 func ResolvePath(customPath string, userFlag bool, agent Agent) (string, error) {
 	if customPath != "" {
-		return filepath.Abs(customPath)
+		expanded, err := expandTilde(customPath)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Abs(expanded)
 	}
 
 	if userFlag {

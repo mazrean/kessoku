@@ -209,7 +209,7 @@ func TestInjectorChainStmt_Stmt(t *testing.T) {
 				}
 			}()
 
-			stmts, imports := tt.chainStmt.Stmt(varPool, injector, nil)
+			stmts, imports := tt.chainStmt.Stmt(varPool, injector, nil, false)
 
 			// The method should return exactly one statement (the eg.Go call)
 			if len(stmts) != 1 {
@@ -497,7 +497,7 @@ func TestGenerateStmts(t *testing.T) {
 
 			varPool := NewVarPool()
 			existingImports := make(map[string]*Import)
-			stmts, err := generateStmts(varPool, "", tt.injector, existingImports)
+			stmts, err := generateStmts(varPool, varPool, "", tt.injector, existingImports)
 			if err != nil {
 				if !tt.expectErrorHandling {
 					t.Errorf("Unexpected error: %v", err)
@@ -933,7 +933,7 @@ func TestInjectorProviderCallStmt_channelsWait(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := tt.stmt.channelsWait(tt.channels, tt.injector, nil)
+			result := tt.stmt.channelsWait(tt.channels, tt.injector, nil, false)
 
 			if result == nil {
 				t.Error("Expected statement, got nil")
@@ -986,7 +986,12 @@ func TestInjectorProviderCallStmt_buildWaitStatement(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := stmt.buildWaitStatement(tt.hasCtx, channel, nil)
+			injector := &Injector{Name: "TestInjector"}
+			if tt.hasCtx {
+				injector.asyncCtxName = "ctx"
+			}
+
+			result := stmt.buildWaitStatement(injector, channel, nil, false)
 
 			if result == nil {
 				t.Error("Expected statement, got nil")
@@ -1009,6 +1014,158 @@ func TestInjectorProviderCallStmt_buildWaitStatement(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestBuildWaitStatement_ContextCause is a regression test for QA-17:
+// when ctx.Done() fires, the generated code must return context.Cause(ctx)
+// (the real provider error) rather than ctx.Err() (context.Canceled).
+func TestBuildWaitStatement_ContextCause(t *testing.T) {
+	t.Parallel()
+
+	stmt := &InjectorProviderCallStmt{}
+	channel := &ast.Ident{Name: "testCh"}
+
+	// returnErrStmts simulates the injector's error-return lambda
+	returnErrStmts := func(errExpr ast.Expr) []ast.Stmt {
+		return []ast.Stmt{
+			&ast.ReturnStmt{
+				Results: []ast.Expr{ast.NewIdent("zero"), errExpr},
+			},
+		}
+	}
+
+	injector := &Injector{asyncCtxName: "ctx"}
+	result := stmt.buildWaitStatement(injector, channel, returnErrStmts, false)
+
+	selectStmt, ok := result.(*ast.SelectStmt)
+	if !ok {
+		t.Fatalf("expected *ast.SelectStmt, got %T", result)
+	}
+
+	// Find the ctx.Done() case clause
+	var ctxDoneBody []ast.Stmt
+	for _, s := range selectStmt.Body.List {
+		cc, isCC := s.(*ast.CaseClause)
+		if !isCC {
+			continue
+		}
+		if len(cc.List) == 1 {
+			if unary, isUnary := cc.List[0].(*ast.UnaryExpr); isUnary {
+				if call, isCall := unary.X.(*ast.CallExpr); isCall {
+					if sel, isSel := call.Fun.(*ast.SelectorExpr); isSel {
+						if sel.Sel.Name == "Done" {
+							ctxDoneBody = cc.Body
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if ctxDoneBody == nil {
+		t.Fatal("could not find ctx.Done() case clause in select statement")
+	}
+
+	// Find the return statement in the ctx.Done() body
+	var returnStmt *ast.ReturnStmt
+	for _, s := range ctxDoneBody {
+		if rs, isRS := s.(*ast.ReturnStmt); isRS {
+			returnStmt = rs
+			break
+		}
+	}
+
+	if returnStmt == nil {
+		t.Fatal("no return statement found in ctx.Done() body")
+	}
+
+	// The last result should be context.Cause(ctx), not ctx.Err()
+	if len(returnStmt.Results) == 0 {
+		t.Fatal("return statement has no results")
+	}
+
+	errResult := returnStmt.Results[len(returnStmt.Results)-1]
+	callExpr, ok := errResult.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected error result to be *ast.CallExpr, got %T", errResult)
+	}
+
+	selExpr, ok := callExpr.Fun.(*ast.SelectorExpr)
+	if !ok {
+		t.Fatalf("expected call fun to be *ast.SelectorExpr, got %T", callExpr.Fun)
+	}
+
+	pkgIdent, ok := selExpr.X.(*ast.Ident)
+	if !ok {
+		t.Fatalf("expected selector X to be *ast.Ident, got %T", selExpr.X)
+	}
+
+	if pkgIdent.Name != "context" {
+		t.Errorf("expected package name %q in error call, got %q (QA-17: must use context.Cause, not ctx.Err)", "context", pkgIdent.Name)
+	}
+
+	if selExpr.Sel.Name != "Cause" {
+		t.Errorf("expected function name %q, got %q (QA-17: must use context.Cause, not ctx.Err)", "Cause", selExpr.Sel.Name)
+	}
+
+	if len(callExpr.Args) != 1 {
+		t.Errorf("expected context.Cause to have 1 argument, got %d", len(callExpr.Args))
+		return
+	}
+
+	argIdent, ok := callExpr.Args[0].(*ast.Ident)
+	if !ok {
+		t.Fatalf("expected context.Cause argument to be *ast.Ident, got %T", callExpr.Args[0])
+	}
+
+	if argIdent.Name != "ctx" {
+		t.Errorf("expected context.Cause argument to be %q, got %q", "ctx", argIdent.Name)
+	}
+}
+
+// TestBuildWaitStatement_ContextCauseUsesImportAlias is a regression test:
+// when the stdlib context package is imported under an alias (because a user
+// package claimed the name "context"), the generated context.Cause call must
+// use that alias instead of the hardcoded identifier "context".
+func TestBuildWaitStatement_ContextCauseUsesImportAlias(t *testing.T) {
+	t.Parallel()
+
+	stmt := &InjectorProviderCallStmt{}
+	channel := &ast.Ident{Name: "testCh"}
+	returnErrStmts := func(errExpr ast.Expr) []ast.Stmt {
+		return []ast.Stmt{
+			&ast.ReturnStmt{
+				Results: []ast.Expr{ast.NewIdent("zero"), errExpr},
+			},
+		}
+	}
+
+	injector := &Injector{asyncCtxName: "ctx", asyncContextAlias: "context0"}
+	result := stmt.buildWaitStatement(injector, channel, returnErrStmts, false)
+
+	selectStmt, ok := result.(*ast.SelectStmt)
+	if !ok {
+		t.Fatalf("expected *ast.SelectStmt, got %T", result)
+	}
+
+	var causePkg string
+	ast.Inspect(selectStmt, func(n ast.Node) bool {
+		sel, isSel := n.(*ast.SelectorExpr)
+		if !isSel || sel.Sel.Name != "Cause" {
+			return true
+		}
+		if pkgIdent, isIdent := sel.X.(*ast.Ident); isIdent {
+			causePkg = pkgIdent.Name
+		}
+		return false
+	})
+
+	if causePkg == "" {
+		t.Fatal("no context.Cause call found in select statement")
+	}
+	if causePkg != "context0" {
+		t.Errorf("expected Cause to be qualified with import alias %q, got %q", "context0", causePkg)
 	}
 }
 
@@ -1219,7 +1376,7 @@ func TestGenerateVariableSpecs(t *testing.T) {
 
 			varPool := NewVarPool()
 			existingImports := make(map[string]*Import)
-			specs, err := generateVariableSpecs("test", tt.injector, varPool, existingImports)
+			specs, err := generateVariableSpecs("test", tt.injector, varPool, varPool, existingImports)
 
 			if tt.expectError {
 				if err == nil {
@@ -1470,4 +1627,148 @@ func TestVarPool_GetChannel(t *testing.T) {
 			t.Errorf("GetChannel() for context = %v, want ctxCh", result)
 		}
 	})
+}
+
+// TestGenerateAsyncInitializationUsesActualErrgroupAlias verifies that when the
+// golang.org/x/sync/errgroup package is already in the imports map under a
+// non-default alias (e.g. "eg"), the generated errgroup declaration uses that
+// actual alias rather than a hardcoded "errgroup" string.
+// Regression test for the bug where generateErrGroupDeclaration hardcoded
+// "errgroup" instead of reading the alias from the Import record.
+func TestGenerateAsyncInitializationUsesActualErrgroupAlias(t *testing.T) {
+	t.Parallel()
+
+	// Simulate a varPool that already has "errgroup" reserved (e.g. by a
+	// file-level declaration `var errgroup = ...`), forcing the package to
+	// receive the alias "errgroup0".
+	varPool := NewVarPool()
+	_ = varPool.GetName("errgroup") // reserves "errgroup"; next call returns "errgroup0"
+
+	// Pre-populate imports: errgroup package is NOT yet in the map so that
+	// generateAsyncInitialization allocates the alias itself via varPool.
+	imports := map[string]*Import{}
+
+	injector := &Injector{
+		Name:          "InitializeApp",
+		Vars:          []*InjectorParam{},
+		Args:          []*InjectorArgument{},
+		Stmts:         []InjectorStmt{},
+		IsReturnError: false,
+	}
+
+	stmts, _, err := generateAsyncInitialization("main", injector, NewVarPool(), varPool, imports)
+	if err != nil {
+		t.Fatalf("generateAsyncInitialization returned error: %v", err)
+	}
+
+	// The import alias actually assigned must be "errgroup0" because "errgroup"
+	// was already reserved in the varPool.
+	imp, ok := imports[errgroupPkgPath]
+	if !ok {
+		t.Fatal("errgroup package was not added to imports map")
+	}
+	if imp.Name != "errgroup0" {
+		t.Errorf("errgroup import alias = %q, want %q", imp.Name, "errgroup0")
+	}
+
+	// The generated errgroup-declaration statement must use the actual alias
+	// ("errgroup0"), not the hardcoded string "errgroup".
+	// The declaration is the last statement (after the var-block).
+	if len(stmts) < 2 {
+		t.Fatalf("expected at least 2 statements, got %d", len(stmts))
+	}
+	egDecl, ok := stmts[len(stmts)-1].(*ast.AssignStmt)
+	if !ok {
+		t.Fatalf("last statement is not *ast.AssignStmt, got %T", stmts[len(stmts)-1])
+	}
+	callExpr, ok := egDecl.Rhs[0].(*ast.UnaryExpr)
+	if !ok {
+		// Could be a CallExpr (WithContext) when ctx is available; handle both.
+		callExprDirect, ok2 := egDecl.Rhs[0].(*ast.CallExpr)
+		if !ok2 {
+			t.Fatalf("errgroup decl RHS is neither *ast.UnaryExpr nor *ast.CallExpr, got %T", egDecl.Rhs[0])
+		}
+		sel, ok3 := callExprDirect.Fun.(*ast.SelectorExpr)
+		if !ok3 {
+			t.Fatalf("call Fun is not *ast.SelectorExpr, got %T", callExprDirect.Fun)
+		}
+		xIdent, ok4 := sel.X.(*ast.Ident)
+		if !ok4 {
+			t.Fatalf("selector X is not *ast.Ident, got %T", sel.X)
+		}
+		if xIdent.Name != "errgroup0" {
+			t.Errorf("errgroup selector uses %q, want %q (actual alias)", xIdent.Name, "errgroup0")
+		}
+	} else {
+		// &errgroup.Group{} case
+		lit, ok2 := callExpr.X.(*ast.CompositeLit)
+		if !ok2 {
+			t.Fatalf("unary X is not *ast.CompositeLit, got %T", callExpr.X)
+		}
+		sel, ok3 := lit.Type.(*ast.SelectorExpr)
+		if !ok3 {
+			t.Fatalf("composite lit type is not *ast.SelectorExpr, got %T", lit.Type)
+		}
+		xIdent, ok4 := sel.X.(*ast.Ident)
+		if !ok4 {
+			t.Fatalf("selector X is not *ast.Ident, got %T", sel.X)
+		}
+		if xIdent.Name != "errgroup0" {
+			t.Errorf("errgroup selector uses %q, want %q (actual alias)", xIdent.Name, "errgroup0")
+		}
+	}
+}
+
+// TestGenerateAsyncInitializationReservesErrgroupAliasInLocalPool verifies that
+// generateAsyncInitialization reserves the errgroup import alias in localVarPool
+// so that a user-provided type whose lowerCamel base name equals that alias
+// (e.g. *Errgroup → "errgroup") is allocated a distinct name in the var block.
+//
+// Regression test: before the fix, localVarPool had no reservation for the
+// errgroup alias at the point generateVariableSpecs ran, so a *Errgroup
+// provider variable would be named "errgroup" — the same as the package alias —
+// producing a compile error in the generated code.
+func TestGenerateAsyncInitializationReservesErrgroupAliasInLocalPool(t *testing.T) {
+	t.Parallel()
+
+	// Start with completely fresh pools: no pre-existing "errgroup" reservation.
+	// This simulates the first-ever code-generation run where no *_band.go file
+	// (and thus no errgroup import) exists yet to seed the varPool.
+	fileVarPool := NewVarPool()
+	localVarPool := fileVarPool.Snapshot() // no "errgroup" in either pool
+
+	imports := map[string]*Import{}
+
+	injector := &Injector{
+		Name:          "InitializeApp",
+		Vars:          []*InjectorParam{},
+		Args:          []*InjectorArgument{},
+		Stmts:         []InjectorStmt{},
+		IsReturnError: false,
+	}
+
+	_, _, err := generateAsyncInitialization("main", injector, localVarPool, fileVarPool, imports)
+	if err != nil {
+		t.Fatalf("generateAsyncInitialization returned error: %v", err)
+	}
+
+	// Confirm the errgroup alias was registered in the file-scoped pool.
+	imp, ok := imports[errgroupPkgPath]
+	if !ok {
+		t.Fatal("errgroup package was not added to imports map")
+	}
+	// The alias must be "errgroup" because nothing else reserved it.
+	if imp.Name != "errgroup" {
+		t.Errorf("errgroup import alias = %q, want %q", imp.Name, "errgroup")
+	}
+
+	// The critical property: localVarPool must now treat "errgroup" as reserved
+	// so that a subsequent GetName("errgroup") call (from generateVariableSpecs
+	// naming a *Errgroup provider variable) returns a distinct name.
+	nextName := localVarPool.GetName("errgroup")
+	if nextName == "errgroup" {
+		t.Errorf("localVarPool.GetName(\"errgroup\") = %q after generateAsyncInitialization; "+
+			"want a suffix like \"errgroup0\" — the package alias is not reserved in localVarPool, "+
+			"so a *Errgroup provider variable would shadow the import", nextName)
+	}
 }

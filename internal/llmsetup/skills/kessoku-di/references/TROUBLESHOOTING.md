@@ -313,17 +313,49 @@ kessoku.Struct[*Config](),
 2. **Dependency not initialized**
    - Check all providers are included in Inject
 
-### Cleanup not called
+### Cleanup func() never runs / rejected by kessoku migrate
 
-**Symptom**: Resources not cleaned up
+**Symptom**: `kessoku migrate` fails with
+`provider "NewDB" returns a wire-style cleanup function (func()); kessoku does not support cleanup functions`,
+or a hand-written provider's cleanup `func()` is silently never called.
 
-**Solution**: Ensure cleanup function is called
+**Cause**: A provider returns a bare `func()` or `func() error` as a cleanup
+value (wire-style). Kessoku has no mechanism to propagate a cleanup function
+back to the injector's caller. The code generator treats the `func()` as an
+ordinary provided value; when nothing consumes it, the generated injector binds
+it to `_` and the cleanup never runs. `kessoku migrate` rejects wire code using
+cleanup returns so this cannot slip through silently during migration.
+
+**Solution**: Remove the cleanup return value and expose a `Close` (or similar)
+method on the returned type instead. Call it explicitly at the call site.
+
 ```go
-app, cleanup, err := InitializeApp(ctx)
+// Bad: wire-style cleanup return — cleanup is silently discarded
+func NewDB() (*DB, func(), error) {
+    db, _ := sql.Open("postgres", dsn)
+    return &DB{db: db}, func() { db.Close() }, nil
+}
+
+// Good: explicit Close method
+type DB struct{ db *sql.DB }
+func (d *DB) Close() { d.db.Close() }
+
+func NewDB() (*DB, error) {
+    db, err := sql.Open("postgres", dsn)
+    if err != nil {
+        return nil, err
+    }
+    return &DB{db: db}, nil
+}
+```
+
+```go
+// Call site: explicit cleanup
+app, err := InitializeApp()
 if err != nil {
     log.Fatal(err)
 }
-defer cleanup()  // Must call cleanup
+defer app.DB.Close()
 ```
 
 ## Debugging Tips

@@ -1,9 +1,13 @@
 package kessoku
 
 import (
+	"bytes"
 	"errors"
 	"go/ast"
+	"go/printer"
+	"go/token"
 	"go/types"
+	"strings"
 	"testing"
 )
 
@@ -74,7 +78,7 @@ func TestNewGraph(t *testing.T) {
 			errorContains: "multiple providers provide",
 		},
 		{
-			name: "missing return provider - auto add dependency",
+			name: "missing return provider - error with clear message",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -89,9 +93,8 @@ func TestNewGraph(t *testing.T) {
 					},
 				},
 			},
-			expectError:   false,
-			expectedName:  "InitializeService",
-			expectedNodes: 1, // Only the auto-added argument node
+			expectError:   true,
+			errorContains: "no provider found for return type",
 		},
 		{
 			name: "complex dependency chain",
@@ -253,7 +256,65 @@ func TestNewGraph(t *testing.T) {
 }
 
 func containsError(err, substring string) bool {
-	return len(err) >= len(substring) && err[:len(substring)] == substring
+	return strings.Contains(err, substring)
+}
+
+func TestContainsError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		err       string
+		substring string
+		want      bool
+	}{
+		{
+			name:      "substring at start (prefix)",
+			err:       "dependency cycle detected: A -> B -> A",
+			substring: "dependency cycle detected",
+			want:      true,
+		},
+		{
+			name:      "substring in middle",
+			err:       "create graph: dependency cycle detected: A -> B -> A",
+			substring: "dependency cycle detected",
+			want:      true,
+		},
+		{
+			name:      "substring at end",
+			err:       "error: bad type",
+			substring: "bad type",
+			want:      true,
+		},
+		{
+			name:      "substring not present",
+			err:       "multiple providers provide *pkg.T",
+			substring: "dependency cycle detected",
+			want:      false,
+		},
+		{
+			name:      "empty substring",
+			err:       "some error",
+			substring: "",
+			want:      true,
+		},
+		{
+			name:      "empty error",
+			err:       "",
+			substring: "something",
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := containsError(tt.err, tt.substring)
+			if got != tt.want {
+				t.Errorf("containsError(%q, %q) = %v, want %v", tt.err, tt.substring, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestNewGraphMultiTypeProvider(t *testing.T) {
@@ -545,6 +606,76 @@ func TestCreateASTTypeExpr(t *testing.T) {
 				if _, exists := existingImports[expectedImport]; !exists {
 					t.Errorf("Expected import %q not found in existingImports", expectedImport)
 				}
+			}
+		})
+	}
+}
+
+// exprToString renders an ast.Expr to its Go source string for comparison.
+func exprToString(expr ast.Expr) string {
+	var buf bytes.Buffer
+	_ = printer.Fprint(&buf, token.NewFileSet(), expr)
+	return buf.String()
+}
+
+// TestCreateASTTypeExprVariadic verifies that variadic function types are rendered
+// as func(arg0 ...T) instead of func(arg0 []T).
+func TestCreateASTTypeExprVariadic(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		typeExpr     types.Type
+		expectedExpr string
+	}{
+		{
+			name: "variadic function type single param",
+			typeExpr: func() types.Type {
+				params := types.NewTuple(types.NewVar(0, nil, "args", types.NewSlice(types.Typ[types.String])))
+				results := types.NewTuple(types.NewVar(0, nil, "", types.Typ[types.String]))
+				return types.NewSignatureType(nil, nil, nil, params, results, true)
+			}(),
+			expectedExpr: "func(arg0 ...string) (result0 string)",
+		},
+		{
+			name: "variadic function type with leading non-variadic params",
+			typeExpr: func() types.Type {
+				p0 := types.NewVar(0, nil, "n", types.Typ[types.Int])
+				p1 := types.NewVar(0, nil, "args", types.NewSlice(types.Typ[types.String]))
+				params := types.NewTuple(p0, p1)
+				results := types.NewTuple(types.NewVar(0, nil, "", types.Typ[types.Int]))
+				return types.NewSignatureType(nil, nil, nil, params, results, true)
+			}(),
+			expectedExpr: "func(arg0 int, arg1 ...string) (result0 int)",
+		},
+		{
+			name: "non-variadic function type is unchanged",
+			typeExpr: func() types.Type {
+				params := types.NewTuple(types.NewVar(0, nil, "x", types.Typ[types.Int]))
+				results := types.NewTuple(types.NewVar(0, nil, "", types.Typ[types.String]))
+				return types.NewSignatureType(nil, nil, nil, params, results, false)
+			}(),
+			expectedExpr: "func(arg0 int) (result0 string)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			varPool := NewVarPool()
+			existingImports := make(map[string]*Import)
+			expr, err := createASTTypeExpr("main", tt.typeExpr, varPool, existingImports)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if expr == nil {
+				t.Fatal("Expected non-nil expression but got nil")
+			}
+
+			got := exprToString(expr)
+			if got != tt.expectedExpr {
+				t.Errorf("Expected %q, got %q", tt.expectedExpr, got)
 			}
 		})
 	}
@@ -1240,7 +1371,11 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 			expectedArgsCount:      0,
 		},
 		{
-			name: "async providers - context injection required",
+			// A single async provider in a linear chain (A async -> B sync) cannot run in
+			// parallel with anything, so no goroutine is emitted — but ctx IS still
+			// injected: any injector with an async provider takes ctx so its signature
+			// stays stable as the dependency graph evolves.
+			name: "single async provider in linear chain - context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1252,7 +1387,7 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
-						IsAsync:       true, // This should trigger context injection
+						IsAsync:       true,
 					},
 					{
 						Type:          ProviderTypeFunction,
@@ -1269,7 +1404,10 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 			expectedContextPosition: 0,
 		},
 		{
-			name: "mixed async and sync providers - context injection required",
+			// A sync provider followed by a single async provider (A sync -> B async) is
+			// also a linear chain with no sibling to parallelize; no goroutine is emitted,
+			// but the async provider still forces the ctx parameter.
+			name: "mixed async and sync providers in linear chain - context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1288,7 +1426,7 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
-						IsAsync:       true, // This should trigger context injection
+						IsAsync:       true,
 					},
 				},
 			},
@@ -1298,7 +1436,9 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 			expectedContextPosition: 0,
 		},
 		{
-			name: "multiple async providers - single context injection",
+			// Two async providers in a linear chain (A async -> B async) cannot run in
+			// parallel; no goroutine is emitted, but ctx is still injected.
+			name: "multiple async providers in linear chain - context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1310,20 +1450,74 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 						Provides:      [][]types.Type{{configType}},
 						Requires:      []types.Type{},
 						IsReturnError: false,
-						IsAsync:       true, // Async
+						IsAsync:       true,
 					},
 					{
 						Type:          ProviderTypeFunction,
 						Provides:      [][]types.Type{{serviceType}},
 						Requires:      []types.Type{configType},
 						IsReturnError: false,
-						IsAsync:       true, // Also async
+						IsAsync:       true,
 					},
 				},
 			},
 			expectError:             false,
 			expectContextInjection:  true,
-			expectedArgsCount:       1, // Only one context should be injected
+			expectedArgsCount:       1,
+			expectedContextPosition: 0,
+		},
+		{
+			// Diamond pattern: Config(sync) -> {DB(async), Cache(sync)} -> App(sync).
+			// DB and Cache can run in parallel, so a goroutine IS emitted and ctx MUST
+			// be injected. This is the canonical regression case for the POOL_LOOP bug.
+			name: "diamond pattern with async sibling - context injected",
+			build: func() *BuildDirective {
+				dbType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "DB", nil), types.NewStruct(nil, nil), nil))
+				appType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "App", nil), types.NewStruct(nil, nil), nil))
+				return &BuildDirective{
+					InjectorName: "InitializeApp",
+					Return: &Return{
+						Type: appType,
+					},
+					Providers: []*ProviderSpec{
+						// Config (sync, no deps)
+						{
+							Type:          ProviderTypeFunction,
+							Provides:      [][]types.Type{{configType}},
+							Requires:      []types.Type{},
+							IsReturnError: false,
+							IsAsync:       false,
+						},
+						// DB (async, depends on Config)
+						{
+							Type:          ProviderTypeFunction,
+							Provides:      [][]types.Type{{dbType}},
+							Requires:      []types.Type{configType},
+							IsReturnError: false,
+							IsAsync:       true,
+						},
+						// Cache (sync, depends on Config — sibling of DB)
+						{
+							Type:          ProviderTypeFunction,
+							Provides:      [][]types.Type{{serviceType}},
+							Requires:      []types.Type{configType},
+							IsReturnError: false,
+							IsAsync:       false,
+						},
+						// App (sync, depends on DB and Cache)
+						{
+							Type:          ProviderTypeFunction,
+							Provides:      [][]types.Type{{appType}},
+							Requires:      []types.Type{dbType, serviceType},
+							IsReturnError: false,
+							IsAsync:       false,
+						},
+					},
+				}
+			}(),
+			expectError:             false,
+			expectContextInjection:  true,
+			expectedArgsCount:       1,
 			expectedContextPosition: 0,
 		},
 	}
@@ -1489,7 +1683,9 @@ func TestGraph_Build_ContextInjection_NoDuplicates(t *testing.T) {
 			expectedArgTypes:  []string{"context.Context"},
 		},
 		{
-			name: "context.Context with other args - should reorder correctly",
+			// Async provider with context.Context as a direct dependency: injection
+			// reuses the existing arg and moves it to the first position.
+			name: "context.Context with other args - moved to first position",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1512,8 +1708,8 @@ func TestGraph_Build_ContextInjection_NoDuplicates(t *testing.T) {
 					},
 				},
 			},
-			expectedArgsCount: 2,                                  // Should have int and context.Context
-			expectedArgTypes:  []string{"context.Context", "int"}, // context should be first
+			expectedArgsCount: 2,                                  // Should have context.Context and int
+			expectedArgTypes:  []string{"context.Context", "int"}, // ctx moved to the front
 		},
 	}
 
@@ -1564,6 +1760,73 @@ func TestGraph_Build_ContextInjection_NoDuplicates(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCycleError_DependsOnDirection is a regression test for BUG-23.
+// It verifies that the cycle error message prints arrows in the "depends-on"
+// direction (A -> B means "A depends on B"), not the "provides-to" direction.
+func TestCycleError_DependsOnDirection(t *testing.T) {
+	t.Parallel()
+
+	// Build types: NodeA depends on NodeC, NodeB depends on NodeA, NodeC depends on NodeB.
+	// Dependency (depends-on) cycle: NodeA -> NodeC -> NodeB -> NodeA
+	nodeAType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "NodeA", nil), types.NewStruct(nil, nil), nil))
+	nodeBType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "NodeB", nil), types.NewStruct(nil, nil), nil))
+	nodeCType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "NodeC", nil), types.NewStruct(nil, nil), nil))
+
+	build := &BuildDirective{
+		InjectorName: "InitializeApp",
+		Return: &Return{
+			Type: nodeAType,
+		},
+		Providers: []*ProviderSpec{
+			{
+				Type:     ProviderTypeFunction,
+				Provides: [][]types.Type{{nodeAType}},
+				Requires: []types.Type{nodeCType}, // NodeA depends on NodeC
+			},
+			{
+				Type:     ProviderTypeFunction,
+				Provides: [][]types.Type{{nodeBType}},
+				Requires: []types.Type{nodeAType}, // NodeB depends on NodeA
+			},
+			{
+				Type:     ProviderTypeFunction,
+				Provides: [][]types.Type{{nodeCType}},
+				Requires: []types.Type{nodeBType}, // NodeC depends on NodeB
+			},
+		},
+	}
+
+	metaData := &MetaData{
+		Package: Package{Name: "test", Path: "test"},
+		Imports: make(map[string]*Import),
+	}
+
+	_, err := NewGraph(metaData, build, NewVarPool())
+	if err == nil {
+		t.Fatal("Expected cycle error but got none")
+	}
+
+	var cycleErr *CycleError
+	if !errors.As(err, &cycleErr) {
+		t.Fatalf("Expected *CycleError, got %T: %v", err, err)
+	}
+
+	msg := cycleErr.Error()
+
+	// The arrow -> must read as "depends on". Verify that each adjacent pair in
+	// the printed cycle is actually a depends-on relationship (not provides-to).
+	//
+	// In the depends-on direction NodeA depends on NodeC, so "*NodeA -> *NodeC"
+	// must appear somewhere in the cycle (with -> reading as depends-on).
+	// In the provides-to direction the erroneous order would be "*NodeC -> *NodeA".
+	if !strings.Contains(msg, "*NodeA -> *NodeC") {
+		t.Errorf("cycle error should show NodeA -> NodeC (depends-on direction), got: %s", msg)
+	}
+	if strings.Contains(msg, "*NodeC -> *NodeA") && !strings.Contains(msg, "*NodeA -> *NodeC") {
+		t.Errorf("cycle error is showing provides-to direction (NodeC -> NodeA) instead of depends-on (NodeA -> NodeC): %s", msg)
 	}
 }
 
@@ -1754,5 +2017,241 @@ func TestGraph_DetectCycles(t *testing.T) {
 				t.Error("Graph should be cycle-free but cycle detection found a cycle")
 			}
 		})
+	}
+}
+
+// TestGraph_ReturnNodeInProviderNodeMap is a regression test for BUG-28:
+// returnNode was never added to providerNodeMap, so when the return type
+// participates in a cycle a duplicate node was created instead of reusing
+// the existing returnNode. This produced a disconnected returnNode with no
+// outgoing edges and a stray duplicate node in the cycle path.
+func TestGraph_ReturnNodeInProviderNodeMap(t *testing.T) {
+	t.Parallel()
+
+	// Build a 3-node cycle: NodeA(NodeC), NodeB(NodeA), NodeC(NodeB), Inject[*NodeA]
+	// NodeA is the return type AND participates in the cycle.
+	nodeAType := types.NewNamed(types.NewTypeName(0, nil, "NodeA", nil), types.NewStruct(nil, nil), nil)
+	nodeBType := types.NewNamed(types.NewTypeName(0, nil, "NodeB", nil), types.NewStruct(nil, nil), nil)
+	nodeCType := types.NewNamed(types.NewTypeName(0, nil, "NodeC", nil), types.NewStruct(nil, nil), nil)
+
+	nodeAProvider := &ProviderSpec{
+		Type:     ProviderTypeFunction,
+		Provides: [][]types.Type{{nodeAType}},
+		Requires: []types.Type{nodeCType}, // NodeA requires NodeC
+	}
+
+	build := &BuildDirective{
+		InjectorName: "InitializeNodeA",
+		Return: &Return{
+			Type: nodeAType,
+		},
+		Providers: []*ProviderSpec{
+			nodeAProvider,
+			{
+				Type:     ProviderTypeFunction,
+				Provides: [][]types.Type{{nodeBType}},
+				Requires: []types.Type{nodeAType}, // NodeB requires NodeA (the return type)
+			},
+			{
+				Type:     ProviderTypeFunction,
+				Provides: [][]types.Type{{nodeCType}},
+				Requires: []types.Type{nodeBType}, // NodeC requires NodeB
+			},
+		},
+	}
+
+	metaData := &MetaData{
+		Package: Package{Name: "test", Path: "test"},
+		Imports: make(map[string]*Import),
+	}
+
+	_, err := NewGraph(metaData, build, NewVarPool())
+	if err == nil {
+		t.Fatal("Expected cycle error but got none")
+	}
+
+	var cycleErr *CycleError
+	if !errors.As(err, &cycleErr) {
+		t.Fatalf("Expected CycleError but got %T: %v", err, err)
+	}
+
+	// Before the fix, returnNode was missing from providerNodeMap, so when
+	// nodeB required NodeA the BFS created a duplicate node (nodeA2) instead
+	// of reusing returnNode. The cycle then ran through nodeA2 (the
+	// duplicate) while returnNode was left with no edges – a disconnected
+	// orphan node in the graph. Verify that every node in the cycle path
+	// is backed by a distinct ProviderSpec (no two nodes share the same
+	// ProviderSpec, which would indicate a duplicate).
+	seen := make(map[*ProviderSpec]bool)
+	for _, n := range cycleErr.Cycle {
+		if n.providerSpec == nil {
+			continue
+		}
+		if seen[n.providerSpec] {
+			t.Errorf("duplicate ProviderSpec found in cycle path (BUG-28: returnNode not added to providerNodeMap); cycle: %v", cycleErr.Cycle)
+			return
+		}
+		seen[n.providerSpec] = true
+	}
+
+	// Additionally verify that the cycle path starts with the return type's
+	// provider. Before the fix the first node was an intermediate provider
+	// (e.g. NodeC) rather than NodeA.
+	if len(cycleErr.Cycle) == 0 || cycleErr.Cycle[0].providerSpec != nodeAProvider {
+		t.Errorf("expected cycle to start with the return type provider (NodeA); got cycle: %v", cycleErr.Cycle)
+	}
+}
+
+// TestNewGraph_ValidatorProvider is a regression test for BUG-08: error-only validator
+// providers (Provides == nil, IsReturnError == true) were silently dropped from the graph
+// because the backward traversal from the return type never reaches them.
+func TestNewGraph_ValidatorProvider(t *testing.T) {
+	t.Parallel()
+
+	configType, serviceType, _ := createTestTypes()
+
+	// dbType is the type produced by NewDB and consumed by ValidateDB and NewService
+	dbType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "DB", nil), types.NewStruct(nil, nil), nil))
+
+	build := &BuildDirective{
+		InjectorName: "InitializeService",
+		Return: &Return{
+			Type: serviceType,
+		},
+		Providers: []*ProviderSpec{
+			{
+				// NewDB() *DB — no deps, produces *DB
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{dbType}},
+				Requires:      []types.Type{},
+				IsReturnError: false,
+			},
+			{
+				// ValidateDB(db *DB) error — error-only validator, no Provides
+				Type:          ProviderTypeFunction,
+				Provides:      nil,
+				Requires:      []types.Type{dbType},
+				IsReturnError: true,
+			},
+			{
+				// NewService(db *DB) *Service
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{serviceType}},
+				Requires:      []types.Type{dbType},
+				IsReturnError: false,
+			},
+		},
+	}
+
+	metaData := &MetaData{
+		Package: Package{
+			Name: "main",
+			Path: "main",
+		},
+		Imports: make(map[string]*Import),
+	}
+
+	graph, err := NewGraph(metaData, build, NewVarPool())
+	if err != nil {
+		t.Fatalf("unexpected error building graph: %v", err)
+	}
+
+	// The graph must include the validator node (3 provider nodes total,
+	// not 2 as the old code produced by silently dropping ValidateDB).
+	providerCount := 0
+	for _, n := range graph.nodes {
+		if n.providerSpec != nil {
+			providerCount++
+		}
+	}
+	if providerCount != 3 {
+		t.Errorf("expected 3 provider nodes (NewDB + ValidateDB + NewService), got %d", providerCount)
+	}
+
+	// The graph must propagate errors from the validator — isReturnError must be true.
+	if !graph.isReturnError() {
+		t.Error("expected isReturnError() == true because ValidateDB returns error")
+	}
+
+	// Building the injector should succeed and mark IsReturnError.
+	injector, err := graph.Build(metaData, NewVarPool())
+	if err != nil {
+		t.Fatalf("unexpected error building injector: %v", err)
+	}
+	if !injector.IsReturnError {
+		t.Error("injector.IsReturnError should be true because ValidateDB returns error")
+	}
+
+	// The generated statements must include a call for the validator.
+	providerCallCount := countProviderCalls(injector.Stmts)
+	if providerCallCount != 3 {
+		t.Errorf("expected 3 provider call statements, got %d", providerCallCount)
+	}
+
+	// Unused type — suppress lint error
+	_ = configType
+}
+
+// TestNewGraph_ValidatorProvider_OnlyValidator tests an error-only validator whose
+// dependency is not provided by any other provider (must be auto-added as an argument).
+func TestNewGraph_ValidatorProvider_OnlyValidator(t *testing.T) {
+	t.Parallel()
+
+	_, serviceType, _ := createTestTypes()
+
+	dbType := types.NewPointer(types.NewNamed(types.NewTypeName(0, nil, "DB", nil), types.NewStruct(nil, nil), nil))
+
+	build := &BuildDirective{
+		InjectorName: "InitializeService",
+		Return: &Return{
+			Type: serviceType,
+		},
+		Providers: []*ProviderSpec{
+			{
+				// ValidateDB(db *DB) error — validator; *DB has no provider, so it becomes an arg
+				Type:          ProviderTypeFunction,
+				Provides:      nil,
+				Requires:      []types.Type{dbType},
+				IsReturnError: true,
+			},
+			{
+				// NewService() *Service — no deps
+				Type:          ProviderTypeFunction,
+				Provides:      [][]types.Type{{serviceType}},
+				Requires:      []types.Type{},
+				IsReturnError: false,
+			},
+		},
+	}
+
+	metaData := &MetaData{
+		Package: Package{
+			Name: "main",
+			Path: "main",
+		},
+		Imports: make(map[string]*Import),
+	}
+
+	graph, err := NewGraph(metaData, build, NewVarPool())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !graph.isReturnError() {
+		t.Error("isReturnError() should be true")
+	}
+
+	injector, err := graph.Build(metaData, NewVarPool())
+	if err != nil {
+		t.Fatalf("unexpected error building injector: %v", err)
+	}
+
+	if !injector.IsReturnError {
+		t.Error("injector.IsReturnError should be true")
+	}
+
+	// *DB should have been auto-added as an injector argument
+	if len(injector.Args) == 0 {
+		t.Error("expected *DB to be auto-added as an argument")
 	}
 }

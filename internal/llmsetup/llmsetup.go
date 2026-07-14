@@ -22,11 +22,19 @@ type LLMSetupCmd struct {
 	OpenCode      OpenCodeCmd   `kong:"cmd,name='opencode',help='Install OpenCode skills'"`
 }
 
-// UsageCmd is a hidden default command that prints usage (FR-003).
+// UsageCmd is a hidden default command that prints the llm-setup parent usage (FR-003).
 type UsageCmd struct{}
 
-// Run prints usage information and exits with code 0.
+// Run prints the llm-setup usage with the full agent subcommand list.
+//
+// ctx.Selected() points to this hidden "usage" leaf node when called, so we
+// pop it from ctx.Path before calling PrintUsage so that ctx.Selected() returns
+// the llm-setup parent node and the correct usage — including all agent
+// subcommands — is displayed.
 func (c *UsageCmd) Run(ctx *kong.Context) error {
+	if len(ctx.Path) > 0 {
+		ctx.Path = ctx.Path[:len(ctx.Path)-1]
+	}
 	return ctx.PrintUsage(false)
 }
 
@@ -45,7 +53,6 @@ func (c *AgentCmd[T]) Run() error {
 
 	installedPath, err := Install(agent, c.Path, c.User)
 	if err != nil {
-		c.writeError(err)
 		return err
 	}
 
@@ -69,10 +76,6 @@ func (c *AgentCmd[T]) stderr() io.Writer {
 
 func (c *AgentCmd[T]) writeSuccess(path string) {
 	_, _ = fmt.Fprintf(c.stdout(), "Skills installed to: %s\n", path)
-}
-
-func (c *AgentCmd[T]) writeError(err error) {
-	_, _ = fmt.Fprintf(c.stderr(), "Error: %v\n", err)
 }
 
 // ClaudeCodeCmd is the subcommand for installing Claude Code Skills.

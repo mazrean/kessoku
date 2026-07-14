@@ -7,7 +7,6 @@ import (
 	"go/token"
 	"go/types"
 	"io"
-	"log/slog"
 	"slices"
 	"strings"
 )
@@ -22,13 +21,17 @@ func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Inj
 		Name: ast.NewIdent(metaData.Package.Name),
 	}
 
-	// Generate injector function declarations
+	// Generate injector function declarations.
+	// Each injector gets a fresh snapshot of the file-level VarPool so that
+	// local variable names (config, err, eg, ...) are allocated independently
+	// per injector function.  The file-level varPool is still passed for any
+	// import-alias allocations that may happen during code generation.
 	var funcDecls []ast.Decl
 	for _, injector := range injectors {
-		funcDecl, err := generateInjectorDecl(metaData, injector, varPool)
+		injectorVarPool := varPool.Snapshot()
+		funcDecl, err := generateInjectorDecl(metaData, injector, injectorVarPool, varPool)
 		if err != nil {
-			slog.Error("Failed to generate injector declaration", "error", err)
-			continue
+			return fmt.Errorf("generate injector declaration for %s: %w", injector.Name, err)
 		}
 
 		funcDecls = append(funcDecls, funcDecl)
@@ -66,9 +69,10 @@ func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Inj
 	return nil
 }
 
-// isContextType checks if a type is context.Context
+// isContextType checks if a type is context.Context, including user-defined
+// aliases such as `type Ctx = context.Context`.
 func isContextType(t types.Type) bool {
-	if named, ok := t.(*types.Named); ok {
+	if named, ok := types.Unalias(t).(*types.Named); ok {
 		if obj := named.Obj(); obj != nil && obj.Pkg() != nil {
 			return obj.Pkg().Path() == contextPkgPath && obj.Name() == contextTypeName
 		}
@@ -93,35 +97,66 @@ func hasChainStmts(injector *Injector) bool {
 	return false
 }
 
-// generateAsyncInitialization creates errgroup and variable declarations for async execution
-func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Stmt, error) {
+// ensureImport returns the local name of the import for pkgPath, creating
+// and registering it via varPool when missing, and marks it as used.
+func ensureImport(imports map[string]*Import, varPool *VarPool, pkgPath, pkgName string) string {
+	if imp, exists := imports[pkgPath]; exists {
+		imp.IsUsed = true
+		return imp.Name
+	}
+
+	name := varPool.GetName(pkgName)
+	imports[pkgPath] = &Import{
+		Name:          name,
+		IsDefaultName: pkgName == name,
+		IsUsed:        true,
+	}
+
+	return name
+}
+
+// generateAsyncInitialization creates errgroup and variable declarations for async execution.
+// It returns the generated statements, the name of the parent context variable (if any), and any error.
+// The parent context variable preserves the original ctx parameter before errgroup.WithContext shadows it,
+// so that ctx.Err() can be checked after eg.Wait() to detect cancellation that completed before any error.
+//
+// For error-returning injectors it establishes the exit protocol of the
+// generated code: a cancellable context wrapping the caller's context plus a
+// deferred `cancel(); eg.Wait()` pair, so that every early return unblocks
+// and joins all in-flight provider goroutines (no goroutine leaks, no
+// abandoned channels).
+//
+// Injectors without an error return cannot observe provider failures (none of
+// their providers return errors), so their generated code waits on completion
+// channels unconditionally instead of selecting on context cancellation.
+// This keeps them deadlock-free even when called with a cancelled context.
+//
+// localVarPool is used for local variable name allocation (eg, cancel, ctx, parentCtx);
+// fileVarPool is used for import-alias allocation (errgroup, context) that must be
+// unique across the entire output file.
+func generateAsyncInitialization(pkg string, injector *Injector, localVarPool *VarPool, fileVarPool *VarPool, imports map[string]*Import) ([]ast.Stmt, string, error) {
 	var stmts []ast.Stmt
 
-	// Add errgroup import and mark it as used
-	if imp, exists := imports[errgroupPkgPath]; exists {
-		imp.IsUsed = true // Mark as used since we're generating errgroup code
-	} else {
-		name := varPool.GetName(errgroupPkgName)
-		imports[errgroupPkgPath] = &Import{
-			Name:          name,
-			IsDefaultName: errgroupPkgName == name,
-			IsUsed:        true, // Mark as used since we're generating errgroup code
-		}
-	}
+	errgroupAlias := ensureImport(imports, fileVarPool, errgroupPkgPath, errgroupPkgName)
+	// Reserve the errgroup alias in the per-injector pool so that a provider
+	// returning a user type whose lowerCamel base name equals the alias (e.g.
+	// *Errgroup → "errgroup") does not claim that name for its local variable,
+	// which would shadow the package reference and cause a compile error.
+	localVarPool.Reserve(errgroupAlias)
 
 	// Find context parameter name if available
 	var ctxParamName string
 	for _, arg := range injector.Args {
 		if isContextType(arg.Type) {
-			ctxParamName = arg.Param.Name(varPool)
+			ctxParamName = arg.Param.Name(localVarPool)
 			break
 		}
 	}
 
 	// Generate variable declarations for async access
-	varSpecs, err := generateVariableSpecs(pkg, injector, varPool, imports)
+	varSpecs, err := generateVariableSpecs(pkg, injector, localVarPool, fileVarPool, imports)
 	if err != nil {
-		return nil, fmt.Errorf("generate variable declarations: %w", err)
+		return nil, "", fmt.Errorf("generate variable declarations: %w", err)
 	}
 
 	stmts = append(stmts, &ast.DeclStmt{
@@ -131,44 +166,135 @@ func generateAsyncInitialization(pkg string, injector *Injector, varPool *VarPoo
 		},
 	})
 
-	// Generate errgroup declaration
-	egDecl := generateErrGroupDeclaration(ctxParamName)
-	stmts = append(stmts, egDecl)
+	injector.asyncEgName = localVarPool.GetName("eg")
 
-	return stmts, nil
+	if !injector.IsReturnError {
+		// Unconditional channel waits: no cancellable context needed.
+		injector.asyncCtxName = ""
+		stmts = append(stmts, generateErrGroupDeclaration(injector.asyncEgName, "", errgroupAlias))
+
+		return stmts, "", nil
+	}
+
+	contextAlias := ensureImport(imports, fileVarPool, contextPkgPath, contextPkgName)
+	injector.asyncContextAlias = contextAlias
+	injector.asyncCancelName = localVarPool.GetName("cancel")
+
+	// ctx, cancel := context.WithCancel(ctx)
+	// (falls back to context.Background() when the injector has no context
+	// parameter; async injectors normally receive one automatically)
+	//
+	// Save the original ctx before context.WithCancel shadows the name so that
+	// we can check parentCtx.Err() after eg.Wait() (BUG-06: a goroutine may
+	// complete via the channel select arm at the exact instant the caller's
+	// deadline fires; eg.Wait() then returns nil while parentCtx is cancelled).
+	var parentCtxName string
+	var parentCtxExpr ast.Expr
+	if ctxParamName != "" {
+		injector.asyncCtxName = ctxParamName
+		parentCtxName = localVarPool.GetName("parentCtx")
+		// parentCtx := ctx
+		stmts = append(stmts, &ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(parentCtxName)},
+			Tok: token.DEFINE,
+			Rhs: []ast.Expr{ast.NewIdent(ctxParamName)},
+		})
+		parentCtxExpr = ast.NewIdent(ctxParamName)
+	} else {
+		injector.asyncCtxName = localVarPool.GetName("ctx")
+		parentCtxExpr = &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent(contextAlias),
+				Sel: ast.NewIdent("Background"),
+			},
+		}
+	}
+
+	stmts = append(stmts, &ast.AssignStmt{
+		Lhs: []ast.Expr{
+			ast.NewIdent(injector.asyncCtxName),
+			ast.NewIdent(injector.asyncCancelName),
+		},
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{
+			&ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   ast.NewIdent(contextAlias),
+					Sel: ast.NewIdent("WithCancel"),
+				},
+				Args: []ast.Expr{parentCtxExpr},
+			},
+		},
+	})
+
+	stmts = append(stmts, generateErrGroupDeclaration(injector.asyncEgName, injector.asyncCtxName, errgroupAlias))
+
+	// defer func() { cancel(); _ = eg.Wait() }()
+	// Guarantees that any return path unblocks and joins provider goroutines.
+	stmts = append(stmts, &ast.DeferStmt{
+		Call: &ast.CallExpr{
+			Fun: &ast.FuncLit{
+				Type: &ast.FuncType{Params: &ast.FieldList{}},
+				Body: &ast.BlockStmt{
+					List: []ast.Stmt{
+						&ast.ExprStmt{
+							X: &ast.CallExpr{
+								Fun: ast.NewIdent(injector.asyncCancelName),
+							},
+						},
+						&ast.AssignStmt{
+							Lhs: []ast.Expr{ast.NewIdent("_")},
+							Tok: token.ASSIGN,
+							Rhs: []ast.Expr{
+								&ast.CallExpr{
+									Fun: &ast.SelectorExpr{
+										X:   ast.NewIdent(injector.asyncEgName),
+										Sel: ast.NewIdent("Wait"),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	return stmts, parentCtxName, nil
 }
 
-// generateErrGroupDeclaration creates the errgroup variable declaration
-// ctxParamName is the name of the context parameter (empty string if no context)
-func generateErrGroupDeclaration(ctxParamName string) *ast.AssignStmt {
-	if ctxParamName != "" {
+// generateErrGroupDeclaration creates the errgroup variable declaration.
+// ctxName is the name of the context variable to derive from (empty string
+// when the errgroup should not be bound to a context).
+func generateErrGroupDeclaration(egName, ctxName, errgroupAlias string) *ast.AssignStmt {
+	if ctxName != "" {
 		return &ast.AssignStmt{
 			Lhs: []ast.Expr{
-				ast.NewIdent("eg"),
-				ast.NewIdent("ctx"),
+				ast.NewIdent(egName),
+				ast.NewIdent(ctxName),
 			},
 			Tok: token.DEFINE,
 			Rhs: []ast.Expr{
 				&ast.CallExpr{
 					Fun: &ast.SelectorExpr{
-						X:   ast.NewIdent("errgroup"),
+						X:   ast.NewIdent(errgroupAlias),
 						Sel: ast.NewIdent("WithContext"),
 					},
-					Args: []ast.Expr{ast.NewIdent(ctxParamName)},
+					Args: []ast.Expr{ast.NewIdent(ctxName)},
 				},
 			},
 		}
 	}
 
 	return &ast.AssignStmt{
-		Lhs: []ast.Expr{ast.NewIdent("eg")},
+		Lhs: []ast.Expr{ast.NewIdent(egName)},
 		Tok: token.DEFINE,
 		Rhs: []ast.Expr{
 			&ast.UnaryExpr{
 				Op: token.AND,
 				X: &ast.CompositeLit{
 					Type: &ast.SelectorExpr{
-						X:   ast.NewIdent("errgroup"),
+						X:   ast.NewIdent(errgroupAlias),
 						Sel: ast.NewIdent("Group"),
 					},
 				},
@@ -177,12 +303,14 @@ func generateErrGroupDeclaration(ctxParamName string) *ast.AssignStmt {
 	}
 }
 
-// generateVariableSpecs creates variable declarations for async access
-func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imports map[string]*Import) ([]ast.Spec, error) {
+// generateVariableSpecs creates variable declarations for async access.
+// localVarPool is used for local variable name allocation; fileVarPool is used
+// for import-alias allocation in createASTTypeExpr.
+func generateVariableSpecs(pkg string, injector *Injector, localVarPool *VarPool, fileVarPool *VarPool, imports map[string]*Import) ([]ast.Spec, error) {
 	var specs []ast.Spec
 
 	for _, param := range injector.Vars {
-		paramName := param.Name(varPool)
+		paramName := param.Name(localVarPool)
 		if paramName == "_" {
 			continue
 		}
@@ -192,7 +320,7 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imp
 			imp.IsUsed = true
 		}
 
-		typeExpr, err := createASTTypeExpr(pkg, param.Type(), varPool, imports)
+		typeExpr, err := createASTTypeExpr(pkg, param.Type(), fileVarPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("create AST type expression for %s: %w", paramName, err)
 		}
@@ -207,7 +335,7 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imp
 		}
 
 		specs = append(specs, &ast.ValueSpec{
-			Names: []*ast.Ident{ast.NewIdent(param.ChannelName(varPool))},
+			Names: []*ast.Ident{ast.NewIdent(param.ChannelName(localVarPool))},
 			Values: []ast.Expr{
 				&ast.CallExpr{
 					Fun: ast.NewIdent("make"),
@@ -225,12 +353,15 @@ func generateVariableSpecs(pkg string, injector *Injector, varPool *VarPool, imp
 	return specs, nil
 }
 
-// generateAsyncWaitStatements creates errgroup wait statements
-func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
-	if injector.IsReturnError {
+// generateAsyncWaitStatements creates errgroup wait statements.
+// parentCtxName is the variable holding the original context before errgroup.WithContext shadowed it;
+// if non-empty and the injector returns an error, a context.Cause(parentCtx) guard is emitted after
+// eg.Wait() to catch cancellations that raced past the goroutine channel-selects.
+func generateAsyncWaitStatements(injector *Injector, parentCtxName string, returnErrStmts func(ast.Expr) []ast.Stmt) []ast.Stmt {
+	if injector.IsReturnError && returnErrStmts != nil {
 		errIdent := ast.NewIdent("err")
 
-		return []ast.Stmt{
+		stmts := []ast.Stmt{
 			&ast.IfStmt{
 				Init: &ast.AssignStmt{
 					Lhs: []ast.Expr{errIdent},
@@ -238,7 +369,7 @@ func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
 					Rhs: []ast.Expr{
 						&ast.CallExpr{
 							Fun: &ast.SelectorExpr{
-								X:   ast.NewIdent("eg"),
+								X:   ast.NewIdent(injector.egName()),
 								Sel: ast.NewIdent("Wait"),
 							},
 						},
@@ -250,17 +381,49 @@ func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
 					Y:  ast.NewIdent("nil"),
 				},
 				Body: &ast.BlockStmt{
-					List: []ast.Stmt{
-						&ast.ReturnStmt{
-							Results: []ast.Expr{
-								ast.NewIdent("nil"),
-								errIdent,
-							},
-						},
-					},
+					List: returnErrStmts(errIdent),
 				},
 			},
 		}
+
+		// Guard against the race where goroutines completed via the channel case of a select
+		// just as the caller's context deadline expired.  eg.Wait() returns nil in this case
+		// but the parent context is already cancelled, so we must surface the cancellation error.
+		// Use context.Cause(parentCtx) rather than parentCtx.Err() so that a cause set via
+		// context.WithCancelCause is preserved instead of being replaced by the generic
+		// context.Canceled sentinel.
+		if parentCtxName != "" {
+			contextAlias := injector.asyncContextAlias
+			if contextAlias == "" {
+				contextAlias = contextPkgName
+			}
+			ctxErrIdent := ast.NewIdent("err")
+			stmts = append(stmts, &ast.IfStmt{
+				Init: &ast.AssignStmt{
+					Lhs: []ast.Expr{ctxErrIdent},
+					Tok: token.DEFINE,
+					Rhs: []ast.Expr{
+						&ast.CallExpr{
+							Fun: &ast.SelectorExpr{
+								X:   ast.NewIdent(contextAlias),
+								Sel: ast.NewIdent("Cause"),
+							},
+							Args: []ast.Expr{ast.NewIdent(parentCtxName)},
+						},
+					},
+				},
+				Cond: &ast.BinaryExpr{
+					X:  ctxErrIdent,
+					Op: token.NEQ,
+					Y:  ast.NewIdent("nil"),
+				},
+				Body: &ast.BlockStmt{
+					List: returnErrStmts(ctxErrIdent),
+				},
+			})
+		}
+
+		return stmts
 	}
 
 	return []ast.Stmt{
@@ -270,7 +433,7 @@ func generateAsyncWaitStatements(injector *Injector) []ast.Stmt {
 			Rhs: []ast.Expr{
 				&ast.CallExpr{
 					Fun: &ast.SelectorExpr{
-						X:   ast.NewIdent("eg"),
+						X:   ast.NewIdent(injector.egName()),
 						Sel: ast.NewIdent("Wait"),
 					},
 				},
@@ -294,7 +457,11 @@ func generateImportDecl(imporSpecs []*ast.ImportSpec) *ast.GenDecl {
 	}
 }
 
-func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPool) (ast.Decl, error) {
+// generateInjectorDecl generates a function declaration for an injector.
+// localVarPool is a per-injector pool used for local variable name allocation
+// (params, err, eg, channels, …).  fileVarPool is the file-scoped pool used
+// for any new import-alias allocation that may be needed during generation.
+func generateInjectorDecl(metaData *MetaData, injector *Injector, localVarPool *VarPool, fileVarPool *VarPool) (ast.Decl, error) {
 	paramFields := make([]*ast.Field, 0, len(injector.Args)+1)
 
 	// Add parameters
@@ -305,7 +472,7 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 				imp.IsUsed = true
 			}
 			paramFields = append(paramFields, &ast.Field{
-				Names: []*ast.Ident{ast.NewIdent(arg.Param.Name(varPool))},
+				Names: []*ast.Ident{ast.NewIdent(arg.Param.Name(localVarPool))},
 				Type:  arg.ASTTypeExpr,
 			})
 		}
@@ -367,7 +534,7 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 		Results: results,
 	}
 
-	stmts, err := generateStmts(varPool, metaData.Package.Path, injector, metaData.Imports)
+	stmts, err := generateStmts(localVarPool, fileVarPool, metaData.Package.Path, injector, metaData.Imports)
 	if err != nil {
 		return nil, fmt.Errorf("generate statements: %w", err)
 	}
@@ -383,20 +550,26 @@ func generateInjectorDecl(metaData *MetaData, injector *Injector, varPool *VarPo
 	return funcDecl, nil
 }
 
-// generateStmts generates statements with parallel execution support using errgroup
-func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map[string]*Import) ([]ast.Stmt, error) {
+// generateStmts generates statements with parallel execution support using errgroup.
+// localVarPool is the per-injector pool for local variable names; fileVarPool is
+// the file-scoped pool used for any import-alias allocation during generation.
+func generateStmts(localVarPool *VarPool, fileVarPool *VarPool, pkg string, injector *Injector, imports map[string]*Import) ([]ast.Stmt, error) {
 	var stmts []ast.Stmt
 
 	hasChains := hasChainStmts(injector)
 
+	// parentCtxName is the variable holding the original ctx before errgroup.WithContext shadows it.
+	var parentCtxName string
+
 	// Initialize async components if needed
 	if hasChains {
-		asyncStmts, err := generateAsyncInitialization(pkg, injector, varPool, imports)
+		asyncStmts, pCtx, err := generateAsyncInitialization(pkg, injector, localVarPool, fileVarPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("generate async initialization: %w", err)
 		}
 
 		stmts = append(stmts, asyncStmts...)
+		parentCtxName = pCtx
 	}
 
 	var returnErrStmts func(ast.Expr) []ast.Stmt
@@ -434,20 +607,20 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map
 
 	// Process statements and collect completion channels
 	for _, stmt := range injector.Stmts {
-		newStmts, _ := stmt.Stmt(varPool, injector, returnErrStmts)
+		newStmts, _ := stmt.Stmt(localVarPool, injector, returnErrStmts, false)
 		stmts = append(stmts, newStmts...)
 	}
 
 	// Add async completion handling
 	if hasChains {
-		waitStmts := generateAsyncWaitStatements(injector)
+		waitStmts := generateAsyncWaitStatements(injector, parentCtxName, returnErrStmts)
 		stmts = append(stmts, waitStmts...)
 	}
 
 	// Add return statement
 	returnExprs := make([]ast.Expr, 0, maxInjectorReturnValues)
 	if injector.Return != nil && injector.Return.Param != nil {
-		returnExprs = append(returnExprs, ast.NewIdent(injector.Return.Param.Name(varPool)))
+		returnExprs = append(returnExprs, ast.NewIdent(injector.Return.Param.Name(localVarPool)))
 	}
 	if injector.IsReturnError {
 		returnExprs = append(returnExprs, ast.NewIdent("nil"))
@@ -461,13 +634,13 @@ func generateStmts(varPool *VarPool, pkg string, injector *Injector, imports map
 	return stmts, nil
 }
 
-func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) ([]ast.Stmt, []string) {
+func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt, inChain bool) ([]ast.Stmt, []string) {
 	var stmts []ast.Stmt
 
 	// Add channel synchronization for async scenarios
 	hasChains := hasChainStmts(injector)
 	if hasChains {
-		waitStmt := stmt.generateChannelWaitStatement(varPool, injector, returnErrStmts)
+		waitStmt := stmt.generateChannelWaitStatement(varPool, injector, returnErrStmts, inChain)
 		if waitStmt != nil {
 			stmts = append(stmts, waitStmt)
 		}
@@ -486,22 +659,36 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 		errIdent := ast.NewIdent(errIdentName)
 		lhs = append(lhs, errIdent)
 
+		// Use the provider's exact error return type for the var declaration.
+		// When a provider returns a concrete type (e.g. *MyError) rather than
+		// the error interface, declaring `var err error` would cause nil-interface
+		// false positives: a nil *MyError assigned to an error interface becomes
+		// non-nil. Using the concrete type avoids that pitfall.
+		errTypeExpr := stmt.Provider.ErrorTypeExpr
+		if errTypeExpr == nil {
+			// Fallback: should not happen in practice, but keep behaviour safe.
+			errTypeExpr = ast.NewIdent("error")
+		}
+
 		stmts = append(stmts, &ast.DeclStmt{
 			Decl: &ast.GenDecl{
 				Tok: token.VAR,
 				Specs: []ast.Spec{
 					&ast.ValueSpec{
 						Names: []*ast.Ident{errIdent},
-						Type:  ast.NewIdent("error"),
+						Type:  errTypeExpr,
 					},
 				},
 			},
 		})
 
-		errorHandleStmt = stmt.buildErrorHandlingStatement(errIdent, returnErrStmts)
+		errorHandleStmt = stmt.buildErrorHandlingStatement(errIdent, injector, returnErrStmts)
 	}
 
-	assignStmt := stmt.buildAssignmentStatement(lhs, rhs, hasChains)
+	// When Returns is empty and IsReturnError is true, the only LHS variable is the
+	// pre-declared "err". Use plain assignment (=) instead of short var decl (:=).
+	onlyErrOnLhs := stmt.Provider.IsReturnError && len(stmt.Returns) == 0
+	assignStmt := stmt.buildAssignmentStatement(lhs, rhs, hasChains || onlyErrOnLhs)
 	stmts = append(stmts, assignStmt)
 
 	if errorHandleStmt != nil {
@@ -523,19 +710,10 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 	return stmts, nil
 }
 
-func (stmt *InjectorProviderCallStmt) channelsWait(channels []ast.Expr, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
-	// Check if context is available
-	hasCtx := false
-	for _, arg := range injector.Args {
-		if isContextType(arg.Type) {
-			hasCtx = true
-			break
-		}
-	}
-
+func (stmt *InjectorProviderCallStmt) channelsWait(channels []ast.Expr, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt, inChain bool) ast.Stmt {
 	if len(channels) == 1 {
 		// Single channel case
-		return stmt.buildWaitStatement(hasCtx, channels[0], returnErrStmts)
+		return stmt.buildWaitStatement(injector, channels[0], returnErrStmts, inChain)
 	}
 
 	return &ast.RangeStmt{
@@ -553,14 +731,31 @@ func (stmt *InjectorProviderCallStmt) channelsWait(channels []ast.Expr, injector
 		},
 		Body: &ast.BlockStmt{
 			List: []ast.Stmt{
-				stmt.buildWaitStatement(hasCtx, ast.NewIdent("ch"), returnErrStmts),
+				stmt.buildWaitStatement(injector, ast.NewIdent("ch"), returnErrStmts, inChain),
 			},
 		},
 	}
 }
 
-func (stmt *InjectorProviderCallStmt) buildWaitStatement(hasCtx bool, channel ast.Expr, returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
-	if !hasCtx || returnErrStmts == nil {
+// buildWaitStatement emits the wait for a dependency's completion channel.
+//
+// When the injector has no cancellable context (non-error-returning builds)
+// the wait is an unconditional receive: none of the providers can fail, so
+// every channel is guaranteed to be closed and selecting on context
+// cancellation would only introduce paths that leave waiters stuck or return
+// silent zero values.
+//
+// Inside errgroup goroutines the ctx.Done() branch returns ctx.Err() into the
+// errgroup. On the main goroutine it consults eg.Wait() first so the actual
+// provider failure is returned to the caller instead of a derived
+// context.Canceled.
+func (stmt *InjectorProviderCallStmt) buildWaitStatement(injector *Injector, channel ast.Expr, returnErrStmts func(ast.Expr) []ast.Stmt, inChain bool) ast.Stmt {
+	ctxName := injector.asyncCtxName
+	contextAlias := injector.asyncContextAlias
+	if contextAlias == "" {
+		contextAlias = contextPkgName
+	}
+	if ctxName == "" || returnErrStmts == nil {
 		return &ast.ExprStmt{
 			X: &ast.UnaryExpr{
 				Op: token.ARROW,
@@ -587,7 +782,7 @@ func (stmt *InjectorProviderCallStmt) buildWaitStatement(hasCtx bool, channel as
 							Op: token.ARROW,
 							X: &ast.CallExpr{
 								Fun: &ast.SelectorExpr{
-									X:   ast.NewIdent("ctx"),
+									X:   ast.NewIdent(ctxName),
 									Sel: ast.NewIdent("Done"),
 								},
 							},
@@ -595,9 +790,10 @@ func (stmt *InjectorProviderCallStmt) buildWaitStatement(hasCtx bool, channel as
 					},
 					Body: returnErrStmts(&ast.CallExpr{
 						Fun: &ast.SelectorExpr{
-							X:   ast.NewIdent("ctx"),
-							Sel: ast.NewIdent("Err"),
+							X:   ast.NewIdent(contextAlias),
+							Sel: ast.NewIdent("Cause"),
 						},
+						Args: []ast.Expr{ast.NewIdent(ctxName)},
 					}),
 				},
 			},
@@ -659,13 +855,21 @@ func chainReturnErrStmts(errExpr ast.Expr) []ast.Stmt {
 	}
 }
 
-func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ func(ast.Expr) []ast.Stmt) ([]ast.Stmt, []string) {
+func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ func(ast.Expr) []ast.Stmt, _ bool) ([]ast.Stmt, []string) {
 	var imports []string
 	var stmts []ast.Stmt
 
+	// Providers of non-error-returning injectors cannot fail, so their
+	// goroutines wait on dependency channels unconditionally (nil
+	// returnErrStmts) instead of racing against context cancellation.
+	chainErrStmts := chainReturnErrStmts
+	if !injector.IsReturnError {
+		chainErrStmts = nil
+	}
+
 	// Generate statements for this chain
 	for _, chainStmt := range stmt.Statements {
-		chainStmts, chainImports := chainStmt.Stmt(varPool, injector, chainReturnErrStmts)
+		chainStmts, chainImports := chainStmt.Stmt(varPool, injector, chainErrStmts, true)
 		stmts = append(stmts, chainStmts...)
 		imports = append(imports, chainImports...)
 	}
@@ -679,7 +883,7 @@ func (stmt *InjectorChainStmt) Stmt(varPool *VarPool, injector *Injector, _ func
 		&ast.ExprStmt{
 			X: &ast.CallExpr{
 				Fun: &ast.SelectorExpr{
-					X:   ast.NewIdent("eg"),
+					X:   ast.NewIdent(injector.egName()),
 					Sel: ast.NewIdent("Go"),
 				},
 				Args: []ast.Expr{
@@ -735,17 +939,26 @@ func (stmt *InjectorProviderCallStmt) buildArguments(varPool *VarPool) []ast.Exp
 
 // buildProviderCall builds the provider function call expression
 func (stmt *InjectorProviderCallStmt) buildProviderCall(args []ast.Expr) []ast.Expr {
-	return []ast.Expr{
-		&ast.CallExpr{
-			Fun: &ast.CallExpr{
-				Fun: &ast.SelectorExpr{
-					X:   stmt.Provider.ASTExpr,
-					Sel: ast.NewIdent("Fn"),
-				},
+	callExpr := &ast.CallExpr{
+		Fun: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   stmt.Provider.ASTExpr,
+				Sel: ast.NewIdent("Fn"),
 			},
-			Args: args,
 		},
+		Args: args,
 	}
+
+	// Variadic providers receive the last dependency as a slice that must be
+	// expanded at the call site: fn(a, opts...).
+	// When the variadic last parameter was matched via an element-type provider
+	// (e.g. NewOption() Option satisfying ...Option), the value is already a
+	// plain element — no spread is needed.
+	if stmt.Provider.IsVariadic && !stmt.VariadicElemMatch && len(args) > 0 {
+		callExpr.Ellipsis = token.Pos(1)
+	}
+
+	return []ast.Expr{callExpr}
 }
 
 // buildAssignmentStatement builds the assignment statement
@@ -762,11 +975,65 @@ func (stmt *InjectorProviderCallStmt) buildAssignmentStatement(lhs, rhs []ast.Ex
 	}
 }
 
-// buildErrorHandlingStatement builds error handling statements
-func (stmt *InjectorProviderCallStmt) buildErrorHandlingStatement(errIdent *ast.Ident, returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
+// buildErrorHandlingStatement builds error handling statements.
+//
+// When the injector uses an errgroup context (asyncCtxName != ""), a context
+// cancellation triggered by a goroutine failure must surface the root-cause
+// error rather than context.Canceled. We emit:
+//
+//	if err != nil {
+//	    if cause := context.Cause(ctx); cause != nil {
+//	        return zero, cause
+//	    }
+//	    return zero, err
+//	}
+//
+// Without the context.Cause check the caller would observe context.Canceled
+// while the real error from the errgroup goroutine is silently dropped.
+func (stmt *InjectorProviderCallStmt) buildErrorHandlingStatement(errIdent *ast.Ident, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
 	if returnErrStmts == nil {
 		return &ast.EmptyStmt{}
 	}
+
+	var bodyStmts []ast.Stmt
+
+	// When an errgroup cancellable context exists, check context.Cause(ctx)
+	// first so that the root-cause error from a goroutine failure is returned
+	// instead of the derivative context.Canceled that the provider observed.
+	ctxName := injector.asyncCtxName
+	contextAlias := injector.asyncContextAlias
+	if ctxName != "" {
+		if contextAlias == "" {
+			contextAlias = contextPkgName
+		}
+
+		causeIdent := ast.NewIdent("cause")
+		causeCall := &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent(contextAlias),
+				Sel: ast.NewIdent("Cause"),
+			},
+			Args: []ast.Expr{ast.NewIdent(ctxName)},
+		}
+
+		bodyStmts = append(bodyStmts, &ast.IfStmt{
+			Init: &ast.AssignStmt{
+				Lhs: []ast.Expr{causeIdent},
+				Tok: token.DEFINE,
+				Rhs: []ast.Expr{causeCall},
+			},
+			Cond: &ast.BinaryExpr{
+				X:  causeIdent,
+				Op: token.NEQ,
+				Y:  ast.NewIdent("nil"),
+			},
+			Body: &ast.BlockStmt{
+				List: returnErrStmts(causeIdent),
+			},
+		})
+	}
+
+	bodyStmts = append(bodyStmts, returnErrStmts(errIdent)...)
 
 	return &ast.IfStmt{
 		Cond: &ast.BinaryExpr{
@@ -775,13 +1042,13 @@ func (stmt *InjectorProviderCallStmt) buildErrorHandlingStatement(errIdent *ast.
 			Y:  ast.NewIdent("nil"),
 		},
 		Body: &ast.BlockStmt{
-			List: returnErrStmts(errIdent),
+			List: bodyStmts,
 		},
 	}
 }
 
 // generateChannelWaitStatement generates channel wait statements for async coordination
-func (stmt *InjectorProviderCallStmt) generateChannelWaitStatement(varPool *VarPool, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
+func (stmt *InjectorProviderCallStmt) generateChannelWaitStatement(varPool *VarPool, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt, inChain bool) ast.Stmt {
 	var channels []ast.Expr
 
 	// Collect channels from dependencies
@@ -795,7 +1062,7 @@ func (stmt *InjectorProviderCallStmt) generateChannelWaitStatement(varPool *VarP
 		return nil
 	}
 
-	return stmt.channelsWait(channels, injector, returnErrStmts)
+	return stmt.channelsWait(channels, injector, returnErrStmts, inChain)
 }
 
 // generateChannelCloseStatement generates channel close statements for async coordination

@@ -19,7 +19,13 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		notificationServiceCh = make(chan struct{})
 		app                   *App
 	)
+	parentCtx := ctx
+	ctx, cancel := context.WithCancel(ctx)
 	eg, ctx := errgroup.WithContext(ctx)
+	defer func() {
+		cancel()
+		_ = eg.Wait()
+	}()
 	eg.Go(func() error {
 		cacheService = kessoku.Async(kessoku.Provide(NewCacheService)).Fn()()
 		close(cacheServiceCh)
@@ -34,6 +40,10 @@ func InitializeApp(ctx context.Context) (*App, error) {
 	var err error
 	databaseService, err = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
 	if err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			var zero *App
+			return zero, cause
+		}
 		var zero *App
 		return zero, err
 	}
@@ -41,18 +51,23 @@ func InitializeApp(ctx context.Context) (*App, error) {
 	case <-cacheServiceCh:
 	case <-ctx.Done():
 		var zero *App
-		return zero, ctx.Err()
+		return zero, context.Cause(ctx)
 	}
 	userService = kessoku.Provide(NewUserService).Fn()(databaseService, cacheService)
 	select {
 	case <-notificationServiceCh:
 	case <-ctx.Done():
 		var zero *App
-		return zero, ctx.Err()
+		return zero, context.Cause(ctx)
 	}
 	app = kessoku.Provide(NewApp).Fn()(userService, notificationService)
 	if err := eg.Wait(); err != nil {
-		return nil, err
+		var zero *App
+		return zero, err
+	}
+	if err := context.Cause(parentCtx); err != nil {
+		var zero *App
+		return zero, err
 	}
 	return app, nil
 }

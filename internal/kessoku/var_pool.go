@@ -3,6 +3,7 @@ package kessoku
 import (
 	"fmt"
 	"go/types"
+	"maps"
 
 	"github.com/mazrean/kessoku/internal/pkg/strings"
 )
@@ -25,6 +26,16 @@ func NewVarPool() *VarPool {
 	}
 }
 
+// Snapshot returns a new VarPool that is a copy of the current pool.
+// The snapshot starts with all names already registered in the parent pool,
+// so it can safely allocate fresh local variable names without conflicting
+// with import aliases or package-level identifiers from the parent.
+func (p *VarPool) Snapshot() *VarPool {
+	vars := make(map[string]int, len(p.vars))
+	maps.Copy(vars, p.vars)
+	return &VarPool{vars: vars}
+}
+
 func (p *VarPool) GetName(baseName string) string {
 	count := p.vars[baseName]
 	p.vars[baseName] = count + 1
@@ -33,7 +44,23 @@ func (p *VarPool) GetName(baseName string) string {
 		return baseName
 	}
 
-	return fmt.Sprintf("%s%d", baseName, count-1)
+	for n := count - 1; ; n++ {
+		candidate := fmt.Sprintf("%s%d", baseName, n)
+		if p.vars[candidate] == 0 {
+			p.vars[candidate] = 1
+			return candidate
+		}
+	}
+}
+
+// Reserve marks name as taken in this pool without allocating it as a new
+// local variable name.  If name is already reserved the call is a no-op.
+// This is used to prevent user-type variable names from shadowing import
+// aliases that are allocated later in a different (file-scoped) pool.
+func (p *VarPool) Reserve(name string) {
+	if p.vars[name] == 0 {
+		p.vars[name] = 1
+	}
 }
 
 func (p *VarPool) Get(t types.Type) string {
@@ -45,17 +72,7 @@ func (p *VarPool) Get(t types.Type) string {
 func (p *VarPool) GetChannel(t types.Type) string {
 	name := p.getBaseName(t) + "Ch"
 
-	count, ok := p.vars[name]
-	if !ok {
-		count = 0
-	}
-	p.vars[name] = count + 1
-
-	if count == 0 {
-		return name
-	}
-
-	return fmt.Sprintf("%s%d", name, count-1)
+	return p.GetName(name)
 }
 
 // getTypeBaseName extracts a base name from a type for argument naming
@@ -98,6 +115,8 @@ func (p *VarPool) getBaseName(t types.Type) string {
 		default:
 			baseName = strings.ToLowerCamel(t.Name())
 		}
+	case *types.Signature:
+		baseName = "fn"
 	default:
 		baseName = "val"
 	}

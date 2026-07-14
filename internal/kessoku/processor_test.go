@@ -1,6 +1,8 @@
 package kessoku
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +34,148 @@ func TestNewProcessor(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWriteAtomically verifies the atomic write semantics required by BUG-09.
+// With the old os.Create approach the destination file was truncated before
+// generation ran, so a failure left a 0-byte file behind.  With writeAtomically
+// the destination is only replaced on success and the original is preserved on
+// failure.
+func TestWriteAtomically(t *testing.T) {
+	t.Parallel()
+
+	const sentinel = "ORIGINAL_CONTENT"
+
+	t.Run("success: creates destination file with written content", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "out.go")
+
+		err := writeAtomically(dst, func(f *os.File) error {
+			_, werr := fmt.Fprint(f, "hello")
+			return werr
+		})
+		if err != nil {
+			t.Fatalf("writeAtomically returned unexpected error: %v", err)
+		}
+
+		got, readErr := os.ReadFile(dst)
+		if readErr != nil {
+			t.Fatalf("failed to read destination file: %v", readErr)
+		}
+		if string(got) != "hello" {
+			t.Errorf("destination content = %q; want %q", string(got), "hello")
+		}
+	})
+
+	t.Run("failure: preserves pre-existing destination file", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "out.go")
+
+		// Pre-create the destination with known content (simulates a valid
+		// band file that was previously generated).
+		if err := os.WriteFile(dst, []byte(sentinel), 0o644); err != nil {
+			t.Fatalf("failed to create pre-existing file: %v", err)
+		}
+
+		writeErr := errors.New("generate failed")
+		err := writeAtomically(dst, func(f *os.File) error {
+			// Write some bytes then fail, mimicking a partial Generate call.
+			_, _ = fmt.Fprint(f, "partial")
+			return writeErr
+		})
+		if err == nil {
+			t.Fatal("writeAtomically should have returned an error")
+		}
+
+		// The original file must be untouched.
+		got, readErr := os.ReadFile(dst)
+		if readErr != nil {
+			t.Fatalf("failed to read destination file after failure: %v", readErr)
+		}
+		if string(got) != sentinel {
+			t.Errorf("destination content after failure = %q; want original %q", string(got), sentinel)
+		}
+	})
+
+	t.Run("success: new file gets 0644 permissions, not CreateTemp's 0600", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "out.go")
+
+		err := writeAtomically(dst, func(f *os.File) error {
+			_, werr := fmt.Fprint(f, "hello")
+			return werr
+		})
+		if err != nil {
+			t.Fatalf("writeAtomically returned unexpected error: %v", err)
+		}
+
+		fi, statErr := os.Stat(dst)
+		if statErr != nil {
+			t.Fatalf("failed to stat destination file: %v", statErr)
+		}
+		if fi.Mode().Perm() != 0o644 {
+			t.Errorf("destination permissions = %v; want %v", fi.Mode().Perm(), os.FileMode(0o644))
+		}
+	})
+
+	t.Run("success: preserves pre-existing destination permissions", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "out.go")
+
+		if err := os.WriteFile(dst, []byte(sentinel), 0o664); err != nil {
+			t.Fatalf("failed to create pre-existing file: %v", err)
+		}
+		// WriteFile's mode is subject to umask; force the exact mode.
+		if err := os.Chmod(dst, 0o664); err != nil {
+			t.Fatalf("failed to chmod pre-existing file: %v", err)
+		}
+
+		err := writeAtomically(dst, func(f *os.File) error {
+			_, werr := fmt.Fprint(f, "hello")
+			return werr
+		})
+		if err != nil {
+			t.Fatalf("writeAtomically returned unexpected error: %v", err)
+		}
+
+		fi, statErr := os.Stat(dst)
+		if statErr != nil {
+			t.Fatalf("failed to stat destination file: %v", statErr)
+		}
+		if fi.Mode().Perm() != 0o664 {
+			t.Errorf("destination permissions = %v; want preserved %v", fi.Mode().Perm(), os.FileMode(0o664))
+		}
+	})
+
+	t.Run("failure: no temp files left behind", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "out.go")
+
+		_ = writeAtomically(dst, func(_ *os.File) error {
+			return errors.New("generate failed")
+		})
+
+		// After a failure the directory must contain no .kessoku-tmp-* files.
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("failed to read temp dir: %v", err)
+		}
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".kessoku-tmp-") {
+				t.Errorf("temp file not cleaned up: %s", e.Name())
+			}
+		}
+	})
 }
 
 func TestProcessFiles(t *testing.T) {
@@ -657,6 +801,45 @@ var _ = kessoku.Inject[*Database](
 			expectedGeneratedFiles: []string{"test_band.go"},
 			shouldError:            false,
 		},
+		{
+			name: "struct with multiple fields of same type returns clear error",
+			files: []fileContent{
+				{
+					name: "test.go",
+					content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Host     string
+	Username string
+}
+
+func NewConfig() *Config {
+	return &Config{Host: "localhost", Username: "admin"}
+}
+
+type DB struct {
+	host     string
+	username string
+}
+
+func NewDB(host, username string) *DB {
+	return &DB{host: host, username: username}
+}
+
+var _ = kessoku.Inject[*DB](
+	"Init",
+	kessoku.Provide(NewConfig),
+	kessoku.Struct[*Config](),
+	kessoku.Provide(NewDB),
+)
+`,
+				},
+			},
+			shouldError:   true,
+			errorContains: "same type",
+		},
 	}
 
 	for _, tt := range tests {
@@ -742,6 +925,230 @@ var _ = kessoku.Inject[*Database](
 	}
 }
 
+// TestDuplicateInjectorNamesAcrossFiles verifies that kessoku detects duplicate
+// injector names when the tool is invoked per-file (the go:generate $GOFILE
+// pattern), where each invocation creates a fresh Processor.  BUG-24.
+func TestDuplicateInjectorNamesAcrossFiles(t *testing.T) {
+	t.Parallel()
+
+	const sharedPkg = `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Value string
+}
+
+func NewConfig() *Config {
+	return &Config{Value: "test"}
+}
+
+type Service struct {
+	config *Config
+}
+
+func NewService(config *Config) *Service {
+	return &Service{config: config}
+}
+`
+
+	// file1.go and file2.go both declare an injector named "InitializeApp".
+	file1Content := sharedPkg + `
+var _ = kessoku.Inject[*Service](
+	"InitializeApp",
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewService),
+)
+`
+	file2Content := sharedPkg + `
+var _ = kessoku.Inject[*Service](
+	"InitializeApp",
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewService),
+)
+`
+
+	tempDir := t.TempDir()
+	file1 := filepath.Join(tempDir, "file1.go")
+	file2 := filepath.Join(tempDir, "file2.go")
+
+	if err := os.WriteFile(file1, []byte(file1Content), 0644); err != nil {
+		t.Fatalf("write file1: %v", err)
+	}
+	if err := os.WriteFile(file2, []byte(file2Content), 0644); err != nil {
+		t.Fatalf("write file2: %v", err)
+	}
+
+	// First invocation: process file1, should succeed.
+	proc1 := NewProcessor()
+	if err := proc1.ProcessFiles([]string{file1}); err != nil {
+		t.Fatalf("first ProcessFiles (file1) failed unexpectedly: %v", err)
+	}
+
+	// Verify file1_band.go was generated.
+	if _, err := os.Stat(filepath.Join(tempDir, "file1_band.go")); os.IsNotExist(err) {
+		t.Fatal("expected file1_band.go to be created")
+	}
+
+	// Second invocation: process file2 with a fresh Processor (simulating
+	// go:generate $GOFILE on the second file).  It must fail because
+	// file1_band.go already declares "InitializeApp".
+	proc2 := NewProcessor()
+	err := proc2.ProcessFiles([]string{file2})
+	if err == nil {
+		t.Fatal("expected ProcessFiles (file2) to fail with duplicate name error, but it succeeded")
+	}
+	if !containsString(err.Error(), "duplicate injector name") {
+		t.Errorf("expected error to mention duplicate injector name, got: %v", err)
+	}
+}
+
+// TestSourceFileNamedBandGoNoFalsePositive verifies that when the kessoku
+// source file itself ends in _band.go (e.g. inject_band.go), processing it
+// does not produce a false-positive "duplicate injector name" error.
+//
+// Regression test for the bug where checkDuplicateInjectorNames scanned
+// sibling *_band.go files but only excluded ownOutputFile from the scan.
+// When the source file itself matched the *_band.go suffix it was scanned,
+// and any function it declared with the same name as an injector was
+// incorrectly flagged as a duplicate.
+func TestSourceFileNamedBandGoNoFalsePositive(t *testing.T) {
+	t.Parallel()
+
+	// inject_band.go: the source file itself ends in _band.go.
+	// It contains both a helper function InitFoo and a kessoku.Inject call
+	// that will generate a function also named InitFoo.
+	srcContent := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Foo struct{}
+
+func NewFoo() *Foo { return &Foo{} }
+
+// InitFoo is a helper declared in the source file itself.
+func InitFoo() *Foo { return NewFoo() }
+
+var _ = kessoku.Inject[*Foo](
+	"InitFoo",
+	kessoku.Provide(NewFoo),
+)
+`
+
+	tempDir := t.TempDir()
+	// Source file is named inject_band.go — matches the *_band.go pattern.
+	srcFile := filepath.Join(tempDir, "inject_band.go")
+	if err := os.WriteFile(srcFile, []byte(srcContent), 0644); err != nil {
+		t.Fatalf("write inject_band.go: %v", err)
+	}
+
+	proc := NewProcessor()
+	// Must succeed — the source file is not a previously-generated output.
+	if err := proc.ProcessFiles([]string{srcFile}); err != nil {
+		t.Fatalf("ProcessFiles returned unexpected error: %v", err)
+	}
+
+	// The output file should be inject_band_band.go.
+	outFile := filepath.Join(tempDir, "inject_band_band.go")
+	if _, err := os.Stat(outFile); os.IsNotExist(err) {
+		t.Fatal("expected inject_band_band.go to be created")
+	}
+}
+
+// TestProcessFilesGraphValidationBeforeWrite verifies that a graph-level error
+// (e.g. struct with duplicate field types, which is caught by CreateInjector
+// rather than ParseFile) in a later file does not leave the earlier file's
+// *_band.go on disk.  This is the guarantee expressed by the "all files are
+// parsed and graph-validated before any output is written" comment.
+func TestProcessFilesGraphValidationBeforeWrite(t *testing.T) {
+	t.Parallel()
+
+	// file1.go: valid — should produce file1_band.go on success.
+	file1Content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct {
+	Value string
+}
+
+func NewConfig() *Config {
+	return &Config{Value: "test"}
+}
+
+type Service struct {
+	config *Config
+}
+
+func NewService(config *Config) *Service {
+	return &Service{config: config}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewService),
+)
+`
+
+	// file2.go: graph-level error — Struct[*Config2] has two fields of type
+	// string, which CreateInjector (not ParseFile) detects.
+	file2Content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config2 struct {
+	Host     string
+	Username string
+}
+
+func NewConfig2() *Config2 {
+	return &Config2{Host: "localhost", Username: "admin"}
+}
+
+type DB struct {
+	host     string
+	username string
+}
+
+func NewDB(host, username string) *DB {
+	return &DB{host: host, username: username}
+}
+
+var _ = kessoku.Inject[*DB](
+	"InitDB",
+	kessoku.Provide(NewConfig2),
+	kessoku.Struct[*Config2](),
+	kessoku.Provide(NewDB),
+)
+`
+
+	tempDir := t.TempDir()
+	file1 := filepath.Join(tempDir, "file1.go")
+	file2 := filepath.Join(tempDir, "file2.go")
+
+	if err := os.WriteFile(file1, []byte(file1Content), 0644); err != nil {
+		t.Fatalf("write file1: %v", err)
+	}
+	if err := os.WriteFile(file2, []byte(file2Content), 0644); err != nil {
+		t.Fatalf("write file2: %v", err)
+	}
+
+	proc := NewProcessor()
+	err := proc.ProcessFiles([]string{file1, file2})
+	if err == nil {
+		t.Fatal("expected ProcessFiles to fail due to graph error in file2")
+	}
+
+	// After the error, no *_band.go files must exist.  The guarantee is that
+	// graph validation for all files completes before writing any output.
+	file1Band := filepath.Join(tempDir, "file1_band.go")
+	if _, statErr := os.Stat(file1Band); statErr == nil {
+		t.Errorf("file1_band.go must not exist after ProcessFiles returned an error; " +
+			"graph validation of file2 must happen before file1 is written")
+	}
+}
+
 type fileContent struct {
 	content     string
 	shouldWrite *bool // If nil, defaults to true
@@ -756,6 +1163,7 @@ func TestProcessFile(t *testing.T) {
 		expectedFunctionName string
 		name                 string
 		errorContains        string
+		errorNotContains     string
 		expectedGenerated    bool
 		shouldError          bool
 	}{
@@ -817,6 +1225,7 @@ func invalid syntax here {
 			expectedGenerated: false,
 			shouldError:       true,
 			errorContains:     "parse file",
+			errorNotContains:  "parse file test.go: parse file",
 		},
 	}
 
@@ -840,6 +1249,9 @@ func invalid syntax here {
 				}
 				if tt.errorContains != "" && !containsString(err.Error(), tt.errorContains) {
 					t.Errorf("Expected error to contain %q, got %q", tt.errorContains, err.Error())
+				}
+				if tt.errorNotContains != "" && containsString(err.Error(), tt.errorNotContains) {
+					t.Errorf("Expected error to not contain %q, got %q", tt.errorNotContains, err.Error())
 				}
 				return
 			}

@@ -43,15 +43,39 @@ func (p *Parser) FindWireImport(file *ast.File) string {
 }
 
 // ExtractImports extracts all imports from a file as a map from package name/alias to import path.
-func (p *Parser) ExtractImports(file *ast.File) map[string]string {
+// pkgNameByPath is an optional map from import path to the actual package name (as declared in
+// the imported package's "package" clause). When non-nil it is used instead of lastPathElement
+// to derive the default key for un-aliased imports. This is necessary for major-version suffix
+// paths (e.g. "example.com/lib/v2" whose package name is "lib", not "v2") and for
+// gopkg.in-style paths (e.g. "gopkg.in/yaml.v3" whose package name is "yaml", not "yaml.v3").
+// It also returns the set of import paths that carry an explicit alias in the source — i.e. imports
+// written as `alias "path"`.  This distinction is used by TypeConverter.CollectExprImports to
+// decide whether the alias must always be emitted in the generated output.
+func (p *Parser) ExtractImports(file *ast.File, pkgNameByPath map[string]string) (map[string]string, map[string]bool) {
 	imports := make(map[string]string)
+	explicitAliasPaths := make(map[string]bool) // import path -> true when alias is explicit
 	for _, imp := range file.Imports {
 		path := strings.Trim(imp.Path.Value, "\"")
 		var name string
-		if imp.Name != nil {
+		switch {
+		case imp.Name != nil:
 			name = imp.Name.Name
-		} else {
-			// Use the last element of the path as the default package name
+			// Record that this path has an explicit alias in the source.
+			// We must emit the alias in generated code: Go resolves an unaliased import using
+			// the package's declared name, which may differ from lastPathElement(path) (e.g.
+			// `v2 "example.com/bar/v2"` where package declares `package bar`).
+			if name != "." && name != "_" {
+				explicitAliasPaths[path] = true
+			}
+		case pkgNameByPath != nil:
+			if actualName, ok := pkgNameByPath[path]; ok {
+				name = actualName
+			} else {
+				// Fall back to last path element when not in the provided map.
+				name = lastPathElement(path)
+			}
+		default:
+			// Use the last element of the path as the default package name.
 			name = lastPathElement(path)
 		}
 		// Skip dot imports and blank imports
@@ -59,7 +83,7 @@ func (p *Parser) ExtractImports(file *ast.File) map[string]string {
 			imports[name] = path
 		}
 	}
-	return imports
+	return imports, explicitAliasPaths
 }
 
 // ExtractPatterns extracts wire patterns from the file.
@@ -121,6 +145,14 @@ func (p *Parser) ExtractPatterns(file *ast.File, info *types.Info, wireAlias str
 					continue
 				}
 
+				// Handle panic(wire.Build(...)) — the alternate injector form
+				// documented in the wire User Guide.
+				if panicIdent, isPanic := call.Fun.(*ast.Ident); isPanic && panicIdent.Name == "panic" && len(call.Args) == 1 {
+					if inner, isCall := call.Args[0].(*ast.CallExpr); isCall {
+						call = inner
+					}
+				}
+
 				// Check if it's a wire.Build call
 				sel, ok := call.Fun.(*ast.SelectorExpr)
 				if !ok {
@@ -160,15 +192,33 @@ func (p *Parser) parseCallExpr(call *ast.CallExpr, info *types.Info, wireAlias s
 	case "NewSet":
 		return p.parseNewSet(call, info, wireAlias, filePath, varName), nil
 	case "Bind":
-		return p.parseBind(call, info, filePath), nil
+		// Guard against typed-nil interface pitfall: parseBind returns *WireBind,
+		// which when nil and stored in a WirePattern interface is non-nil.
+		// Check the concrete pointer before assigning to the interface.
+		if wb := p.parseBind(call, info, filePath, varName); wb != nil {
+			return wb, nil
+		}
+		return nil, nil
 	case "Value":
-		return p.parseValue(call, info, filePath), nil
+		if wv := p.parseValue(call, info, filePath); wv != nil {
+			return wv, nil
+		}
+		return nil, nil
 	case "InterfaceValue":
-		return p.parseInterfaceValue(call, info, filePath), nil
+		if wiv := p.parseInterfaceValue(call, info, filePath); wiv != nil {
+			return wiv, nil
+		}
+		return nil, nil
 	case "Struct":
-		return p.parseStruct(call, info, filePath), nil
+		if ws := p.parseStruct(call, info, filePath); ws != nil {
+			return ws, nil
+		}
+		return nil, nil
 	case "FieldsOf":
-		return p.parseFieldsOf(call, info, filePath), nil
+		if wf := p.parseFieldsOf(call, info, filePath); wf != nil {
+			return wf, nil
+		}
+		return nil, nil
 	case "Build":
 		// wire.Build is handled separately in ExtractPatterns for function declarations
 		return nil, nil
@@ -279,7 +329,7 @@ func extractStringFields(args []ast.Expr) []string {
 	return fields
 }
 
-func (p *Parser) parseBind(call *ast.CallExpr, info *types.Info, filePath string) *WireBind {
+func (p *Parser) parseBind(call *ast.CallExpr, info *types.Info, filePath, varName string) *WireBind {
 	if len(call.Args) != wireBindArgCount {
 		return nil
 	}
@@ -298,6 +348,7 @@ func (p *Parser) parseBind(call *ast.CallExpr, info *types.Info, filePath string
 		},
 		Interface:      ifaceType,
 		Implementation: implType,
+		VarName:        varName,
 	}
 }
 
@@ -354,9 +405,16 @@ func (p *Parser) parseStruct(call *ast.CallExpr, info *types.Info, filePath stri
 		return nil
 	}
 
+	// extractTypeFromNew always wraps the argument in one pointer layer:
+	//   new(T)  -> *T  (single pointer, value-type provision)
+	//   new(*T) -> **T (double pointer, pointer-type provision)
+	// So the correct check for "pointer provision" is whether the result is
+	// a double pointer (**T), mirroring the IsPtrToStruct logic in parseFieldsOf.
 	isPointer := false
-	if _, ok := structType.(*types.Pointer); ok {
-		isPointer = true
+	if ptr, ok := structType.(*types.Pointer); ok {
+		if _, ok := ptr.Elem().(*types.Pointer); ok {
+			isPointer = true
+		}
 	}
 
 	fields := extractStringFields(call.Args[1:])
@@ -386,6 +444,15 @@ func (p *Parser) parseFieldsOf(call *ast.CallExpr, info *types.Info, filePath st
 		return nil
 	}
 
+	// Detect new(*S) form: extractTypeFromNew returns **S, so StructType is **S.
+	// In that case wire provides both FieldType and *FieldType for each field.
+	isPtrToStruct := false
+	if ptr, ok := structType.(*types.Pointer); ok {
+		if _, ok := ptr.Elem().(*types.Pointer); ok {
+			isPtrToStruct = true
+		}
+	}
+
 	fields := extractStringFields(call.Args[1:])
 
 	return &WireFieldsOf{
@@ -393,8 +460,9 @@ func (p *Parser) parseFieldsOf(call *ast.CallExpr, info *types.Info, filePath st
 			Pos:  call.Pos(),
 			File: filePath,
 		},
-		StructType: structType,
-		Fields:     fields,
+		StructType:    structType,
+		Fields:        fields,
+		IsPtrToStruct: isPtrToStruct,
 	}
 }
 

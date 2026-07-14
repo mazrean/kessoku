@@ -7,7 +7,7 @@ import (
 )
 
 var storageSet = kessoku.Set(
-	kessoku.Provide(func(s *Storage) (GameImage, GameVideo, GameFile) {
-		return s.GameImage, s.GameVideo, s.GameFile
+	kessoku.Provide(func(s *Storage) (GameImage, *GameImage, GameVideo, *GameVideo, GameFile, *GameFile) {
+		return s.GameImage, &s.GameImage, s.GameVideo, &s.GameVideo, s.GameFile, &s.GameFile
 	}),
 )

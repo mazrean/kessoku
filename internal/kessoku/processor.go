@@ -2,78 +2,184 @@ package kessoku
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
+// generatedFilePerm is the default permission for generated files when the
+// destination does not already exist.
+const generatedFilePerm = os.FileMode(0o644)
+
+// writeAtomically writes content produced by fn to a temporary file in the
+// same directory as dst, then renames the temp file to dst on success.
+// If fn returns an error, the temporary file is removed and dst is left
+// untouched.
+func writeAtomically(dst string, fn func(*os.File) error) error {
+	dir := filepath.Dir(dst)
+	tmp, err := os.CreateTemp(dir, ".kessoku-tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	// cleanup removes the temp file; safe to call after tmp is closed.
+	cleanup := func() {
+		if removeErr := os.Remove(tmpName); removeErr != nil && !os.IsNotExist(removeErr) {
+			slog.Error("Failed to remove temp file", "file", tmpName, "error", removeErr)
+		}
+	}
+
+	if err := fn(tmp); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+
+	// os.CreateTemp creates the file with mode 0o600, which would leak
+	// owner-only permissions onto dst after the rename. Preserve the
+	// existing file's permissions, or default to the usual 0o644.
+	perm := generatedFilePerm
+	if fi, statErr := os.Stat(dst); statErr == nil {
+		perm = fi.Mode().Perm()
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpName, dst); err != nil {
+		cleanup()
+		return fmt.Errorf("rename temp file to %s: %w", dst, err)
+	}
+	return nil
+}
+
 // Processor handles the overall dependency injection code generation process.
 type Processor struct {
-	parser  *Parser
-	varPool *VarPool
+	parser *Parser
 }
 
 // NewProcessor creates a new processor instance.
 func NewProcessor() *Processor {
 	return &Processor{
-		parser:  NewParser(),
-		varPool: NewVarPool(),
+		parser: NewParser(),
 	}
+}
+
+// parsedFile holds the parse result for one input file awaiting generation.
+type parsedFile struct {
+	metaData  *MetaData
+	varPool   *VarPool
+	filename  string
+	builds    []*BuildDirective
+	injectors []*Injector // populated after graph validation in ProcessFiles
 }
 
 // ProcessFiles processes specified Go files for wire generation.
+// All files are parsed and graph-validated before any output is written, so a
+// failure in one file does not leave partial *_band.go files behind.
 func (p *Processor) ProcessFiles(files []string) error {
+	parsedFiles := make([]*parsedFile, 0, len(files))
+	// injector function names must be unique per package
+	seenNames := make(map[string]string)
+
+	// Phase 1: AST parse + type check every file and record duplicate-name errors.
 	for _, filename := range files {
-		if err := p.processFile(filename); err != nil {
+		slog.Debug("Processing file", "file", filename)
+
+		// Create a fresh VarPool per file so import aliases and package-level
+		// name reservations from one file do not contaminate another file.
+		fileVarPool := NewVarPool()
+
+		metaData, builds, err := p.parser.ParseFile(filename, fileVarPool)
+		if err != nil {
+			return fmt.Errorf("parse file %s: %w", filename, err)
+		}
+
+		if len(builds) == 0 {
+			continue
+		}
+
+		slog.Info("Found inject directives", "file", filename, "count", len(builds))
+
+		for _, build := range builds {
+			key := metaData.Package.Path + "." + build.InjectorName
+			if prevFile, ok := seenNames[key]; ok {
+				return fmt.Errorf("duplicate injector name %q in package %s: declared in both %s and %s",
+					build.InjectorName, metaData.Package.Path, prevFile, filename)
+			}
+			seenNames[key] = filename
+		}
+
+		parsedFiles = append(parsedFiles, &parsedFile{
+			metaData: metaData,
+			filename: filename,
+			builds:   builds,
+			varPool:  fileVarPool,
+		})
+	}
+
+	// Phase 2: graph validation (cycle detection, missing providers, etc.) for
+	// all files before writing any output.  This ensures a graph-level error in
+	// one file does not leave previously-written *_band.go files behind.
+	for _, pf := range parsedFiles {
+		injectors := make([]*Injector, 0, len(pf.builds))
+		for _, build := range pf.builds {
+			injector, injectorErr := CreateInjector(pf.metaData, build, pf.varPool)
+			if injectorErr != nil {
+				return fmt.Errorf("create injector: %w", injectorErr)
+			}
+			injectors = append(injectors, injector)
+		}
+		pf.injectors = injectors
+	}
+
+	// Phase 3: write output only after all files have passed graph validation.
+	for _, pf := range parsedFiles {
+		if err := p.generateFile(pf); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
-// processFile processes a single Go file for wire generation.
-func (p *Processor) processFile(filename string) error {
-	slog.Debug("Processing file", "file", filename)
-
-	metaData, builds, err := p.parser.ParseFile(filename, p.varPool)
-	if err != nil {
-		return fmt.Errorf("parse file %s: %w", filename, err)
-	}
-
-	if len(builds) == 0 {
-		return nil
-	}
-
-	slog.Info("Found inject directives", "file", filename, "count", len(builds))
-
-	outputFileName := outputFileName(filename)
+// generateFile generates the *_band.go file for a parsed input file.
+// It uses pf.varPool (a fresh VarPool created per file in ProcessFiles) for
+// import-alias allocation; Generate creates a per-injector snapshot for local
+// variable names.
+// Callers must populate pf.injectors via CreateInjector before calling this
+// method (ProcessFiles does this in a separate phase so that graph-level errors
+// are caught before any output is written).
+func (p *Processor) generateFile(pf *parsedFile) error {
+	outputFileName := outputFileName(pf.filename)
 	slog.Debug("outputFileName", "outputFileName", outputFileName)
 
-	injectors := make([]*Injector, 0, len(builds))
-	for _, build := range builds {
-		injector, injectorErr := CreateInjector(metaData, build, p.varPool)
-		if injectorErr != nil {
-			return fmt.Errorf("create injector: %w", injectorErr)
-		}
-
-		injectors = append(injectors, injector)
-	}
-
+	injectors := pf.injectors
 	slog.Debug("injectors", "injectors", injectors)
 
-	f, err := os.Create(outputFileName)
-	if err != nil {
-		return fmt.Errorf("create file %s: %w", outputFileName, err)
+	// Detect duplicate injector names across sibling *_band.go files.
+	// This catches the case where kessoku is invoked per-file (go:generate $GOFILE)
+	// and two files in the same package declare the same injector name.
+	if dupErr := checkDuplicateInjectorNames(pf.filename, outputFileName, injectors); dupErr != nil {
+		return dupErr
 	}
-	defer func() {
-		if closeErr := f.Close(); closeErr != nil {
-			slog.Error("Failed to close file", "error", closeErr)
-		}
-	}()
 
-	if genErr := Generate(f, filename, metaData, injectors, p.varPool); genErr != nil {
-		return fmt.Errorf("generate: %w", genErr)
+	if err := writeAtomically(outputFileName, func(f *os.File) error {
+		return Generate(f, pf.filename, pf.metaData, injectors, pf.varPool)
+	}); err != nil {
+		return fmt.Errorf("write %s: %w", outputFileName, err)
 	}
 
 	return nil
@@ -82,4 +188,83 @@ func (p *Processor) processFile(filename string) error {
 func outputFileName(filename string) string {
 	ext := filepath.Ext(filename)
 	return strings.TrimSuffix(filename, ext) + "_band" + ext
+}
+
+// checkDuplicateInjectorNames scans sibling *_band.go files in the same
+// directory for top-level function declarations that conflict with the names
+// of injectors we are about to generate.  It is necessary because the
+// canonical //go:generate invocation runs kessoku once per source file with a
+// fresh Processor, so per-invocation deduplication is insufficient.
+func checkDuplicateInjectorNames(srcFile, ownOutputFile string, injectors []*Injector) error {
+	// Build a set of injector names this invocation will emit.
+	wantNames := make(map[string]struct{}, len(injectors))
+	for _, inj := range injectors {
+		wantNames[inj.Name] = struct{}{}
+	}
+
+	dir := filepath.Dir(srcFile)
+
+	// Collect all *_band.go files in the same directory, excluding:
+	//   1. The output file we are about to (re)write (idempotency).
+	//   2. The source file itself — it may end in _band.go (e.g.
+	//      inject_band.go), in which case scanning it would cause false-positive
+	//      duplicate errors for any function whose name matches an injector name.
+	absOwn, err := filepath.Abs(ownOutputFile)
+	if err != nil {
+		absOwn = ownOutputFile
+	}
+	absSrc, err := filepath.Abs(srcFile)
+	if err != nil {
+		absSrc = srcFile
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read dir %s: %w", dir, err)
+	}
+
+	fset := token.NewFileSet()
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, "_band.go") {
+			continue
+		}
+
+		bandPath := filepath.Join(dir, name)
+		absBand, absErr := filepath.Abs(bandPath)
+		if absErr != nil {
+			absBand = bandPath
+		}
+		// Skip the output file we are about to (re)write and the source file
+		// itself (which may also match the *_band.go pattern).
+		if absBand == absOwn || absBand == absSrc {
+			continue
+		}
+
+		astFile, parseErr := parser.ParseFile(fset, bandPath, nil, 0)
+		if parseErr != nil {
+			// If the sibling band file cannot be parsed, skip it rather than
+			// blocking generation — a broken sibling is not our problem.
+			slog.Warn("failed to parse sibling band file", "file", bandPath, "error", parseErr)
+			continue
+		}
+
+		for _, decl := range astFile.Decls {
+			funcDecl, ok := decl.(*ast.FuncDecl)
+			if !ok || funcDecl.Name == nil {
+				continue
+			}
+			if _, clash := wantNames[funcDecl.Name.Name]; clash {
+				return fmt.Errorf(
+					"duplicate injector name %q: already declared in %s",
+					funcDecl.Name.Name, bandPath,
+				)
+			}
+		}
+	}
+
+	return nil
 }

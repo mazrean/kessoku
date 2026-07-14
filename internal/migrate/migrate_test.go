@@ -159,6 +159,198 @@ type Foo struct{}
 	}
 }
 
+// TestGeneratedOutputHasNoBuildConstraint verifies that the generated kessoku
+// output does NOT carry a //go:build !wireinject constraint. Generated files
+// must build unconditionally; wire configurations that rely on build tags are
+// intentionally unsupported.
+func TestGeneratedOutputHasNoBuildConstraint(t *testing.T) {
+	tmpDir := t.TempDir()
+	outputPath := filepath.Join(tmpDir, "kessoku.go")
+
+	inputFile := filepath.Join(tmpDir, "wire.go")
+	inputContent := `package test
+
+import "github.com/google/wire"
+
+var TestSet = wire.NewSet(NewFoo)
+
+func NewFoo() *Foo { return &Foo{} }
+
+type Foo struct{}
+`
+	if err := os.WriteFile(inputFile, []byte(inputContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	migrator := NewMigrator()
+	if err := migrator.MigrateFiles([]string{inputFile}, outputPath); err != nil {
+		t.Fatalf("first migration failed: %v", err)
+	}
+
+	outputBytes, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+
+	if strings.Contains(string(outputBytes), "//go:build") {
+		t.Errorf("generated output must not contain a //go:build constraint; got:\n%s", string(outputBytes))
+	}
+}
+
+// TestOutputPackageConflict tests that migration fails when the generated package name
+// does not match the existing package in the output directory.
+// This is the regression test for the bug where running 'kessoku migrate' from the repo
+// root with default output 'kessoku.go' would write a 'package main' file into a directory
+// containing 'package kessoku' files, breaking the entire build.
+func TestOutputPackageConflict(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create output directory with an existing Go file using a different package name
+	existingFile := filepath.Join(tmpDir, "existing.go")
+	existingContent := `package kessoku
+
+// Some existing declaration
+func Foo() {}
+`
+	if err := os.WriteFile(existingFile, []byte(existingContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a wire input file with 'package main'
+	inputDir := filepath.Join(tmpDir, "input")
+	if err := os.MkdirAll(inputDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	inputFile := filepath.Join(inputDir, "wire.go")
+	inputContent := `package main
+
+import "github.com/google/wire"
+
+var MainSet = wire.NewSet(NewBar)
+
+func NewBar() *Bar { return &Bar{} }
+
+type Bar struct{}
+`
+	if err := os.WriteFile(inputFile, []byte(inputContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Output file goes into tmpDir which has 'package kessoku' but wire file is 'package main'
+	outputPath := filepath.Join(tmpDir, "kessoku.go")
+
+	migrator := NewMigrator()
+	err := migrator.MigrateFiles([]string{inputFile}, outputPath)
+	if err == nil {
+		t.Fatal("expected error due to package name conflict, but got nil")
+	}
+
+	// The output file must NOT have been created (would corrupt the destination package)
+	if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+		t.Error("output file should not have been created when package names conflict")
+	}
+}
+
+// TestProviderCleanupRejected verifies that migration rejects a provider
+// function returning a wire-style cleanup func(). kessoku has no way to hand
+// the cleanup back to the injector's caller, and the code generator silently
+// discards unused extra return values, so migrate is the single gatekeeper
+// that must reject cleanup-returning wire code loudly.
+func TestProviderCleanupRejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		retType string
+	}{
+		{name: "cleanup func()", retType: "func()"},
+		{name: "cleanup func() error", retType: "func() error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			inputFile := filepath.Join(tmpDir, "wire.go")
+			inputContent := `package test
+
+import "github.com/google/wire"
+
+var TestSet = wire.NewSet(NewDB)
+
+func NewDB() (*DB, ` + tt.retType + `) {
+	return &DB{}, nil
+}
+
+type DB struct{}
+`
+			if err := os.WriteFile(inputFile, []byte(inputContent), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			outputPath := filepath.Join(tmpDir, "kessoku.go")
+			migrator := NewMigrator()
+			err := migrator.MigrateFiles([]string{inputFile}, outputPath)
+			if err == nil {
+				t.Fatal("expected error for cleanup-returning provider, got nil")
+			}
+			if !strings.Contains(err.Error(), "cleanup") {
+				t.Errorf("error should mention cleanup, got: %v", err)
+			}
+			if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+				t.Error("output file should not have been created for rejected input")
+			}
+		})
+	}
+}
+
+// TestInjectorCleanupRejected verifies that migration rejects a wire injector
+// template whose signature declares a cleanup return: (T, func(), error) or
+// (T, func()).
+func TestInjectorCleanupRejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		results string
+		retStmt string
+	}{
+		{name: "cleanup with error", results: "(*DB, func(), error)", retStmt: "return nil, nil, nil"},
+		{name: "cleanup without error", results: "(*DB, func())", retStmt: "return nil, nil"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			inputFile := filepath.Join(tmpDir, "wire.go")
+			inputContent := `//go:build wireinject
+
+package test
+
+import "github.com/google/wire"
+
+func InitDB() ` + tt.results + ` {
+	wire.Build(NewDB)
+	` + tt.retStmt + `
+}
+
+func NewDB() *DB { return &DB{} }
+
+type DB struct{}
+`
+			if err := os.WriteFile(inputFile, []byte(inputContent), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			outputPath := filepath.Join(tmpDir, "kessoku.go")
+			migrator := NewMigrator()
+			err := migrator.MigrateFiles([]string{inputFile}, outputPath)
+			if err == nil {
+				t.Fatal("expected error for cleanup-returning injector, got nil")
+			}
+			if !strings.Contains(err.Error(), "cleanup") {
+				t.Errorf("error should mention cleanup, got: %v", err)
+			}
+		})
+	}
+}
+
 // MigrateCmd is imported from config for testing.
 type MigrateCmd struct {
 	Output   string
