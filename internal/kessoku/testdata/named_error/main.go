@@ -1,6 +1,8 @@
 package main
 
-// MyError is a named concrete error type implementing the error interface.
+// MyError is a named concrete type that implements the error interface but is
+// NOT the error interface itself. kessoku must treat it as a normal provided
+// type rather than the error return slot.
 type MyError struct {
 	Msg string
 }
@@ -13,7 +15,10 @@ type Config struct {
 	DSN string
 }
 
-// NewConfig returns a named concrete error type instead of the error interface.
+// NewConfig returns (*Config, *MyError). *MyError implements error but is not
+// the error interface, so it is treated as a normal provide type. Since no
+// downstream provider requires *MyError, its value is discarded in the
+// generated code (blank identifier).
 func NewConfig() (*Config, *MyError) {
 	return &Config{DSN: "test-dsn"}, nil
 }

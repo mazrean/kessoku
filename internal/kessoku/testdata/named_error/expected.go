@@ -6,13 +6,8 @@ package main
 
 import "github.com/mazrean/kessoku"
 
-func InitializeService() (*Service, error) {
-	var err *MyError
-	config, err := kessoku.Provide(NewConfig).Fn()()
-	if err != nil {
-		var zero *Service
-		return zero, err
-	}
+func InitializeService() *Service {
+	config, _ := kessoku.Provide(NewConfig).Fn()()
 	service := kessoku.Provide(NewService).Fn()(config)
-	return service, nil
+	return service
 }

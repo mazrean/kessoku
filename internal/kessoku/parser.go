@@ -875,14 +875,20 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 			requires = append(requires, t)
 		}
 
-		errorIface, _ := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
+		// errorType is the named "error" type from the universe scope. We use
+		// types.Identical (exact type equality) rather than types.Implements so
+		// that concrete types implementing the error interface (e.g. *MyError,
+		// *ValidationError) are NOT mistaken for the error return slot. Only a
+		// return value whose type IS the built-in error interface is treated as
+		// the provider's error return.
+		errorNamedType := types.Universe.Lookup("error").Type()
 		isReturnError := false
 		var errorType types.Type
 		results := providerFnSig.Results()
 		provides := make([][]types.Type, 0, results.Len())
 		for i := range results.Len() {
 			v := results.At(i)
-			if errorIface != nil && types.Implements(v.Type(), errorIface) {
+			if types.Identical(v.Type(), errorNamedType) {
 				if i != results.Len()-1 {
 					return nil, fmt.Errorf("provider function has error return in non-last position (index %d of %d); error must be the last return value", i, results.Len()-1)
 				}
