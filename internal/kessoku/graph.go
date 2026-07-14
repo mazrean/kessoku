@@ -479,6 +479,27 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 			// Add to build.Providers so it's included in graph processing
 			build.Providers = append(build.Providers, fieldProvider)
 		}
+
+		// Register any interface types added by Bind[I](Struct[T]()) wrapping.
+		// The parser appends the interface type to Provides[0] (after the struct
+		// type itself), but the field-expansion loop above only registers field
+		// types. Without this, the graph treats I as an unresolved external
+		// dependency and leaks it as an injector parameter.
+		if len(structProvider.Provides) > 0 {
+			structFnProvider := fnProviderMap[structTypeKey]
+			for _, extraType := range structProvider.Provides[0][1:] {
+				if extraType == nil {
+					continue
+				}
+				extraKey := typeKey(extraType)
+				if _, ok := fnProviderMap[extraKey]; !ok {
+					fnProviderMap[extraKey] = &fnProvider{
+						provider:    structFnProvider.provider,
+						returnIndex: structFnProvider.returnIndex,
+					}
+				}
+			}
+		}
 	}
 
 	if build.Return.Type == nil {
