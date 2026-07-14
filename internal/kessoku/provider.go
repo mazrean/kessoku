@@ -77,21 +77,20 @@ type StructFieldSpec struct {
 
 // ProviderSpec represents a provider specification from annotations.
 type ProviderSpec struct {
-	ASTExpr           ast.Expr
+	ErrorType         types.Type
 	StructType        types.Type
+	ErrorTypeExpr     ast.Expr
+	ASTExpr           ast.Expr
 	ReferencedImports map[string]*Import
 	SourceField       *StructFieldSpec
 	Type              ProviderType
-	Provides          [][]types.Type
 	Requires          []types.Type
 	StructFields      []*StructFieldSpec
+	Provides          [][]types.Type
 	DeclOrder         int
 	IsReturnError     bool
 	IsAsync           bool
-	// IsVariadic reports whether the provider function is variadic; the last
-	// element of Requires is then the variadic slice type and the generated
-	// call site must expand it with `...`.
-	IsVariadic bool
+	IsVariadic        bool
 }
 
 type Return struct {

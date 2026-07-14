@@ -7,12 +7,13 @@ package main
 import "github.com/mazrean/kessoku"
 
 func InitializeService() (*Service, error) {
+	config := kessoku.Provide(NewConfig).Fn()()
 	var err *MyError
-	config, err := kessoku.Provide(NewConfig).Fn()()
+	database, err := kessoku.Provide(NewDatabase).Fn()(config)
 	if err != nil {
 		var zero *Service
 		return zero, err
 	}
-	service := kessoku.Provide(NewService).Fn()(config)
+	service := kessoku.Provide(NewService).Fn()(database)
 	return service, nil
 }

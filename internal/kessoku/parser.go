@@ -566,6 +566,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 			Provides:          result.Provides,
 			Requires:          result.Requires,
 			IsReturnError:     result.IsReturnError,
+			ErrorType:         result.ErrorType,
 			IsAsync:           result.IsAsync,
 			ReferencedImports: referencedImports,
 		})
@@ -576,6 +577,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 			Provides:          result.Provides,
 			Requires:          result.Requires,
 			IsReturnError:     result.IsReturnError,
+			ErrorType:         result.ErrorType,
 			IsAsync:           result.IsAsync,
 			IsVariadic:        result.IsVariadic,
 			ReferencedImports: referencedImports,
@@ -598,6 +600,7 @@ func isCleanupFunc(t types.Type) bool {
 // parseProviderTypeResult holds the result of parsing a provider type.
 type parseProviderTypeResult struct {
 	StructType    types.Type
+	ErrorType     types.Type
 	Requires      []types.Type
 	Provides      [][]types.Type
 	IsReturnError bool
@@ -706,6 +709,7 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 
 		errorIface, _ := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
 		isReturnError := false
+		var errorType types.Type
 		results := providerFnSig.Results()
 		provides := make([][]types.Type, 0, results.Len())
 		for i := range results.Len() {
@@ -715,6 +719,7 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 					return nil, fmt.Errorf("provider function has error return in non-last position (index %d of %d); error must be the last return value", i, results.Len()-1)
 				}
 				isReturnError = true
+				errorType = v.Type()
 				continue
 			}
 
@@ -731,6 +736,7 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 		return &parseProviderTypeResult{
 			Requires:      requires,
 			Provides:      provides,
+			ErrorType:     errorType,
 			IsReturnError: isReturnError,
 			IsAsync:       false,
 			IsStruct:      false,
