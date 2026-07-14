@@ -451,6 +451,14 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 			msg: fmt.Sprintf("injector name %q is reserved: func init must have no arguments and no return values", build.InjectorName),
 		}
 	}
+	// "main" in package main: the Go spec requires func main to have no arguments
+	// and no return values. Generating func main() *T { ... } in package main
+	// would therefore fail to compile.
+	if build.InjectorName == "main" && pkg.Name == "main" {
+		return nil, &injectorValidationError{
+			msg: fmt.Sprintf("injector name %q is reserved in package main: func main must have no arguments and no return values", build.InjectorName),
+		}
+	}
 
 	// Parse provider arguments (starting from index 1)
 	for _, arg := range call.Args[1:] {
