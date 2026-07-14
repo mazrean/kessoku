@@ -152,3 +152,23 @@ func (t *Transformer) transformBind(wb *WireBind, pkg *types.Package, elements [
 func joinNames(names []string) string {
 	return strings.Join(names, ", ")
 }
+
+// buildBindVarTypes builds a map from top-level WireBind variable names to their
+// implementation type strings (with pointer unwrapped one level).
+// This mirrors buildSetIndex and is used to pre-populate t.bindVarTypes package-wide
+// before per-file processing begins, ensuring cross-file bind variable visibility.
+func buildBindVarTypes(patterns []WirePattern) map[string]string {
+	m := make(map[string]string)
+	for _, p := range patterns {
+		wb, ok := p.(*WireBind)
+		if !ok || wb.VarName == "" {
+			continue
+		}
+		implType := wb.Implementation
+		if ptr, ok2 := implType.(*types.Pointer); ok2 {
+			implType = ptr.Elem()
+		}
+		m[wb.VarName] = implType.String()
+	}
+	return m
+}
