@@ -4,6 +4,7 @@
 /.serena/cache
 /.claude
 /.specify
+/main.go
 
 # Example binaries
 examples/*/async_parallel
