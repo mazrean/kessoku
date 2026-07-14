@@ -206,6 +206,27 @@ func (tc *TypeConverter) TypeToExpr(t types.Type) ast.Expr {
 			Dir:   dir,
 			Value: tc.TypeToExpr(typ.Elem()),
 		}
+	case *types.Alias:
+		obj := typ.Obj()
+		if obj.Pkg() == nil {
+			// Built-in alias (should be rare)
+			return wrapTypeArgs(ast.NewIdent(obj.Name()), typ.TypeArgs(), tc.TypeToExpr)
+		}
+		var baseExpr ast.Expr
+		if tc.currentPkg != nil && obj.Pkg() != tc.currentPkg {
+			// External package - add import and generate SelectorExpr
+			pkgPath := obj.Pkg().Path()
+			pkgName := obj.Pkg().Name()
+			actualName := tc.AddImport(pkgPath, pkgName)
+			baseExpr = &ast.SelectorExpr{
+				X:   ast.NewIdent(actualName),
+				Sel: ast.NewIdent(obj.Name()),
+			}
+		} else {
+			// Same package - just use the alias name
+			baseExpr = ast.NewIdent(obj.Name())
+		}
+		return wrapTypeArgs(baseExpr, typ.TypeArgs(), tc.TypeToExpr)
 	default:
 		return ast.NewIdent(t.String())
 	}
