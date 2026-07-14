@@ -679,12 +679,12 @@ var _ = kessoku.Inject[*B](
 			shouldHaveError: true, // Misplaced error return is rejected loudly at parse time
 		},
 		{
-			// Wire's cleanup-function pattern: a provider returning (*T, func()).
-			// kessoku cannot hand the cleanup back to the injector's caller, so it
-			// must reject the provider loudly instead of silently discarding the
-			// cleanup (resource leak) or deferring it inside the injector (which
-			// would close the resource before the caller uses it).
-			name: "provider returning wire-style cleanup func is rejected",
+			// A provider returning (*T, func()) is accepted: the func() is treated
+			// as an ordinary provided value like any other return. Rejecting
+			// wire-style cleanup functions is the migrate tool's job, not the code
+			// generator's — when nothing consumes the func(), the generated code
+			// binds it to _ and it is discarded.
+			name: "provider returning extra func value is accepted",
 			content: `package main
 
 import "github.com/mazrean/kessoku"
@@ -700,16 +700,12 @@ var _ = kessoku.Inject[*DB](
 	kessoku.Provide(NewDB),
 )
 `,
-			expectedBuilds:  0,
-			shouldHaveError: true,
+			expectedBuilds:  1,
+			shouldHaveError: false,
 		},
 		{
-			// Wire also supports func() error as a cleanup return type.
-			// Previously isCleanupFunc only detected bare func() (no results),
-			// so func() error fell through to the provides list with zero refcount,
-			// silently binding the cleanup to _ in generated code and leaking the
-			// resource.
-			name: "provider returning wire-style cleanup func() error is rejected",
+			// Same for func() error: an ordinary provided value, not a cleanup slot.
+			name: "provider returning extra func() error value is accepted",
 			content: `package main
 
 import "github.com/mazrean/kessoku"
@@ -725,8 +721,8 @@ var _ = kessoku.Inject[*DB](
 	kessoku.Provide(NewDB),
 )
 `,
-			expectedBuilds:  0,
-			shouldHaveError: true,
+			expectedBuilds:  1,
+			shouldHaveError: false,
 		},
 	}
 

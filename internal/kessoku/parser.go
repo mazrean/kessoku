@@ -866,35 +866,6 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 	return nil
 }
 
-// isCleanupFunc reports whether t is a wire-style cleanup function: func() or
-// func() error, with no parameters. Wire supports both forms as cleanup returns.
-// kessoku has no way to hand a cleanup back to the injector's caller, so such
-// providers are rejected with an explicit error instead of silently discarding
-// the cleanup or (worse) deferring it inside the injector, which would tear the
-// resource down before the caller ever uses it.
-func isCleanupFunc(t types.Type) bool {
-	// Named types are user-defined business types (e.g. type ShutdownFunc func()).
-	// Even when their underlying type is func() or func() error they are NOT
-	// wire-style anonymous cleanup functions and must pass through unchanged.
-	if _, isNamed := t.(*types.Named); isNamed {
-		return false
-	}
-	sig, ok := t.Underlying().(*types.Signature)
-	if !ok || sig.Params().Len() != 0 {
-		return false
-	}
-	// bare func() — no return values
-	if sig.Results().Len() == 0 {
-		return true
-	}
-	// func() error — single error return value
-	if sig.Results().Len() == 1 {
-		errorIface, _ := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
-		return errorIface != nil && types.Implements(sig.Results().At(0).Type(), errorIface)
-	}
-	return false
-}
-
 // parseProviderTypeResult holds the result of parsing a provider type.
 type parseProviderTypeResult struct {
 	StructType    types.Type
@@ -1025,22 +996,6 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 				isReturnError = true
 				errorType = v.Type()
 				continue
-			}
-
-			// A bare func() return is wire's cleanup-function pattern. kessoku cannot
-			// return the cleanup to the injector's caller, so reject it loudly rather
-			// than silently leaking the resource or closing it before the caller runs.
-			//
-			// However, a func() or func() error is also a perfectly valid injectable
-			// value (e.g. an event handler, factory closure, or strategy function).
-			// The distinction: if the provider's ONLY non-error return value is a
-			// func(), that func() IS the value being provided — it cannot be a cleanup
-			// side-effect because there is nothing else being provided. Wire-style
-			// cleanup only makes sense when the provider also returns at least one
-			// concrete value (e.g. func() (*DB, func(), error)).  So we skip the
-			// cleanup check for the first non-error return value.
-			if len(provides) > 0 && isCleanupFunc(v.Type()) {
-				return nil, fmt.Errorf("provider returns a cleanup func(); kessoku does not support wire-style cleanup functions — release the resource explicitly (e.g. expose a Close method on the provided type)")
 			}
 
 			provides = append(provides, []types.Type{v.Type()})

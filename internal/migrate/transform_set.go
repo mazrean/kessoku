@@ -387,7 +387,11 @@ func (t *Transformer) transformElementsWithBoundTypes(elements []WirePattern, pk
 			if t.isProviderBound(we, boundTypes) {
 				continue
 			}
-			result = append(result, t.transformProviderFunc(we))
+			transformed, err := t.transformProviderFunc(we)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, transformed)
 		case *WireSetRef:
 			// Suppress a set reference whose every provider is already covered by a
 			// wire.Bind in the same scope. Without suppression, the Bind's embedded

@@ -49,11 +49,14 @@ var _ = kessoku.Inject[*App](
 
 ### Resource Cleanup (No cleanup func() Support)
 
-Kessoku does **not** support wire-style `func()` cleanup returns. A provider
-returning `(*DB, func(), error)` will produce a hard codegen error:
+Kessoku does **not** support wire-style `func()` cleanup returns. The code
+generator treats every non-error return value as an ordinary provided value;
+a cleanup `func()` that nothing consumes is bound to `_` in the generated
+injector and never called, so the cleanup silently does not run. The
+`kessoku migrate` tool rejects wire code using cleanup returns with:
 
 ```
-provider returns a cleanup func(); kessoku does not support wire-style cleanup functions
+provider "NewDB" returns a wire-style cleanup function (func()); kessoku does not support cleanup functions
 ```
 
 **Recommended pattern**: expose a `Close` method on the returned type and call

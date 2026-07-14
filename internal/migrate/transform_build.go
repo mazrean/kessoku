@@ -18,6 +18,18 @@ func (t *Transformer) transformBuild(wb *WireBuild, pkg *types.Package) (*Kessok
 			Message: fmt.Sprintf("injector function %q must have at least one return value", wb.FuncName),
 		}
 	}
+	// Wire injector templates may declare a cleanup return: (T, func()) or
+	// (T, func(), error). kessoku does not support cleanup functions, so give
+	// a cleanup-specific error instead of the generic arity/type message.
+	if numReturns >= 2 && isCleanupFuncType(wb.ReturnTypes[1]) {
+		return nil, &ParseError{
+			Kind:    ParseErrorTypeResolution,
+			File:    wb.File,
+			Pos:     wb.Pos,
+			Message: fmt.Sprintf("injector function %q returns a wire-style cleanup function (%s); kessoku does not support cleanup functions — remove the cleanup return (e.g. expose a Close method on the provided type) before migrating", wb.FuncName, wb.ReturnTypes[1]),
+		}
+	}
+
 	if numReturns > maxInjectorReturns {
 		return nil, &ParseError{
 			Kind:    ParseErrorMissingConstructor,

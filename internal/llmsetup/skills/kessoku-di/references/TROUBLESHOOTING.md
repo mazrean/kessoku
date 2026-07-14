@@ -313,19 +313,24 @@ kessoku.Struct[*Config](),
 2. **Dependency not initialized**
    - Check all providers are included in Inject
 
-### Cleanup func() return rejected by codegen
+### Cleanup func() never runs / rejected by kessoku migrate
 
-**Symptom**: `provider returns a cleanup func(); kessoku does not support wire-style cleanup functions`
+**Symptom**: `kessoku migrate` fails with
+`provider "NewDB" returns a wire-style cleanup function (func()); kessoku does not support cleanup functions`,
+or a hand-written provider's cleanup `func()` is silently never called.
 
 **Cause**: A provider returns a bare `func()` or `func() error` as a cleanup
 value (wire-style). Kessoku has no mechanism to propagate a cleanup function
-back to the injector's caller, so such providers are rejected at codegen time.
+back to the injector's caller. The code generator treats the `func()` as an
+ordinary provided value; when nothing consumes it, the generated injector binds
+it to `_` and the cleanup never runs. `kessoku migrate` rejects wire code using
+cleanup returns so this cannot slip through silently during migration.
 
 **Solution**: Remove the cleanup return value and expose a `Close` (or similar)
 method on the returned type instead. Call it explicitly at the call site.
 
 ```go
-// Bad: wire-style cleanup return — rejected by kessoku
+// Bad: wire-style cleanup return — cleanup is silently discarded
 func NewDB() (*DB, func(), error) {
     db, _ := sql.Open("postgres", dsn)
     return &DB{db: db}, func() { db.Close() }, nil

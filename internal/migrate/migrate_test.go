@@ -253,6 +253,105 @@ type Bar struct{}
 	}
 }
 
+// TestProviderCleanupRejected verifies that migration rejects a provider
+// function returning a wire-style cleanup func(). kessoku has no way to hand
+// the cleanup back to the injector's caller, and the code generator silently
+// discards unused extra return values, so migrate is the single gatekeeper
+// that must reject cleanup-returning wire code loudly.
+func TestProviderCleanupRejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		retType string
+	}{
+		{name: "cleanup func()", retType: "func()"},
+		{name: "cleanup func() error", retType: "func() error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			inputFile := filepath.Join(tmpDir, "wire.go")
+			inputContent := `package test
+
+import "github.com/google/wire"
+
+var TestSet = wire.NewSet(NewDB)
+
+func NewDB() (*DB, ` + tt.retType + `) {
+	return &DB{}, nil
+}
+
+type DB struct{}
+`
+			if err := os.WriteFile(inputFile, []byte(inputContent), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			outputPath := filepath.Join(tmpDir, "kessoku.go")
+			migrator := NewMigrator()
+			err := migrator.MigrateFiles([]string{inputFile}, outputPath)
+			if err == nil {
+				t.Fatal("expected error for cleanup-returning provider, got nil")
+			}
+			if !strings.Contains(err.Error(), "cleanup") {
+				t.Errorf("error should mention cleanup, got: %v", err)
+			}
+			if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+				t.Error("output file should not have been created for rejected input")
+			}
+		})
+	}
+}
+
+// TestInjectorCleanupRejected verifies that migration rejects a wire injector
+// template whose signature declares a cleanup return: (T, func(), error) or
+// (T, func()).
+func TestInjectorCleanupRejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		results string
+		retStmt string
+	}{
+		{name: "cleanup with error", results: "(*DB, func(), error)", retStmt: "return nil, nil, nil"},
+		{name: "cleanup without error", results: "(*DB, func())", retStmt: "return nil, nil"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			inputFile := filepath.Join(tmpDir, "wire.go")
+			inputContent := `//go:build wireinject
+
+package test
+
+import "github.com/google/wire"
+
+func InitDB() ` + tt.results + ` {
+	wire.Build(NewDB)
+	` + tt.retStmt + `
+}
+
+func NewDB() *DB { return &DB{} }
+
+type DB struct{}
+`
+			if err := os.WriteFile(inputFile, []byte(inputContent), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			outputPath := filepath.Join(tmpDir, "kessoku.go")
+			migrator := NewMigrator()
+			err := migrator.MigrateFiles([]string{inputFile}, outputPath)
+			if err == nil {
+				t.Fatal("expected error for cleanup-returning injector, got nil")
+			}
+			if !strings.Contains(err.Error(), "cleanup") {
+				t.Errorf("error should mention cleanup, got: %v", err)
+			}
+		})
+	}
+}
+
 // MigrateCmd is imported from config for testing.
 type MigrateCmd struct {
 	Output   string
