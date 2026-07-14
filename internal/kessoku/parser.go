@@ -336,12 +336,76 @@ func (p *Parser) initializePackages(filename string) (*packages.Package, error) 
 		return nil, fmt.Errorf("load packages: %w", err)
 	}
 
-	// Any package loading or type-checking errors are fatal: continuing with
-	// partially-typed packages lets types.Invalid flow into codegen and produces
-	// syntactically broken *_band.go files (e.g. "func GetFoo(invalid invalid type)").
-	errorCount := packages.PrintErrors(pkgs)
-	if errorCount > 0 {
-		return nil, fmt.Errorf("package loading errors occurred (%d error(s)); fix them before running kessoku", errorCount)
+	// Check package errors, but only treat errors that originate in the target
+	// file as fatal. Type errors in other files of the same package (e.g. calls
+	// to not-yet-generated injector functions in main.go) are warnings: the
+	// kessoku.Inject declaration in the target file can still be type-checked
+	// correctly even when the rest of the package has unresolved references to
+	// the function that kessoku is about to generate. Treating those cross-file
+	// errors as fatal would create a chicken-and-egg deadlock where the user
+	// can never run `go generate` for the first time.
+	//
+	// pkg.Errors entries with Kind != TypeError (ParseError, ListError, etc.) are
+	// always fatal because they indicate problems unrelated to missing generated
+	// code (e.g. syntax errors, missing imports, package-graph failures).
+	// Kind==ListError entries whose Pos is empty are summaries that the Go
+	// toolchain emits to bundle multiple TypeErrors; we skip them here because
+	// the individual TypeError entries already carry the per-file positions.
+	var fatalPkgErrors []packages.Error
+	var skippedOtherFileTypeErrors int
+
+	for _, pkg := range pkgs {
+		for _, pkgErr := range pkg.Errors {
+			switch pkgErr.Kind {
+			case packages.TypeError:
+				// Extract filename from "file:line:col" position string.
+				errFile := pkgErr.Pos
+				if idx := strings.IndexByte(errFile, ':'); idx >= 0 {
+					errFile = errFile[:idx]
+				}
+				absErrFile, absErr := filepath.Abs(errFile)
+				if absErr != nil {
+					absErrFile = errFile
+				}
+				if absErrFile == absFilename {
+					fatalPkgErrors = append(fatalPkgErrors, pkgErr)
+				} else {
+					skippedOtherFileTypeErrors++
+					slog.Debug("ignoring type error in non-target file (may reference not-yet-generated injector)",
+						"file", pkgErr.Pos, "msg", pkgErr.Msg)
+				}
+			case packages.ListError:
+				// ListError with an empty Pos is a bundled summary of TypeErrors
+				// that the toolchain groups under the package name line (e.g.
+				// "# pkg/path\nfile:line: msg"). We skip these here because the
+				// underlying TypeErrors are examined individually above.
+				if pkgErr.Pos == "" {
+					slog.Debug("skipping ListError summary (underlying TypeErrors handled individually)",
+						"msg", pkgErr.Msg)
+					continue
+				}
+				// A ListError with a non-empty Pos is a genuine package-load
+				// failure (e.g. missing dependency); treat it as fatal.
+				fatalPkgErrors = append(fatalPkgErrors, pkgErr)
+			case packages.ParseError, packages.UnknownError:
+				// ParseError and UnknownError are always fatal: they indicate
+				// syntax errors or problems that prevent the package graph from
+				// loading correctly.
+				fatalPkgErrors = append(fatalPkgErrors, pkgErr)
+			}
+		}
+	}
+
+	if skippedOtherFileTypeErrors > 0 {
+		slog.Warn("type errors in package files other than the target were ignored; they may resolve once kessoku generates the injector functions",
+			"ignored_count", skippedOtherFileTypeErrors)
+	}
+	if len(fatalPkgErrors) > 0 {
+		// Print only the fatal errors so the user sees what needs to be fixed.
+		for _, e := range fatalPkgErrors {
+			fmt.Fprintf(os.Stderr, "%s\n", e)
+		}
+		return nil, fmt.Errorf("package loading errors occurred (%d error(s)); fix them before running kessoku", len(fatalPkgErrors))
 	}
 
 	for _, pkg := range pkgs {
