@@ -143,6 +143,57 @@ func (t *Transformer) transformElementsWithBoundTypes(elements []WirePattern, pk
 	// Merge FieldsOf patterns with the same struct type
 	mergedFieldsOf := t.mergeFieldsOf(elements)
 
+	// Pre-pass: group WireBind elements by their concrete implementation type.
+	// When multiple WireBind entries share the same implementation type (e.g.
+	// Bind(Reader, *RWImpl) + Bind(Writer, *RWImpl)), emitting independent
+	// kessoku.Bind[I](kessoku.Provide(Ctor)) calls for each creates duplicate
+	// ProviderSpec objects in the codegen graph, which then fails with
+	// "multiple providers provide *RWImpl". The fix is to chain the binds:
+	//   kessoku.Bind[Writer](kessoku.Bind[Reader](kessoku.Provide(Ctor)))
+	// so that all interfaces for the same concrete type share one ProviderSpec.
+	//
+	// chainedBinds maps the canonicalized implementation type string to the
+	// outermost chained KessokuBind (accumulating all interfaces for that type).
+	// emittedBindKeys tracks which impl type strings have already been emitted in
+	// the main loop so that only the first WireBind occurrence triggers output.
+	chainedBinds := make(map[string]*KessokuBind)
+	emittedBindKeys := make(map[string]bool)
+
+	for _, elem := range elements {
+		wb, ok := elem.(*WireBind)
+		if !ok {
+			continue
+		}
+
+		// Determine the canonical implementation type string (unwrap one pointer level).
+		implType := wb.Implementation
+		if ptr, ok2 := implType.(*types.Pointer); ok2 {
+			implType = ptr.Elem()
+		}
+		key := implType.String()
+
+		existing, seen := chainedBinds[key]
+		if !seen {
+			// First bind for this concrete type: create the base KessokuBind.
+			base, err := t.transformBind(wb, pkg, elements)
+			if err != nil {
+				return nil, err
+			}
+			chainedBinds[key] = base
+		} else {
+			// Subsequent bind for the same concrete type: chain on top of existing.
+			// Wrapping existing in a new KessokuBind means the outermost bind contains
+			// the full provider chain; the inner bind already carries the Provide call.
+			chained := &KessokuBind{
+				Interface: unwrapPointer(wb.Interface),
+				Provider:  existing,
+				VarName:   wb.VarName,
+				SourcePos: wb.Pos,
+			}
+			chainedBinds[key] = chained
+		}
+	}
+
 	var result []KessokuPattern
 
 	for _, elem := range elements {
@@ -158,11 +209,20 @@ func (t *Transformer) transformElementsWithBoundTypes(elements []WirePattern, pk
 			// Flatten nested set elements into parent
 			result = append(result, nestedElements...)
 		case *WireBind:
-			transformed, err := t.transformBind(we, pkg, elements)
-			if err != nil {
-				return nil, err
+			// Emit the chained bind only on the first WireBind occurrence for each
+			// implementation type; subsequent occurrences are already folded into the
+			// chain built during the pre-pass above.
+			implType := we.Implementation
+			if ptr, ok2 := implType.(*types.Pointer); ok2 {
+				implType = ptr.Elem()
 			}
-			result = append(result, transformed)
+			key := implType.String()
+
+			if !emittedBindKeys[key] {
+				emittedBindKeys[key] = true
+				result = append(result, chainedBinds[key])
+			}
+			// If already emitted, this bind's interface is folded into the chain — skip.
 		case *WireValue:
 			result = append(result, t.transformValue(we))
 		case *WireInterfaceValue:
