@@ -2,9 +2,12 @@
 
 package main
 
-import "github.com/mazrean/kessoku"
+import (
+	"context"
+	"github.com/mazrean/kessoku"
+)
 
-func InitializeService() *Service {
+func InitializeService(ctx context.Context) *Service {
 	config := kessoku.Provide(NewConfig).Fn()()
 	str := config.APIKey
 	num := config.CacheTTL

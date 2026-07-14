@@ -1372,9 +1372,10 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 		},
 		{
 			// A single async provider in a linear chain (A async -> B sync) cannot run in
-			// parallel with anything; the pool-assignment logic places it in the same pool,
-			// so no goroutine is emitted and ctx must NOT be injected.
-			name: "single async provider in linear chain - no context injected",
+			// parallel with anything, so no goroutine is emitted — but ctx IS still
+			// injected: any injector with an async provider takes ctx so its signature
+			// stays stable as the dependency graph evolves.
+			name: "single async provider in linear chain - context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1397,15 +1398,16 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 					},
 				},
 			},
-			expectError:            false,
-			expectContextInjection: false,
-			expectedArgsCount:      0,
+			expectError:             false,
+			expectContextInjection:  true,
+			expectedArgsCount:       1,
+			expectedContextPosition: 0,
 		},
 		{
 			// A sync provider followed by a single async provider (A sync -> B async) is
-			// also a linear chain with no sibling to parallelize; no goroutine is emitted
-			// and ctx must NOT be injected.
-			name: "mixed async and sync providers in linear chain - no context injected",
+			// also a linear chain with no sibling to parallelize; no goroutine is emitted,
+			// but the async provider still forces the ctx parameter.
+			name: "mixed async and sync providers in linear chain - context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1428,14 +1430,15 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 					},
 				},
 			},
-			expectError:            false,
-			expectContextInjection: false,
-			expectedArgsCount:      0,
+			expectError:             false,
+			expectContextInjection:  true,
+			expectedArgsCount:       1,
+			expectedContextPosition: 0,
 		},
 		{
 			// Two async providers in a linear chain (A async -> B async) cannot run in
-			// parallel; no goroutine is emitted and ctx must NOT be injected.
-			name: "multiple async providers in linear chain - no context injected",
+			// parallel; no goroutine is emitted, but ctx is still injected.
+			name: "multiple async providers in linear chain - context injected",
 			build: &BuildDirective{
 				InjectorName: "InitializeService",
 				Return: &Return{
@@ -1458,9 +1461,10 @@ func TestGraph_Build_ContextInjection(t *testing.T) {
 					},
 				},
 			},
-			expectError:            false,
-			expectContextInjection: false,
-			expectedArgsCount:      0,
+			expectError:             false,
+			expectContextInjection:  true,
+			expectedArgsCount:       1,
+			expectedContextPosition: 0,
 		},
 		{
 			// Diamond pattern: Config(sync) -> {DB(async), Cache(sync)} -> App(sync).

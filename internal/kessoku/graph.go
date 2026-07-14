@@ -900,14 +900,15 @@ func (g *Graph) hasAsyncProviders() bool {
 	return false
 }
 
-// injectContextArg injects context.Context as the first argument when the injector
-// actually emits parallel chain statements (goroutines). This check is intentionally
-// based on the generated statements rather than on the presence of IsAsync flags,
-// because the pool-assignment logic may collapse all async nodes into a single pool
-// (e.g. when there is only one async provider and no siblings to parallelize with),
-// in which case no goroutines are emitted and ctx would be added but never used.
+// injectContextArg injects context.Context as the first argument when the graph
+// contains any async provider, even if the pool-assignment logic collapses all
+// async nodes into a single pool (e.g. a single async provider with no siblings
+// to parallelize with) and no goroutines are emitted. Tying the parameter to the
+// presence of kessoku.Async rather than to the generated statements keeps the
+// injector signature stable while the dependency graph evolves: adding or removing
+// a sibling provider never breaks existing callers.
 func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool *VarPool) error {
-	if !hasChainStmts(injector) {
+	if !g.hasAsyncProviders() && !hasChainStmts(injector) {
 		return nil
 	}
 
