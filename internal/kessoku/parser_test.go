@@ -597,6 +597,29 @@ var _ = kessoku.Inject[*App](
 			shouldError:   true,
 			errorContains: `injector name "init" is reserved`,
 		},
+		{
+			// "main" in package main: the Go spec requires func main to have no arguments
+			// and no return values. Kessoku would emit func main() *App { ... } which the
+			// Go compiler rejects: "func main must have no arguments and no return values".
+			name: "main as injector name in package main is rejected",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type App struct{}
+
+func NewApp() *App {
+	return &App{}
+}
+
+var _ = kessoku.Inject[*App](
+	"main",
+	kessoku.Provide(NewApp),
+)
+`,
+			shouldError:   true,
+			errorContains: `injector name "main" is reserved`,
+		},
 	}
 
 	// Additional test for edge cases related to Set variable parsing
