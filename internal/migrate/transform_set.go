@@ -125,12 +125,146 @@ func (t *Transformer) transformElements(elements []WirePattern, pkg *types.Packa
 	return t.transformElementsWithBoundTypes(elements, pkg, setIndex, nil)
 }
 
+// collectBindsFromElements collects all WireBind elements reachable from the given
+// elements, recursively resolving WireNewSet and WireSetRef (via t.setIndex).
+// The returned slice preserves order but does not deduplicate.
+func (t *Transformer) collectBindsFromElements(elements []WirePattern) []*WireBind {
+	var binds []*WireBind
+	for _, elem := range elements {
+		switch we := elem.(type) {
+		case *WireBind:
+			binds = append(binds, we)
+		case *WireNewSet:
+			binds = append(binds, t.collectBindsFromElements(we.Elements)...)
+		case *WireSetRef:
+			if t.setIndex != nil {
+				if ws, ok := t.setIndex[we.Name]; ok {
+					binds = append(binds, t.collectBindsFromElements(ws.Elements)...)
+				}
+			}
+		}
+	}
+	return binds
+}
+
+// expandConflictingSetRefs detects WireSetRef siblings that share a concrete
+// implementation type in their resolved sets' binds, and expands those conflicting
+// refs inline so the normal chainedBinds logic can merge them into a single
+// kessoku.Bind chain.
+//
+// Background: when two named sets each bind a different interface to the same
+// concrete type (e.g. SetA binds IfaceA→*Impl, SetB binds IfaceB→*Impl) and a
+// parent set/build includes both via set references, the migration tool would
+// otherwise emit kessoku.Provide(NewImpl) inside both SetA and SetB independently.
+// kessoku's code generator then sees two distinct ProviderSpec objects providing
+// *Impl and fails with "multiple providers provide *Impl" (BUG-15).
+//
+// Fix: if any concrete implementation type appears in the binds of more than one
+// sibling WireSetRef, expand all such refs into their flat element lists (exactly
+// as an inline wire.NewSet would be treated), deduplicating provider functions by
+// identity. The existing chainedBinds pre-pass then produces a single chained
+// kessoku.Bind for that impl type without any duplicate kessoku.Provide.
+func (t *Transformer) expandConflictingSetRefs(elements []WirePattern) []WirePattern {
+	if t.setIndex == nil {
+		return elements
+	}
+
+	type refImplKeys struct {
+		ref      *WireSetRef
+		implKeys map[string]bool
+	}
+
+	// Collect the set of bound impl type keys for every WireSetRef in elements.
+	var refInfos []refImplKeys
+	for _, elem := range elements {
+		we, ok := elem.(*WireSetRef)
+		if !ok {
+			continue
+		}
+		ws, ok := t.setIndex[we.Name]
+		if !ok {
+			continue
+		}
+		keys := make(map[string]bool)
+		for _, bind := range t.collectBindsFromElements(ws.Elements) {
+			implType := bind.Implementation
+			if ptr, ok2 := implType.(*types.Pointer); ok2 {
+				implType = ptr.Elem()
+			}
+			keys[implType.String()] = true
+		}
+		if len(keys) > 0 {
+			refInfos = append(refInfos, refImplKeys{ref: we, implKeys: keys})
+		}
+	}
+
+	// Count how many set refs each impl type key appears in.
+	implKeyRefCount := make(map[string]int)
+	for _, ri := range refInfos {
+		for k := range ri.implKeys {
+			implKeyRefCount[k]++
+		}
+	}
+
+	// Determine which set refs touch a shared (count > 1) impl key.
+	expandRef := make(map[*WireSetRef]bool)
+	for _, ri := range refInfos {
+		for k := range ri.implKeys {
+			if implKeyRefCount[k] > 1 {
+				expandRef[ri.ref] = true
+				break
+			}
+		}
+	}
+
+	if len(expandRef) == 0 {
+		return elements // nothing to expand
+	}
+
+	// Rebuild the element list, replacing conflicting WireSetRefs with their
+	// flat contents. Deduplicate WireProviderFunc by function full name to avoid
+	// emitting NewImpl twice when both SetA and SetB declare it.
+	seenProviders := make(map[string]bool)
+	result := make([]WirePattern, 0, len(elements))
+	for _, elem := range elements {
+		we, ok := elem.(*WireSetRef)
+		if !ok || !expandRef[we] {
+			result = append(result, elem)
+			continue
+		}
+		ws, ok := t.setIndex[we.Name]
+		if !ok {
+			result = append(result, elem) // can't resolve: keep as-is
+			continue
+		}
+		for _, inner := range ws.Elements {
+			if wpf, ok2 := inner.(*WireProviderFunc); ok2 {
+				key := wpf.Name
+				if wpf.Func != nil {
+					key = wpf.Func.FullName()
+				}
+				if seenProviders[key] {
+					continue // deduplicate identical provider functions
+				}
+				seenProviders[key] = true
+			}
+			result = append(result, inner)
+		}
+	}
+	return result
+}
+
 // transformElementsWithBoundTypes transforms a list of wire patterns to kessoku patterns,
 // merging any extra bound types from an outer scope into the collected bound types.
 // extraBoundTypes allows callers (e.g. when flattening an inline nested WireNewSet) to
 // pass the outer scope's bound types so that providers that are bound in the outer scope
 // are correctly suppressed inside nested sets.
 func (t *Transformer) transformElementsWithBoundTypes(elements []WirePattern, pkg *types.Package, setIndex map[string]*WireNewSet, extraBoundTypes map[string]bool) ([]KessokuPattern, error) {
+	// Expand WireSetRef siblings that share a concrete implementation type so that
+	// the chainedBinds pre-pass below can merge them into one kessoku.Bind chain
+	// instead of emitting duplicate kessoku.Provide(Ctor) calls (BUG-15).
+	elements = t.expandConflictingSetRefs(elements)
+
 	// First pass: collect all bound implementation types
 	// These are the types for which wire.Bind creates an implicit provider
 	boundTypes := t.collectBoundTypes(elements)
