@@ -63,14 +63,12 @@ gantt
 go get -tool github.com/mazrean/kessoku/cmd/kessoku
 ```
 
-**Create `main.go`:**
+**Create `di.go`** (dependency injection declarations):
 ```go
 package main
 
 import (
-    "context"
     "fmt"
-    "time"
 
     "github.com/mazrean/kessoku"
 )
@@ -79,12 +77,12 @@ type DB struct{ Addr string }
 type Cache struct{ Addr string }
 
 func SlowDB() *DB {
-    time.Sleep(200 * time.Millisecond)
+    // time.Sleep(200 * time.Millisecond)
     return &DB{Addr: "db:5432"}
 }
 
 func SlowCache() *Cache {
-    time.Sleep(150 * time.Millisecond)
+    // time.Sleep(150 * time.Millisecond)
     return &Cache{Addr: "cache:6379"}
 }
 
@@ -97,6 +95,17 @@ var _ = kessoku.Inject[string]("InitApp",
         return fmt.Sprintf("App running with %s and %s", db.Addr, cache.Addr)
     }),
 )
+```
+
+**Create `main.go`** (application entry point):
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+)
 
 func main() {
     start := time.Now()
@@ -105,9 +114,17 @@ func main() {
 }
 ```
 
+> **Note:** Keep the `kessoku.Inject` declarations and your `main()` function in **separate files**.
+> kessoku type-checks the whole package before generating code, so if `main()` calls `InitApp`
+> in the same file (or any file) where `InitApp` is not yet defined, the type-checker will
+> report `undefined: InitApp` and no code will be generated — a chicken-and-egg deadlock.
+> Running `go generate` on `di.go` first produces `di_band.go` (which defines `InitApp`),
+> after which `go build` / `go run .` succeeds.
+
 **Run:**
 ```bash
-go generate && go run .
+go generate ./...   # generates di_band.go, which defines InitApp
+go run .
 # Shows: App running with db:5432 and cache:6379 in ~200ms (parallel startup)
 ```
 
