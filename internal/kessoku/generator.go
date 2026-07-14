@@ -359,8 +359,8 @@ func generateVariableSpecs(pkg string, injector *Injector, localVarPool *VarPool
 
 // generateAsyncWaitStatements creates errgroup wait statements.
 // parentCtxName is the variable holding the original context before errgroup.WithContext shadowed it;
-// if non-empty and the injector returns an error, a ctx.Err() guard is emitted after eg.Wait()
-// to catch cancellations that raced past the goroutine channel-selects.
+// if non-empty and the injector returns an error, a context.Cause(parentCtx) guard is emitted after
+// eg.Wait() to catch cancellations that raced past the goroutine channel-selects.
 func generateAsyncWaitStatements(injector *Injector, parentCtxName string, returnErrStmts func(ast.Expr) []ast.Stmt) []ast.Stmt {
 	if injector.IsReturnError && returnErrStmts != nil {
 		errIdent := ast.NewIdent("err")
@@ -393,7 +393,14 @@ func generateAsyncWaitStatements(injector *Injector, parentCtxName string, retur
 		// Guard against the race where goroutines completed via the channel case of a select
 		// just as the caller's context deadline expired.  eg.Wait() returns nil in this case
 		// but the parent context is already cancelled, so we must surface the cancellation error.
+		// Use context.Cause(parentCtx) rather than parentCtx.Err() so that a cause set via
+		// context.WithCancelCause is preserved instead of being replaced by the generic
+		// context.Canceled sentinel.
 		if parentCtxName != "" {
+			contextAlias := injector.asyncContextAlias
+			if contextAlias == "" {
+				contextAlias = contextPkgName
+			}
 			ctxErrIdent := ast.NewIdent("err")
 			stmts = append(stmts, &ast.IfStmt{
 				Init: &ast.AssignStmt{
@@ -402,9 +409,10 @@ func generateAsyncWaitStatements(injector *Injector, parentCtxName string, retur
 					Rhs: []ast.Expr{
 						&ast.CallExpr{
 							Fun: &ast.SelectorExpr{
-								X:   ast.NewIdent(parentCtxName),
-								Sel: ast.NewIdent("Err"),
+								X:   ast.NewIdent(contextAlias),
+								Sel: ast.NewIdent("Cause"),
 							},
+							Args: []ast.Expr{ast.NewIdent(parentCtxName)},
 						},
 					},
 				},
