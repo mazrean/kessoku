@@ -8,7 +8,7 @@ uv = "0.11.25"
 "pipx:oraios/serena" = "v1.5.3"
 "pipx:github/spec-kit" = "v0.11.9"
 
-go = "1.26.4"
+go = "1.26.5"
 "go:golang.org/x/tools/gopls" = "0.22.0"
 
 [tasks.worktree]
