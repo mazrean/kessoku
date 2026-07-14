@@ -7,7 +7,7 @@ package main
 import "github.com/mazrean/kessoku"
 
 func InitializeApp() *App {
-	db := kessoku.Provide(NewDB).Fn()()
-	app := kessoku.Provide(NewApp).Fn()(db)
+	val := kessoku.Provide(NewDB).Fn()()
+	app := kessoku.Provide(NewApp).Fn()(val)
 	return app
 }
