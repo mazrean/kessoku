@@ -6,7 +6,7 @@ require (
 	github.com/alingse/asasalint v0.0.11
 	github.com/breml/bidichk v0.3.3
 	github.com/charithe/durationcheck v0.0.11
-	github.com/go-critic/go-critic v0.14.3
+	github.com/go-critic/go-critic v0.14.4
 	github.com/gordonklaus/ineffassign v0.2.0
 	github.com/kisielk/errcheck v1.20.0
 	github.com/kyoh86/exportloopref v0.1.11
@@ -18,8 +18,8 @@ require (
 	github.com/timakin/bodyclose v0.0.0-20260129054331-73d1f95b84b4
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1
 	github.com/uudashr/iface v1.5.0
-	golang.org/x/exp v0.0.0-20260611194520-c48552f49976
-	golang.org/x/tools v0.46.0
+	golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597
+	golang.org/x/tools v0.48.0
 )
 
 require (
@@ -342,14 +342,14 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
 	gocloud.dev v0.44.0 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
-	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/term v0.44.0 // indirect
-	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/term v0.45.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	google.golang.org/api v0.257.0 // indirect

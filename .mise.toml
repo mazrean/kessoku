@@ -1,14 +1,14 @@
 [tools]
 node = "24.18.0"
-"npm:@anthropic-ai/claude-code" = "2.1.195"
-"npm:@openai/codex" = "0.135.0"
+"npm:@anthropic-ai/claude-code" = "2.1.207"
+"npm:@openai/codex" = "0.144.3"
 
 python = "3.14.6"
-uv = "0.11.25"
+uv = "0.11.28"
 "pipx:oraios/serena" = "v1.5.3"
-"pipx:github/spec-kit" = "v0.11.9"
+"pipx:github/spec-kit" = "v0.12.14"
 
-go = "1.26.4"
+go = "1.26.5"
 "go:golang.org/x/tools/gopls" = "0.22.0"
 
 [tasks.worktree]
