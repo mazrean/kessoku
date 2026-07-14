@@ -814,7 +814,16 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 			// A bare func() return is wire's cleanup-function pattern. kessoku cannot
 			// return the cleanup to the injector's caller, so reject it loudly rather
 			// than silently leaking the resource or closing it before the caller runs.
-			if isCleanupFunc(v.Type()) {
+			//
+			// However, a func() or func() error is also a perfectly valid injectable
+			// value (e.g. an event handler, factory closure, or strategy function).
+			// The distinction: if the provider's ONLY non-error return value is a
+			// func(), that func() IS the value being provided — it cannot be a cleanup
+			// side-effect because there is nothing else being provided. Wire-style
+			// cleanup only makes sense when the provider also returns at least one
+			// concrete value (e.g. func() (*DB, func(), error)).  So we skip the
+			// cleanup check for the first non-error return value.
+			if len(provides) > 0 && isCleanupFunc(v.Type()) {
 				return nil, fmt.Errorf("provider returns a cleanup func(); kessoku does not support wire-style cleanup functions — release the resource explicitly (e.g. expose a Close method on the provided type)")
 			}
 
