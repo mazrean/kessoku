@@ -228,7 +228,11 @@ func (t *Transformer) transformElementsWithBoundTypes(elements []WirePattern, pk
 		case *WireInterfaceValue:
 			result = append(result, t.transformInterfaceValue(we))
 		case *WireStruct:
-			result = append(result, t.transformStruct(we, pkg)...)
+			structPatterns, err := t.transformStruct(we, pkg)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, structPatterns...)
 		case *WireFieldsOf:
 			// Check if this is the first occurrence of this struct type
 			typeKey := we.StructType.String()
