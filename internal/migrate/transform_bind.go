@@ -122,12 +122,17 @@ func (t *Transformer) transformBind(wb *WireBind, pkg *types.Package, elements [
 	// Always build a fresh expression so that original source positions do not
 	// interfere with the writer's synthetic position system.
 	constructorName := constructor.Name()
+	// Use the constructor's own package, not the impl type's package.
+	// When Step 1 resolves a provider from a sibling element (e.g. factory.NewDB),
+	// the constructor may live in a completely different package than the impl type
+	// (e.g. impl.DB). Using implPkg here was the root cause of the bug.
+	constructorPkg := constructor.Pkg()
 	var constructorExpr ast.Expr
-	if implPkg != nil && implPkg != pkg {
+	if constructorPkg != nil && constructorPkg != pkg {
 		// External package — use selector with proper import handling.
-		pkgName := implPkg.Name()
+		pkgName := constructorPkg.Name()
 		if t.tc != nil {
-			pkgName = t.tc.AddImport(implPkg.Path(), implPkg.Name())
+			pkgName = t.tc.AddImport(constructorPkg.Path(), constructorPkg.Name())
 		}
 		constructorExpr = &ast.SelectorExpr{
 			X:   ast.NewIdent(pkgName),
