@@ -602,6 +602,12 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 // the cleanup or (worse) deferring it inside the injector, which would tear the
 // resource down before the caller ever uses it.
 func isCleanupFunc(t types.Type) bool {
+	// Named types are user-defined business types (e.g. type ShutdownFunc func()).
+	// Even when their underlying type is func() or func() error they are NOT
+	// wire-style anonymous cleanup functions and must pass through unchanged.
+	if _, isNamed := t.(*types.Named); isNamed {
+		return false
+	}
 	sig, ok := t.Underlying().(*types.Signature)
 	if !ok || sig.Params().Len() != 0 {
 		return false
