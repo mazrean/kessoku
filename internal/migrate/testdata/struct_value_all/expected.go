@@ -2,7 +2,7 @@
 
 //go:generate go tool kessoku $GOFILE
 
-package struct_unexported_fields
+package struct_value_all
 
 import (
 	"github.com/mazrean/kessoku"

@@ -13,8 +13,14 @@ type fieldInfo struct {
 	exported bool
 }
 
-// transformStruct transforms wire.Struct to kessoku.Provide with function literal.
-func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) *KessokuProvide {
+// transformStruct transforms wire.Struct to one or more kessoku.Provide patterns.
+//
+// Wire's processStructProvider provides both T and *T when wire.Struct(new(T)) is
+// used (value-type provision, IsPointer=false), and only *T when wire.Struct(new(*T))
+// is used (pointer-type provision, IsPointer=true).  We replicate that behaviour:
+//   - IsPointer=false → two KessokuProvide: one returning T, one returning *T
+//   - IsPointer=true  → one KessokuProvide returning *T
+func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) []KessokuPattern {
 	// Unwrap all pointer layers to reach the underlying struct type.
 	// wire.Struct(new(*T)) yields **T from extractTypeFromNew; we must strip
 	// both layers to reach T before calling Underlying().
@@ -30,7 +36,7 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) *Kesso
 	underlying := structType.Underlying()
 	st, ok := underlying.(*types.Struct)
 	if !ok {
-		return &KessokuProvide{SourcePos: ws.Pos}
+		return []KessokuPattern{&KessokuProvide{SourcePos: ws.Pos}}
 	}
 
 	// Check if struct is from external package
@@ -67,12 +73,22 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) *Kesso
 		})
 	}
 
-	// Build function literal
-	funcLit := t.buildStructConstructor(structType, fieldInfos, ws.IsPointer)
+	if ws.IsPointer {
+		// wire.Struct(new(*T)) — only *T is provided.
+		funcLit := t.buildStructConstructor(structType, fieldInfos, true)
+		return []KessokuPattern{&KessokuProvide{
+			FuncExpr:  funcLit,
+			SourcePos: ws.Pos,
+		}}
+	}
 
-	return &KessokuProvide{
-		FuncExpr:  funcLit,
-		SourcePos: ws.Pos,
+	// wire.Struct(new(T)) — wire provides both T and *T.
+	// Emit the value-type provider first, then the pointer-type provider.
+	valueFuncLit := t.buildStructConstructor(structType, fieldInfos, false)
+	ptrFuncLit := t.buildStructConstructor(structType, fieldInfos, true)
+	return []KessokuPattern{
+		&KessokuProvide{FuncExpr: valueFuncLit, SourcePos: ws.Pos},
+		&KessokuProvide{FuncExpr: ptrFuncLit, SourcePos: ws.Pos},
 	}
 }
 
