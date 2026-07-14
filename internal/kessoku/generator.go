@@ -141,6 +141,11 @@ func generateAsyncInitialization(pkg string, injector *Injector, localVarPool *V
 	var stmts []ast.Stmt
 
 	errgroupAlias := ensureImport(imports, fileVarPool, errgroupPkgPath, errgroupPkgName)
+	// Reserve the errgroup alias in the per-injector pool so that a provider
+	// returning a user type whose lowerCamel base name equals the alias (e.g.
+	// *Errgroup → "errgroup") does not claim that name for its local variable,
+	// which would shadow the package reference and cause a compile error.
+	localVarPool.Reserve(errgroupAlias)
 
 	// Find context parameter name if available
 	var ctxParamName string
