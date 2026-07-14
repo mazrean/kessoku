@@ -73,13 +73,23 @@ func namedASTTypeExpr(pkg string, obj *types.TypeName, typeArgs *types.TypeList,
 	}, nil
 }
 
-// typeKey returns a canonical string key for a types.Type that is stable under
-// type aliases. It recursively resolves aliases so that, for example, *Database
-// and *DB produce the same key when Database = DB.
+// typeKey returns a canonical string key for a types.Type.
+// Named types and type aliases each get their own key based on their declared
+// package path and name, so that two distinct aliases sharing the same
+// underlying type (e.g. type DBConnStr = string and type CacheConnStr = string)
+// are treated as different dependency keys and are never silently shared.
 func typeKey(t types.Type) string {
 	switch typ := t.(type) {
 	case *types.Alias:
-		return typeKey(types.Unalias(typ))
+		// Use the alias's own fully-qualified name as the key.
+		// Do NOT call types.Unalias here: that would collapse distinct aliases
+		// (e.g. DBConnectionString = string and CacheConnectionString = string)
+		// into the same key, causing silent provider sharing or misleading errors.
+		obj := typ.Obj()
+		if pkg := obj.Pkg(); pkg != nil {
+			return pkg.Path() + "." + obj.Name()
+		}
+		return obj.Name()
 	case *types.Pointer:
 		return "*" + typeKey(typ.Elem())
 	case *types.Slice:

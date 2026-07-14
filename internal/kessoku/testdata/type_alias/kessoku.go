@@ -10,8 +10,11 @@ type DB struct{}
 // Database is a type alias for DB.
 type Database = DB
 
-// NewDB creates a DB instance.
-func NewDB() *DB {
+// NewDB creates a Database instance (returning the alias type explicitly).
+// After the alias-key fix, kessoku treats each alias as a distinct dependency
+// key, so the provider must declare the alias in its return type for the
+// dependency to be satisfied without an extra injector argument.
+func NewDB() *Database {
 	return &DB{}
 }
 
@@ -23,7 +26,7 @@ func NewApp(db *Database) *App {
 	return &App{}
 }
 
-// Test that the alias *Database and concrete *DB are treated as identical types.
+// Test that a provider returning *Database satisfies a *Database parameter.
 var _ = kessoku.Inject[*App](
 	"InitializeApp",
 	kessoku.Provide(NewDB),

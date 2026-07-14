@@ -7,10 +7,10 @@ package main
 import "github.com/mazrean/kessoku"
 
 func GetService() (*Service, error) {
-	db := kessoku.Provide(NewDB).Fn()()
-	service := kessoku.Provide(NewService).Fn()(db)
+	val := kessoku.Provide(NewDB).Fn()()
+	service := kessoku.Provide(NewService).Fn()(val)
 	var err error
-	err = kessoku.Provide(ValidateDB).Fn()(db)
+	err = kessoku.Provide(ValidateDB).Fn()(val)
 	if err != nil {
 		var zero *Service
 		return zero, err
