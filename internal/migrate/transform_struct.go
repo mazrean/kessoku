@@ -22,7 +22,12 @@ type fieldInfo struct {
 // is used (pointer-type provision, IsPointer=true).  We replicate that behaviour:
 //   - IsPointer=false → two KessokuProvide: one returning T, one returning *T
 //   - IsPointer=true  → one KessokuProvide returning *T
-func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) []KessokuPattern {
+//
+// When an explicit field list is provided (non-"*"), each requested name is
+// validated via types.LookupFieldOrMethod.  An unrecognised name returns an error
+// instead of silently dropping the field (mirroring wire's own behaviour and the
+// approach already used by transformFieldsOf).
+func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) ([]KessokuPattern, error) {
 	// Unwrap all pointer layers to reach the underlying struct type.
 	// wire.Struct(new(*T)) yields **T from extractTypeFromNew; we must strip
 	// both layers to reach T before calling Underlying().
@@ -38,7 +43,7 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) []Kess
 	underlying := structType.Underlying()
 	st, ok := underlying.(*types.Struct)
 	if !ok {
-		return []KessokuPattern{&KessokuProvide{SourcePos: ws.Pos}}
+		return []KessokuPattern{&KessokuProvide{SourcePos: ws.Pos}}, nil
 	}
 
 	// Check if struct is from external package
@@ -46,6 +51,21 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) []Kess
 	if named, ok := structType.(*types.Named); ok {
 		if named.Obj().Pkg() != nil && named.Obj().Pkg() != pkg {
 			isExternalPkg = true
+		}
+	}
+
+	// When an explicit field list is provided (non-"*"), validate every requested
+	// name before collecting.  wire.Struct itself would error for non-existent
+	// fields; we mirror that behaviour here so the migration does not silently
+	// drop the field and produce an incomplete constructor.
+	// Use LookupFieldOrMethod so that promoted (embedded) fields are also found,
+	// matching wire's own lookup semantics.
+	if len(ws.Fields) > 0 && ws.Fields[0] != "*" {
+		for _, fieldName := range ws.Fields {
+			obj, _, _ := types.LookupFieldOrMethod(structType, true, pkg, fieldName)
+			if _, ok := obj.(*types.Var); !ok {
+				return nil, fmt.Errorf("field %q not found on struct %s", fieldName, structType.String())
+			}
 		}
 	}
 
@@ -87,7 +107,7 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) []Kess
 		return []KessokuPattern{&KessokuProvide{
 			FuncExpr:  funcLit,
 			SourcePos: ws.Pos,
-		}}
+		}}, nil
 	}
 
 	// wire.Struct(new(T)) — wire provides both T and *T.
@@ -97,7 +117,7 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) []Kess
 	return []KessokuPattern{
 		&KessokuProvide{FuncExpr: valueFuncLit, SourcePos: ws.Pos},
 		&KessokuProvide{FuncExpr: ptrFuncLit, SourcePos: ws.Pos},
-	}
+	}, nil
 }
 
 // transformFieldsOf transforms wire.FieldsOf to kessoku.Provide with accessor function.
