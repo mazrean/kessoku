@@ -54,13 +54,27 @@ func (m *Migrator) MigrateFiles(patterns []string, outputPath string) error {
 	var results []MigrationResult
 	var allWarnings []Warning
 
-	// Create a shared TypeConverter for all transforms (using first package's types)
+	// sharedTypeConverter accumulates import requirements across all packages so that
+	// the single output file has a complete import block.  Its currentPkg field is
+	// updated inside the loop to match the package currently being transformed; this
+	// ensures that TypeToExpr emits qualified identifiers (e.g. "pkg.Doer") for types
+	// that come from external packages rather than treating them as same-package types.
+	// Using pkgs[0] here was the original bug: when packages.Load returns a dependency
+	// package before the package being migrated, every interface from that dependency is
+	// misidentified as a local type and loses its package qualifier.
 	var sharedTypeConverter *TypeConverter
-	if len(pkgs) > 0 && pkgs[0].Types != nil {
-		sharedTypeConverter = NewTypeConverter(pkgs[0].Types)
-	}
 
 	for _, pkg := range pkgs {
+		// Update the shared TypeConverter's view of the current package before
+		// processing each package's files.  This guarantees that TypeToExpr sees the
+		// correct "home" package and emits qualified names for all external types.
+		if pkg.Types != nil {
+			if sharedTypeConverter == nil {
+				sharedTypeConverter = NewTypeConverter(pkg.Types)
+			} else {
+				sharedTypeConverter.currentPkg = pkg.Types
+			}
+		}
 		// Pre-populate the transformer's set index with all WireNewSet declarations
 		// from every file in this package. This allows anyProviderReturnsError (called
 		// from transformBuild) to resolve WireSetRef entries that are defined in a
