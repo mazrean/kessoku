@@ -28,6 +28,9 @@ func InitializeService(ctx context.Context) (*Service, error) {
 		var err error
 		database, err = kessoku.Async(kessoku.Provide(NewDatabase)).Fn()()
 		if err != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				return cause
+			}
 			return err
 		}
 		close(databaseCh)
@@ -36,6 +39,10 @@ func InitializeService(ctx context.Context) (*Service, error) {
 	var err0 error
 	errgroup0, err0 = kessoku.Async(kessoku.Provide(NewErrgroup)).Fn()()
 	if err0 != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			var zero *Service
+			return zero, cause
+		}
 		var zero *Service
 		return zero, err0
 	}

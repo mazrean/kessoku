@@ -12,12 +12,10 @@ import (
 
 func InitializeApp(ctx context.Context) (*App, error) {
 	var (
-		database    *Database
-		cache       *Cache
-		cacheCh     = make(chan struct{})
-		messaging   *Messaging
-		messagingCh = make(chan struct{})
-		app         *App
+		database *Database
+		cache    *Cache
+		cacheCh  = make(chan struct{})
+		app      *App
 	)
 	parentCtx := ctx
 	ctx, cancel := context.WithCancel(ctx)
@@ -28,7 +26,7 @@ func InitializeApp(ctx context.Context) (*App, error) {
 	}()
 	eg.Go(func() error {
 		var err error
-		cache, err = kessoku.Async(kessoku.Provide(NewCache)).Fn()()
+		cache, err = kessoku.Async(kessoku.Provide(NewCache)).Fn()(ctx)
 		if err != nil {
 			if cause := context.Cause(ctx); cause != nil {
 				return cause
@@ -38,37 +36,23 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		close(cacheCh)
 		return nil
 	})
-	eg.Go(func() error {
-		var err0 error
-		messaging, err0 = kessoku.Async(kessoku.Provide(NewMessaging)).Fn()()
-		if err0 != nil {
-			if cause := context.Cause(ctx); cause != nil {
-				return cause
-			}
-			return err0
-		}
-		close(messagingCh)
-		return nil
-	})
-	var err1 error
-	database, err1 = kessoku.Async(kessoku.Provide(NewDatabase)).Fn()()
-	if err1 != nil {
+	var err0 error
+	database, err0 = kessoku.Async(kessoku.Provide(NewDatabase)).Fn()(ctx)
+	if err0 != nil {
 		if cause := context.Cause(ctx); cause != nil {
 			var zero *App
 			return zero, cause
 		}
 		var zero *App
-		return zero, err1
+		return zero, err0
 	}
-	for _, ch := range []<-chan struct{}{cacheCh, messagingCh} {
-		select {
-		case <-ch:
-		case <-ctx.Done():
-			var zero *App
-			return zero, context.Cause(ctx)
-		}
+	select {
+	case <-cacheCh:
+	case <-ctx.Done():
+		var zero *App
+		return zero, context.Cause(ctx)
 	}
-	app = kessoku.Provide(NewApp).Fn()(database, cache, messaging)
+	app = kessoku.Provide(NewApp).Fn()(database, cache)
 	if err := eg.Wait(); err != nil {
 		var zero *App
 		return zero, err

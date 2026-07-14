@@ -42,6 +42,10 @@ func InitializeApp(ctx context.Context) (*App, error) {
 	var err error
 	databaseService, err = kessoku.Async(kessoku.Provide(NewDatabaseService)).Fn()()
 	if err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			var zero *App
+			return zero, cause
+		}
 		var zero *App
 		return zero, err
 	}
