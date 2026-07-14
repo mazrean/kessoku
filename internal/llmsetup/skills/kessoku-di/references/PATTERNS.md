@@ -47,18 +47,30 @@ var _ = kessoku.Inject[*App](
 // Generates: func InitializeApp() (*App, error)
 ```
 
-### Provider with Cleanup
+### Resource Cleanup (No cleanup func() Support)
 
-Return a cleanup function for resource management:
+Kessoku does **not** support wire-style `func()` cleanup returns. A provider
+returning `(*DB, func(), error)` will produce a hard codegen error:
+
+```
+provider returns a cleanup func(); kessoku does not support wire-style cleanup functions
+```
+
+**Recommended pattern**: expose a `Close` method on the returned type and call
+it explicitly at the call site.
 
 ```go
-func NewDB() (*DB, func(), error) {
+// Good: Close method on the type
+type DB struct{ db *sql.DB }
+
+func (d *DB) Close() { d.db.Close() }
+
+func NewDB() (*DB, error) {
     db, err := sql.Open("postgres", dsn)
     if err != nil {
-        return nil, nil, err
+        return nil, err
     }
-    cleanup := func() { db.Close() }
-    return &DB{db: db}, cleanup, nil
+    return &DB{db: db}, nil
 }
 
 var _ = kessoku.Inject[*App](
@@ -66,17 +78,17 @@ var _ = kessoku.Inject[*App](
     kessoku.Provide(NewDB),
     kessoku.Provide(NewApp),
 )
-// Generates: func InitializeApp() (*App, func(), error)
+// Generates: func InitializeApp() (*App, error)
 ```
 
 Usage:
 
 ```go
-app, cleanup, err := InitializeApp()
+app, err := InitializeApp()
 if err != nil {
     log.Fatal(err)
 }
-defer cleanup()
+defer app.DB.Close()  // explicit cleanup via method
 ```
 
 ### Multiple Return Values
