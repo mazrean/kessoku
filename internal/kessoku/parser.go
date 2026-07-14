@@ -1,9 +1,11 @@
 package kessoku
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/build/constraint"
 	"go/constant"
 	"go/parser"
 	"go/token"
@@ -13,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
@@ -228,6 +231,50 @@ func moduleRootForFile(filename string) string {
 	}
 }
 
+// fileHasWireinjectTag reports whether the named file has a //go:build wireinject
+// (or the legacy // +build wireinject) build constraint.  Only the leading
+// comment block before the package clause is scanned, which is sufficient for
+// build constraints and avoids reading the entire file.
+func fileHasWireinjectTag(filename string) bool {
+	f, err := os.Open(filename)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+
+		// Stop once we pass the leading comment block (package clause reached).
+		if strings.HasPrefix(trimmed, "package ") {
+			break
+		}
+
+		// Skip blank lines between comment blocks.
+		if trimmed == "" {
+			continue
+		}
+
+		// Only process lines that look like build constraints.
+		if !constraint.IsGoBuild(trimmed) && !constraint.IsPlusBuild(trimmed) {
+			continue
+		}
+
+		expr, err := constraint.Parse(trimmed)
+		if err != nil {
+			continue
+		}
+
+		if expr.Eval(func(tag string) bool { return tag == "wireinject" }) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // initializeSSA initializes SSA analysis for a file.
 func (p *Parser) initializePackages(filename string) (*packages.Package, error) {
 	// Resolve the filename to an absolute path so that the file= query and
@@ -235,6 +282,17 @@ func (p *Parser) initializePackages(filename string) (*packages.Package, error) 
 	absFilename, err := filepath.Abs(filename)
 	if err != nil {
 		return nil, fmt.Errorf("get absolute path: %w", err)
+	}
+
+	// If the source file is guarded by //go:build wireinject we must pass
+	// -tags=wireinject to packages.Load.  Without it the build tool excludes
+	// the file from the package, so the membership check below never finds it
+	// and returns "file is not in the same package".  This matters both when a
+	// non-wireinject sibling file exists (first run) and after the generated
+	// *_band.go (tagged //go:build !wireinject) is present (second run).
+	var buildFlags []string
+	if fileHasWireinjectTag(absFilename) {
+		buildFlags = []string{"-tags=wireinject"}
 	}
 
 	// Load packages using the new packages API.
@@ -249,7 +307,8 @@ func (p *Parser) initializePackages(filename string) (*packages.Package, error) 
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
 			packages.NeedImports | packages.NeedTypes | packages.NeedTypesSizes |
 			packages.NeedSyntax | packages.NeedTypesInfo,
-		Fset: p.fset,
+		BuildFlags: buildFlags,
+		Fset:       p.fset,
 	}
 
 	// Use the absolute filename in the file= query so that go/packages
