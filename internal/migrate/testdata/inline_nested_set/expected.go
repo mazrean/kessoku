@@ -1,5 +1,3 @@
-//go:build !wireinject
-
 //go:generate go tool kessoku $GOFILE
 
 package inline_nested_set

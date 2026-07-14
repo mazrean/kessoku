@@ -1,5 +1,3 @@
-//go:build !wireinject
-
 //go:generate go tool kessoku $GOFILE
 
 package dual_named_sets_same_impl

@@ -1,5 +1,3 @@
-//go:build !wireinject
-
 //go:generate go tool kessoku $GOFILE
 
 package build_with_set_and_bind

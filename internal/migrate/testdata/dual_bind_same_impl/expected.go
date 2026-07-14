@@ -1,5 +1,3 @@
-//go:build !wireinject
-
 //go:generate go tool kessoku $GOFILE
 
 package dual_bind_same_impl

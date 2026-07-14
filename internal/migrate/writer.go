@@ -120,13 +120,6 @@ func (w *Writer) exprWithPos(expr ast.Expr, pos token.Pos) ast.Expr {
 	}
 }
 
-// wireinjectBuildConstraint excludes the generated file when the wireinject build tag is
-// active. Without this, a second invocation of "kessoku migrate ./" would load its own
-// previously-generated output, triggering type-check errors and "redeclared in this block"
-// failures. With this constraint, packages.Load (which uses -tags=wireinject) automatically
-// skips the generated file, making migrate idempotent.
-const wireinjectBuildConstraint = "//go:build !wireinject\n\n"
-
 // goGenerateComment is the go:generate directive added to generated files.
 const goGenerateComment = "//go:generate go tool kessoku $GOFILE\n\n"
 
@@ -135,10 +128,6 @@ func (w *Writer) Write(output *MergedOutput, path string) error {
 	file := w.buildFile(output)
 
 	var buf bytes.Buffer
-
-	// Add build constraint to exclude this file when loading with -tags=wireinject.
-	// This makes "kessoku migrate" idempotent: re-running it won't pick up its own output.
-	buf.WriteString(wireinjectBuildConstraint)
 
 	// Add go:generate comment at the top
 	buf.WriteString(goGenerateComment)

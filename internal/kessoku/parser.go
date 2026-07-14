@@ -305,9 +305,7 @@ func (p *Parser) initializePackages(filename string) (*packages.Package, error) 
 	// If the source file is guarded by //go:build wireinject we must pass
 	// -tags=wireinject to packages.Load.  Without it the build tool excludes
 	// the file from the package, so the membership check below never finds it
-	// and returns "file is not in the same package".  This matters both when a
-	// non-wireinject sibling file exists (first run) and after the generated
-	// *_band.go (tagged //go:build !wireinject) is present (second run).
+	// and returns "file is not in the same package".
 	var buildFlags []string
 	if fileHasWireinjectTag(absFilename) {
 		buildFlags = []string{"-tags=wireinject"}

@@ -159,10 +159,11 @@ type Foo struct{}
 	}
 }
 
-// TestGeneratedOutputHasBuildConstraint verifies that the generated kessoku output
-// contains //go:build !wireinject so that re-running "kessoku migrate ./" is
-// idempotent (BUG-18: second invocation fails with misleading type-check error).
-func TestGeneratedOutputHasBuildConstraint(t *testing.T) {
+// TestGeneratedOutputHasNoBuildConstraint verifies that the generated kessoku
+// output does NOT carry a //go:build !wireinject constraint. Generated files
+// must build unconditionally; wire configurations that rely on build tags are
+// intentionally unsupported.
+func TestGeneratedOutputHasNoBuildConstraint(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputPath := filepath.Join(tmpDir, "kessoku.go")
 
@@ -191,10 +192,8 @@ type Foo struct{}
 		t.Fatalf("failed to read output: %v", err)
 	}
 
-	// The generated file must start with //go:build !wireinject so that
-	// packages.Load (called with -tags=wireinject) skips it on subsequent runs.
-	if !strings.HasPrefix(string(outputBytes), "//go:build !wireinject\n") {
-		t.Errorf("generated output does not start with //go:build !wireinject; got:\n%s", string(outputBytes))
+	if strings.Contains(string(outputBytes), "//go:build") {
+		t.Errorf("generated output must not contain a //go:build constraint; got:\n%s", string(outputBytes))
 	}
 }
 
