@@ -98,23 +98,35 @@ func anyProviderReturnsError(elements []WirePattern, setIndex map[string]*WireNe
 	return false
 }
 
-// isErrorType checks if a type is the built-in error type.
+// isErrorType reports whether t is, or implements, the built-in error interface.
+// It handles:
+//   - the predeclared error interface itself (types.Identical fast path),
+//   - type aliases whose underlying type is identical to error's underlying type,
+//   - concrete named types (e.g. *MyError) that implement error via types.Implements.
 func isErrorType(t types.Type) bool {
 	if t == nil {
 		return false
 	}
 
-	// Get the predeclared error type from Universe
+	// Get the predeclared error type from Universe.
 	errorType := types.Universe.Lookup("error").Type()
 
-	// Compare directly with the predeclared error type
+	// Fast path: the type IS the error interface.
 	if types.Identical(t, errorType) {
 		return true
 	}
 
-	// Handle type aliases by checking the underlying type
+	// Handle type aliases whose underlying type matches error's underlying interface.
 	underlying := t.Underlying()
 	if underlying != nil && types.Identical(underlying, errorType.Underlying()) {
+		return true
+	}
+
+	// General case: check whether t implements the error interface.
+	// This correctly handles concrete types such as *MyError where
+	// func (*MyError) Error() string is defined.
+	errorIface, ok := errorType.Underlying().(*types.Interface)
+	if ok && types.Implements(t, errorIface) {
 		return true
 	}
 

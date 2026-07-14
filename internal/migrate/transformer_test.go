@@ -62,6 +62,68 @@ func TestIsErrorType(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			// *MyError where MyError is a named struct with an Error() string method.
+			// types.Identical only matches the exact error interface; types.Implements
+			// is needed to recognise concrete implementors.
+			name: "pointer to concrete error type",
+			typeFunc: func() types.Type {
+				pkg := types.NewPackage("example.com/app", "app")
+				// struct MyError{}
+				myErrorStruct := types.NewStruct(nil, nil)
+				myErrorNamed := types.NewNamed(
+					types.NewTypeName(token.NoPos, pkg, "MyError", nil),
+					myErrorStruct,
+					nil,
+				)
+				// func (*MyError) Error() string
+				recv := types.NewVar(token.NoPos, pkg, "", types.NewPointer(myErrorNamed))
+				errMethod := types.NewFunc(
+					token.NoPos,
+					pkg,
+					"Error",
+					types.NewSignatureType(
+						recv,
+						nil, nil,
+						types.NewTuple(),
+						types.NewTuple(types.NewVar(token.NoPos, nil, "", types.Typ[types.String])),
+						false,
+					),
+				)
+				myErrorNamed.AddMethod(errMethod)
+				return types.NewPointer(myErrorNamed)
+			},
+			want: true,
+		},
+		{
+			// MyError (non-pointer) with value receiver Error() string.
+			name: "concrete named error type (value receiver)",
+			typeFunc: func() types.Type {
+				pkg := types.NewPackage("example.com/app", "app")
+				myErrorStruct := types.NewStruct(nil, nil)
+				myErrorNamed := types.NewNamed(
+					types.NewTypeName(token.NoPos, pkg, "MyError", nil),
+					myErrorStruct,
+					nil,
+				)
+				recv := types.NewVar(token.NoPos, pkg, "", myErrorNamed)
+				errMethod := types.NewFunc(
+					token.NoPos,
+					pkg,
+					"Error",
+					types.NewSignatureType(
+						recv,
+						nil, nil,
+						types.NewTuple(),
+						types.NewTuple(types.NewVar(token.NoPos, nil, "", types.Typ[types.String])),
+						false,
+					),
+				)
+				myErrorNamed.AddMethod(errMethod)
+				return myErrorNamed
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -764,6 +826,33 @@ func TestAnyProviderReturnsError(t *testing.T) {
 	errProvider := &WireProviderFunc{Name: "NewDB", Func: newFunc("NewDB", intType, errType)}
 	plainProvider := &WireProviderFunc{Name: "NewApp", Func: newFunc("NewApp", intType)}
 
+	// Build *MyError: a named struct with a pointer-receiver Error() string method.
+	concreteErrType := func() types.Type {
+		pkg := types.NewPackage("example.com/app", "app")
+		myErrorStruct := types.NewStruct(nil, nil)
+		myErrorNamed := types.NewNamed(
+			types.NewTypeName(token.NoPos, pkg, "MyError", nil),
+			myErrorStruct,
+			nil,
+		)
+		recv := types.NewVar(token.NoPos, pkg, "", types.NewPointer(myErrorNamed))
+		errMethod := types.NewFunc(
+			token.NoPos,
+			pkg,
+			"Error",
+			types.NewSignatureType(
+				recv,
+				nil, nil,
+				types.NewTuple(),
+				types.NewTuple(types.NewVar(token.NoPos, nil, "", types.Typ[types.String])),
+				false,
+			),
+		)
+		myErrorNamed.AddMethod(errMethod)
+		return types.NewPointer(myErrorNamed)
+	}()
+	concreteErrProvider := &WireProviderFunc{Name: "NewApp", Func: newFunc("NewApp", intType, concreteErrType)}
+
 	tests := []struct {
 		setIndex map[string]*WireNewSet
 		name     string
@@ -801,6 +890,13 @@ func TestAnyProviderReturnsError(t *testing.T) {
 			elements: []WirePattern{&WireSetRef{Name: "Loop"}},
 			setIndex: map[string]*WireNewSet{"Loop": {Elements: []WirePattern{&WireSetRef{Name: "Loop"}, plainProvider}}},
 			want:     false,
+		},
+		{
+			// Provider that returns (*App, *MyError) where *MyError implements error
+			// but is NOT the predeclared error interface — requires types.Implements.
+			name:     "provider returns concrete error type",
+			elements: []WirePattern{concreteErrProvider},
+			want:     true,
 		},
 	}
 
