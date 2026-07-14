@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -84,7 +85,7 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) *Kesso
 }
 
 // transformFieldsOf transforms wire.FieldsOf to kessoku.Provide with accessor function.
-func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *KessokuProvide {
+func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) (*KessokuProvide, error) {
 	// wf.StructType comes from extractTypeFromNew which wraps the new(T) arg in one extra pointer:
 	//   new(T)   -> *T   (paramType = T,  a value type)
 	//   new(*T)  -> **T  (paramType = *T, a pointer type)
@@ -102,7 +103,7 @@ func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *K
 	}
 	underlying := structType.Underlying()
 	if _, ok := underlying.(*types.Struct); !ok {
-		return &KessokuProvide{SourcePos: wf.Pos}
+		return &KessokuProvide{SourcePos: wf.Pos}, nil
 	}
 
 	// Check if struct is from external package
@@ -121,7 +122,7 @@ func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *K
 		obj, _, _ := types.LookupFieldOrMethod(structType, true, pkg, fieldName)
 		field, ok := obj.(*types.Var)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("field %q not found on struct %s", fieldName, structType.String())
 		}
 		// Skip unexported fields from external packages
 		if isExternalPkg && !field.Exported() {
@@ -140,7 +141,7 @@ func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *K
 	return &KessokuProvide{
 		FuncExpr:  funcLit,
 		SourcePos: wf.Pos,
-	}
+	}, nil
 }
 
 // buildStructConstructor builds a function literal for struct construction.
