@@ -9,6 +9,9 @@ import (
 )
 
 var ConfigSet = kessoku.Set(
+	kessoku.Provide(func(type_ string, type__2 string) Config {
+		return Config{Type: type_, Type_: type__2}
+	}),
 	kessoku.Provide(func(type_ string, type__2 string) *Config {
 		return &Config{Type: type_, Type_: type__2}
 	}),

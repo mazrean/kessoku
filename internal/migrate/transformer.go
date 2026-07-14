@@ -102,7 +102,7 @@ func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *
 		case *WireInterfaceValue:
 			result = append(result, t.transformInterfaceValue(wp))
 		case *WireStruct:
-			result = append(result, t.transformStruct(wp, pkg))
+			result = append(result, t.transformStruct(wp, pkg)...)
 		case *WireFieldsOf:
 			transformed, err := t.transformFieldsOf(wp, pkg)
 			if err != nil {

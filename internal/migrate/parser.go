@@ -363,9 +363,16 @@ func (p *Parser) parseStruct(call *ast.CallExpr, info *types.Info, filePath stri
 		return nil
 	}
 
+	// extractTypeFromNew always wraps the argument in one pointer layer:
+	//   new(T)  -> *T  (single pointer, value-type provision)
+	//   new(*T) -> **T (double pointer, pointer-type provision)
+	// So the correct check for "pointer provision" is whether the result is
+	// a double pointer (**T), mirroring the IsPtrToStruct logic in parseFieldsOf.
 	isPointer := false
-	if _, ok := structType.(*types.Pointer); ok {
-		isPointer = true
+	if ptr, ok := structType.(*types.Pointer); ok {
+		if _, ok := ptr.Elem().(*types.Pointer); ok {
+			isPointer = true
+		}
 	}
 
 	fields := extractStringFields(call.Args[1:])
