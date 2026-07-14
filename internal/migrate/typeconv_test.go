@@ -196,6 +196,48 @@ func TestTypeConverterTypeToExpr(t *testing.T) {
 			currentPkg: currentPkg,
 			wantText:   "pkg.Box[int]",
 		},
+		{
+			name: "alias type in same package",
+			typeFunc: func() types.Type {
+				aliasName := types.NewTypeName(token.NoPos, currentPkg, "AppAlias", nil)
+				underlying := types.NewNamed(
+					types.NewTypeName(token.NoPos, currentPkg, "App", nil),
+					types.NewStruct(nil, nil),
+					nil,
+				)
+				return types.NewAlias(aliasName, underlying)
+			},
+			currentPkg: currentPkg,
+			wantText:   "AppAlias",
+		},
+		{
+			name: "alias type in external package",
+			typeFunc: func() types.Type {
+				aliasName := types.NewTypeName(token.NoPos, externalPkg, "ExtAlias", nil)
+				underlying := types.NewNamed(
+					types.NewTypeName(token.NoPos, externalPkg, "ExtType", nil),
+					types.NewStruct(nil, nil),
+					nil,
+				)
+				return types.NewAlias(aliasName, underlying)
+			},
+			currentPkg: currentPkg,
+			wantText:   "pkg.ExtAlias",
+		},
+		{
+			name: "pointer to alias type in same package",
+			typeFunc: func() types.Type {
+				aliasName := types.NewTypeName(token.NoPos, currentPkg, "AppAlias", nil)
+				underlying := types.NewNamed(
+					types.NewTypeName(token.NoPos, currentPkg, "App", nil),
+					types.NewStruct(nil, nil),
+					nil,
+				)
+				return types.NewPointer(types.NewAlias(aliasName, underlying))
+			},
+			currentPkg: currentPkg,
+			wantText:   "*AppAlias",
+		},
 	}
 
 	for _, tt := range tests {
