@@ -30,6 +30,9 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		var err error
 		cache, err = kessoku.Async(kessoku.Provide(NewCache)).Fn()()
 		if err != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				return cause
+			}
 			return err
 		}
 		close(cacheCh)
@@ -39,6 +42,9 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		var err0 error
 		messaging, err0 = kessoku.Async(kessoku.Provide(NewMessaging)).Fn()()
 		if err0 != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				return cause
+			}
 			return err0
 		}
 		close(messagingCh)
@@ -47,6 +53,10 @@ func InitializeApp(ctx context.Context) (*App, error) {
 	var err1 error
 	database, err1 = kessoku.Async(kessoku.Provide(NewDatabase)).Fn()()
 	if err1 != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			var zero *App
+			return zero, cause
+		}
 		var zero *App
 		return zero, err1
 	}

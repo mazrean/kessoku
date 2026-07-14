@@ -10,12 +10,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func InitializeService(ctx context.Context) (*Service, error) {
+func InitializeApp(ctx context.Context) (*App, error) {
 	var (
-		errgroup0  *Errgroup
-		database   *Database
-		databaseCh = make(chan struct{})
-		service    *Service
+		database *Database
+		cache    *Cache
+		cacheCh  = make(chan struct{})
+		app      *App
 	)
 	parentCtx := ctx
 	ctx, cancel := context.WithCancel(ctx)
@@ -26,40 +26,40 @@ func InitializeService(ctx context.Context) (*Service, error) {
 	}()
 	eg.Go(func() error {
 		var err error
-		database, err = kessoku.Async(kessoku.Provide(NewDatabase)).Fn()()
+		cache, err = kessoku.Async(kessoku.Provide(NewCache)).Fn()(ctx)
 		if err != nil {
 			if cause := context.Cause(ctx); cause != nil {
 				return cause
 			}
 			return err
 		}
-		close(databaseCh)
+		close(cacheCh)
 		return nil
 	})
 	var err0 error
-	errgroup0, err0 = kessoku.Async(kessoku.Provide(NewErrgroup)).Fn()()
+	database, err0 = kessoku.Async(kessoku.Provide(NewDatabase)).Fn()(ctx)
 	if err0 != nil {
 		if cause := context.Cause(ctx); cause != nil {
-			var zero *Service
+			var zero *App
 			return zero, cause
 		}
-		var zero *Service
+		var zero *App
 		return zero, err0
 	}
 	select {
-	case <-databaseCh:
+	case <-cacheCh:
 	case <-ctx.Done():
-		var zero *Service
+		var zero *App
 		return zero, context.Cause(ctx)
 	}
-	service = kessoku.Provide(NewService).Fn()(errgroup0, database)
+	app = kessoku.Provide(NewApp).Fn()(database, cache)
 	if err := eg.Wait(); err != nil {
-		var zero *Service
+		var zero *App
 		return zero, err
 	}
-	if err := context.Cause(parentCtx); err != nil {
-		var zero *Service
+	if err := parentCtx.Err(); err != nil {
+		var zero *App
 		return zero, err
 	}
-	return service, nil
+	return app, nil
 }

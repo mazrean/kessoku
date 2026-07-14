@@ -28,6 +28,9 @@ func InitializeService(val Ctx) (*Service, error) {
 		var err error
 		cache, err = kessoku.Async(kessoku.Provide(NewCache)).Fn()(val)
 		if err != nil {
+			if cause := context.Cause(val); cause != nil {
+				return cause
+			}
 			return err
 		}
 		close(cacheCh)
@@ -36,6 +39,10 @@ func InitializeService(val Ctx) (*Service, error) {
 	var err0 error
 	config, err0 = kessoku.Async(kessoku.Provide(NewConfig)).Fn()(val)
 	if err0 != nil {
+		if cause := context.Cause(val); cause != nil {
+			var zero *Service
+			return zero, cause
+		}
 		var zero *Service
 		return zero, err0
 	}

@@ -686,7 +686,7 @@ func (stmt *InjectorProviderCallStmt) Stmt(varPool *VarPool, injector *Injector,
 			},
 		})
 
-		errorHandleStmt = stmt.buildErrorHandlingStatement(errIdent, returnErrStmts)
+		errorHandleStmt = stmt.buildErrorHandlingStatement(errIdent, injector, returnErrStmts)
 	}
 
 	// When Returns is empty and IsReturnError is true, the only LHS variable is the
@@ -979,11 +979,65 @@ func (stmt *InjectorProviderCallStmt) buildAssignmentStatement(lhs, rhs []ast.Ex
 	}
 }
 
-// buildErrorHandlingStatement builds error handling statements
-func (stmt *InjectorProviderCallStmt) buildErrorHandlingStatement(errIdent *ast.Ident, returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
+// buildErrorHandlingStatement builds error handling statements.
+//
+// When the injector uses an errgroup context (asyncCtxName != ""), a context
+// cancellation triggered by a goroutine failure must surface the root-cause
+// error rather than context.Canceled. We emit:
+//
+//	if err != nil {
+//	    if cause := context.Cause(ctx); cause != nil {
+//	        return zero, cause
+//	    }
+//	    return zero, err
+//	}
+//
+// Without the context.Cause check the caller would observe context.Canceled
+// while the real error from the errgroup goroutine is silently dropped.
+func (stmt *InjectorProviderCallStmt) buildErrorHandlingStatement(errIdent *ast.Ident, injector *Injector, returnErrStmts func(ast.Expr) []ast.Stmt) ast.Stmt {
 	if returnErrStmts == nil {
 		return &ast.EmptyStmt{}
 	}
+
+	var bodyStmts []ast.Stmt
+
+	// When an errgroup cancellable context exists, check context.Cause(ctx)
+	// first so that the root-cause error from a goroutine failure is returned
+	// instead of the derivative context.Canceled that the provider observed.
+	ctxName := injector.asyncCtxName
+	contextAlias := injector.asyncContextAlias
+	if ctxName != "" {
+		if contextAlias == "" {
+			contextAlias = contextPkgName
+		}
+
+		causeIdent := ast.NewIdent("cause")
+		causeCall := &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent(contextAlias),
+				Sel: ast.NewIdent("Cause"),
+			},
+			Args: []ast.Expr{ast.NewIdent(ctxName)},
+		}
+
+		bodyStmts = append(bodyStmts, &ast.IfStmt{
+			Init: &ast.AssignStmt{
+				Lhs: []ast.Expr{causeIdent},
+				Tok: token.DEFINE,
+				Rhs: []ast.Expr{causeCall},
+			},
+			Cond: &ast.BinaryExpr{
+				X:  causeIdent,
+				Op: token.NEQ,
+				Y:  ast.NewIdent("nil"),
+			},
+			Body: &ast.BlockStmt{
+				List: returnErrStmts(causeIdent),
+			},
+		})
+	}
+
+	bodyStmts = append(bodyStmts, returnErrStmts(errIdent)...)
 
 	return &ast.IfStmt{
 		Cond: &ast.BinaryExpr{
@@ -992,7 +1046,7 @@ func (stmt *InjectorProviderCallStmt) buildErrorHandlingStatement(errIdent *ast.
 			Y:  ast.NewIdent("nil"),
 		},
 		Body: &ast.BlockStmt{
-			List: returnErrStmts(errIdent),
+			List: bodyStmts,
 		},
 	}
 }
