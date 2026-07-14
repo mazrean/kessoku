@@ -178,7 +178,11 @@ func (t *Transformer) transformElementsWithBoundTypes(elements []WirePattern, pk
 			}
 			// Remove from map so subsequent occurrences are skipped
 			delete(mergedFieldsOf, typeKey)
-			result = append(result, t.transformFieldsOf(merged, pkg))
+			transformed, err := t.transformFieldsOf(merged, pkg)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, transformed)
 		case *WireProviderFunc:
 			// Skip provider if its output type is already bound via wire.Bind
 			// (wire.Bind creates an implicit provider for the implementation type)
