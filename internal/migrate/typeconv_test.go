@@ -241,3 +241,51 @@ func TestTypeConverterImportsDedup(t *testing.T) {
 		t.Errorf("expected 1 import after dedup, got %d", len(imports))
 	}
 }
+
+// TestTypeConverterWrongCurrentPkgProducesUnqualifiedName demonstrates the bug described
+// in the sharedTypeConverter issue: when a TypeConverter is initialised with a dependency
+// package as currentPkg (pkgs[0] in packages.Load results), TypeToExpr treats types from
+// that dependency package as "same package" and returns an unqualified identifier, omitting
+// the necessary package qualifier and import.
+//
+// After the fix, TypeConverter.currentPkg must match the package being migrated (the
+// output package), not the first package returned by packages.Load.
+func TestTypeConverterWrongCurrentPkgProducesUnqualifiedName(t *testing.T) {
+	// Simulate the dependency package "pkg" that defines the Doer interface.
+	depPkg := types.NewPackage("github.com/example/pkg", "pkg")
+	doerTypeName := types.NewTypeName(token.NoPos, depPkg, "Doer", nil)
+	method := types.NewFunc(token.NoPos, nil, "Do", types.NewSignatureType(nil, nil, nil, nil, nil, false))
+	doerIface := types.NewInterfaceType([]*types.Func{method}, nil)
+	doerIface.Complete()
+	doerType := types.NewNamed(doerTypeName, doerIface, nil)
+
+	// Simulate the "main" package that depends on pkg.
+	mainPkg := types.NewPackage("example.com/app", "main")
+
+	// BUG scenario: TypeConverter initialised with depPkg as currentPkg.
+	// This mimics the bug where pkgs[0] is the dependency, not the package being migrated.
+	tcWrong := NewTypeConverter(depPkg)
+	gotWrong := exprToString(tcWrong.TypeToExpr(doerType))
+	if gotWrong != "Doer" {
+		t.Errorf("bug scenario: TypeToExpr with wrong currentPkg = %q, want %q (unqualified)", gotWrong, "Doer")
+	}
+	// Also confirm no import was collected (the bug: import is silently skipped).
+	importsWrong := tcWrong.Imports()
+	if len(importsWrong) != 0 {
+		t.Errorf("bug scenario: expected 0 imports when currentPkg == depPkg, got %d", len(importsWrong))
+	}
+
+	// CORRECT scenario: TypeConverter initialised with mainPkg as currentPkg.
+	// This is what the fix ensures: each package in the migration loop gets its own TypeConverter
+	// (or the shared one has its currentPkg updated) to reflect the package being migrated.
+	tcCorrect := NewTypeConverter(mainPkg)
+	gotCorrect := exprToString(tcCorrect.TypeToExpr(doerType))
+	if gotCorrect != "pkg.Doer" {
+		t.Errorf("correct scenario: TypeToExpr with correct currentPkg = %q, want %q (qualified)", gotCorrect, "pkg.Doer")
+	}
+	// Confirm the import is collected.
+	importsCorrect := tcCorrect.Imports()
+	if len(importsCorrect) != 1 || importsCorrect[0].Path != "github.com/example/pkg" {
+		t.Errorf("correct scenario: expected import for github.com/example/pkg, got %v", importsCorrect)
+	}
+}
