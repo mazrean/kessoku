@@ -291,6 +291,11 @@ type InjectorProviderCallStmt struct {
 	Provider  *ProviderSpec
 	Arguments []*InjectorCallArgument
 	Returns   []*InjectorParam
+	// VariadicElemMatch is true when the variadic last parameter was satisfied by a
+	// single element-type provider (e.g. NewOption() Option for ...Option).  The
+	// generated call must then omit the `...` spread operator so that the element
+	// is passed as a plain argument rather than being expanded from a slice.
+	VariadicElemMatch bool
 }
 
 func (stmt *InjectorProviderCallStmt) HasAsync() bool {
