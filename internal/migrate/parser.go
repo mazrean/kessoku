@@ -43,15 +43,28 @@ func (p *Parser) FindWireImport(file *ast.File) string {
 }
 
 // ExtractImports extracts all imports from a file as a map from package name/alias to import path.
-func (p *Parser) ExtractImports(file *ast.File) map[string]string {
+// pkgNameByPath is an optional map from import path to the actual package name (as declared in
+// the imported package's "package" clause). When non-nil it is used instead of lastPathElement
+// to derive the default key for un-aliased imports. This is necessary for major-version suffix
+// paths (e.g. "example.com/lib/v2" whose package name is "lib", not "v2") and for
+// gopkg.in-style paths (e.g. "gopkg.in/yaml.v3" whose package name is "yaml", not "yaml.v3").
+func (p *Parser) ExtractImports(file *ast.File, pkgNameByPath map[string]string) map[string]string {
 	imports := make(map[string]string)
 	for _, imp := range file.Imports {
 		path := strings.Trim(imp.Path.Value, "\"")
 		var name string
-		if imp.Name != nil {
+		switch {
+		case imp.Name != nil:
 			name = imp.Name.Name
-		} else {
-			// Use the last element of the path as the default package name
+		case pkgNameByPath != nil:
+			if actualName, ok := pkgNameByPath[path]; ok {
+				name = actualName
+			} else {
+				// Fall back to last path element when not in the provided map.
+				name = lastPathElement(path)
+			}
+		default:
+			// Use the last element of the path as the default package name.
 			name = lastPathElement(path)
 		}
 		// Skip dot imports and blank imports

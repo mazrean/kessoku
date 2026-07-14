@@ -119,8 +119,17 @@ func (m *Migrator) MigrateFiles(patterns []string, outputPath string) error {
 				continue
 			}
 
+			// Build a map from import path to actual package name using the type-checker's
+			// view of imported packages.  This is required so that major-version suffix paths
+			// (e.g. "example.com/lib/v2" → package name "lib") and gopkg.in-style paths
+			// (e.g. "gopkg.in/yaml.v3" → package name "yaml") are keyed correctly.
+			pkgNameByPath := make(map[string]string, len(pkg.Imports))
+			for importPath, importedPkg := range pkg.Imports {
+				pkgNameByPath[importPath] = importedPkg.Name
+			}
+
 			// Extract source imports for package reference resolution
-			sourceImports := m.parser.ExtractImports(file)
+			sourceImports := m.parser.ExtractImports(file, pkgNameByPath)
 
 			// Extract patterns
 			patterns, warnings := m.parser.ExtractPatterns(file, pkg.TypesInfo, wireImport, filePath)
