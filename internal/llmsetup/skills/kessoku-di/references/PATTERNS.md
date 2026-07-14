@@ -285,13 +285,12 @@ Extract struct fields as individual dependencies:
 
 ```go
 type Config struct {
-    DBHost   string
-    DBPort   int
-    CacheURL string
+    DBHost string
+    DBPort int
 }
 
 func NewConfig() *Config {
-    return &Config{DBHost: "localhost", DBPort: 5432, CacheURL: "redis://..."}
+    return &Config{DBHost: "localhost", DBPort: 5432}
 }
 
 func NewDB(host string, port int) *DB {
@@ -301,12 +300,25 @@ func NewDB(host string, port int) *DB {
 var _ = kessoku.Inject[*DB](
     "InitializeDB",
     kessoku.Provide(NewConfig),   // Provides *Config
-    kessoku.Struct[*Config](),    // Expands to DBHost(string), DBPort(int), CacheURL(string)
+    kessoku.Struct[*Config](),    // Expands to DBHost(string), DBPort(int)
     kessoku.Provide(NewDB),       // Receives string and int (matched by type)
 )
 ```
 
 **Important**: `kessoku.Struct[T]()` takes NO arguments. It expands ALL exported fields.
+
+**Constraint**: All exported fields must have distinct types. If two fields share the same type (e.g., two `string` fields), use `kessoku.Provide` with an explicit constructor instead:
+
+```go
+// This would fail — two string fields:
+// type Config struct { DBHost string; CacheURL string; DBPort int }
+// kessoku.Struct[*Config]()  // Error: two exported fields of the same type string
+
+// Fix: use an explicit constructor
+func NewDB(cfg *Config) *DB {
+    return &DB{host: cfg.DBHost, port: cfg.DBPort}
+}
+```
 
 ### Struct vs Provide
 
