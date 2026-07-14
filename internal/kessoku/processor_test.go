@@ -1003,6 +1003,58 @@ var _ = kessoku.Inject[*Service](
 	}
 }
 
+// TestSourceFileNamedBandGoNoFalsePositive verifies that when the kessoku
+// source file itself ends in _band.go (e.g. inject_band.go), processing it
+// does not produce a false-positive "duplicate injector name" error.
+//
+// Regression test for the bug where checkDuplicateInjectorNames scanned
+// sibling *_band.go files but only excluded ownOutputFile from the scan.
+// When the source file itself matched the *_band.go suffix it was scanned,
+// and any function it declared with the same name as an injector was
+// incorrectly flagged as a duplicate.
+func TestSourceFileNamedBandGoNoFalsePositive(t *testing.T) {
+	t.Parallel()
+
+	// inject_band.go: the source file itself ends in _band.go.
+	// It contains both a helper function InitFoo and a kessoku.Inject call
+	// that will generate a function also named InitFoo.
+	srcContent := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Foo struct{}
+
+func NewFoo() *Foo { return &Foo{} }
+
+// InitFoo is a helper declared in the source file itself.
+func InitFoo() *Foo { return NewFoo() }
+
+var _ = kessoku.Inject[*Foo](
+	"InitFoo",
+	kessoku.Provide(NewFoo),
+)
+`
+
+	tempDir := t.TempDir()
+	// Source file is named inject_band.go — matches the *_band.go pattern.
+	srcFile := filepath.Join(tempDir, "inject_band.go")
+	if err := os.WriteFile(srcFile, []byte(srcContent), 0644); err != nil {
+		t.Fatalf("write inject_band.go: %v", err)
+	}
+
+	proc := NewProcessor()
+	// Must succeed — the source file is not a previously-generated output.
+	if err := proc.ProcessFiles([]string{srcFile}); err != nil {
+		t.Fatalf("ProcessFiles returned unexpected error: %v", err)
+	}
+
+	// The output file should be inject_band_band.go.
+	outFile := filepath.Join(tempDir, "inject_band_band.go")
+	if _, err := os.Stat(outFile); os.IsNotExist(err) {
+		t.Fatal("expected inject_band_band.go to be created")
+	}
+}
+
 // TestProcessFilesGraphValidationBeforeWrite verifies that a graph-level error
 // (e.g. struct with duplicate field types, which is caught by CreateInjector
 // rather than ParseFile) in a later file does not leave the earlier file's
