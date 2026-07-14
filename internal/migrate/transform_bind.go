@@ -36,9 +36,74 @@ func (t *Transformer) transformBind(wb *WireBind, pkg *types.Package, elements [
 	implPkg := named.Obj().Pkg()
 
 	// Step 1: look for the provider in the sibling elements of the current set.
-	// This handles both "New+TypeName" and any other naming convention.
+	// This handles both "New+TypeName" and any other naming convention, as well
+	// as wire.Struct siblings which produce anonymous function literals rather
+	// than named constructor functions.
 	var constructor *types.Func
 	for _, elem := range elements {
+		// Handle wire.Struct siblings: transformStruct synthesises an anonymous
+		// *ast.FuncLit, so there is no *types.Func to look up.  Detect the match
+		// directly from the struct type and short-circuit to return KessokuBind.
+		if ws, ok := elem.(*WireStruct); ok {
+			// ws.StructType comes from extractTypeFromNew which adds one pointer
+			// layer; unwrap it to reach the plain named type.
+			wsBase := unwrapPointer(ws.StructType)
+			for {
+				if ptr, ok := wsBase.(*types.Pointer); ok {
+					wsBase = ptr.Elem()
+				} else {
+					break
+				}
+			}
+			if !types.Identical(wsBase, named) {
+				continue
+			}
+			// The bound implementation type determines which provider variant to use.
+			// wire.Bind(new(I), new(*T)) -> use the pointer-returning FuncLit.
+			// wire.Bind(new(I), new(T))  -> use the value-returning FuncLit.
+			_, implIsPointer := wb.Implementation.(*types.Pointer)
+			patterns := t.transformStruct(ws, pkg)
+			// transformStruct returns [valueFuncLit, ptrFuncLit] when !IsPointer,
+			// and [ptrFuncLit] when IsPointer.  We need the pointer variant when
+			// the implementation type is a pointer, value variant otherwise.
+			var providerExpr ast.Expr
+			switch {
+			case ws.IsPointer:
+				// Only one pattern (pointer variant) was produced.
+				if len(patterns) > 0 {
+					if kp, ok := patterns[0].(*KessokuProvide); ok {
+						providerExpr = kp.FuncExpr
+					}
+				}
+			case implIsPointer:
+				// Value and pointer patterns produced; pick the pointer one (index 1).
+				if len(patterns) > 1 {
+					if kp, ok := patterns[1].(*KessokuProvide); ok {
+						providerExpr = kp.FuncExpr
+					}
+				}
+			default:
+				// Value variant (index 0).
+				if len(patterns) > 0 {
+					if kp, ok := patterns[0].(*KessokuProvide); ok {
+						providerExpr = kp.FuncExpr
+					}
+				}
+			}
+			if providerExpr == nil {
+				break
+			}
+			return &KessokuBind{
+				Interface: unwrapPointer(wb.Interface),
+				Provider: &KessokuProvide{
+					FuncExpr:  providerExpr,
+					SourcePos: wb.Pos,
+				},
+				VarName:   wb.VarName,
+				SourcePos: wb.Pos,
+			}, nil
+		}
+
 		wpf, ok := elem.(*WireProviderFunc)
 		if !ok || wpf.Func == nil {
 			continue
