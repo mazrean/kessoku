@@ -63,7 +63,7 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		var zero *App
 		return zero, err
 	}
-	if err := parentCtx.Err(); err != nil {
+	if err := context.Cause(parentCtx); err != nil {
 		var zero *App
 		return zero, err
 	}

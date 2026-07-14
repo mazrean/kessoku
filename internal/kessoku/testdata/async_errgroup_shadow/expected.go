@@ -50,7 +50,7 @@ func InitializeService(ctx context.Context) (*Service, error) {
 		var zero *Service
 		return zero, err
 	}
-	if err := parentCtx.Err(); err != nil {
+	if err := context.Cause(parentCtx); err != nil {
 		var zero *Service
 		return zero, err
 	}
