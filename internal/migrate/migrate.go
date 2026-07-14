@@ -90,6 +90,13 @@ func (m *Migrator) MigrateFiles(patterns []string, outputPath string) error {
 			allPkgPatterns = append(allPkgPatterns, filePatterns...)
 		}
 		m.transformer.setIndex = buildSetIndex(allPkgPatterns)
+		// Pre-populate bindVarTypes package-wide so that a top-level wire.Bind
+		// variable defined in file A is visible when transforming a wire.NewSet in
+		// file B that references it.  Without this, t.bindVarTypes was reset to
+		// only the current file's patterns on each Transform call, causing the
+		// cross-file WireSetRef lookup in collectBoundTypes to miss the bind var
+		// and emit a duplicate kessoku.Provide for the same implementation type.
+		m.transformer.bindVarTypes = buildBindVarTypes(allPkgPatterns)
 
 		// Build a map from syntax position to file path
 		syntaxFiles := pkg.CompiledGoFiles
@@ -152,9 +159,10 @@ func (m *Migrator) MigrateFiles(patterns []string, outputPath string) error {
 			})
 		}
 
-		// Reset the set index after each package so cross-package contamination
-		// cannot occur when MigrateFiles is called with multi-package patterns.
+		// Reset the set index and bind var types after each package so cross-package
+		// contamination cannot occur when MigrateFiles is called with multi-package patterns.
 		m.transformer.setIndex = nil
+		m.transformer.bindVarTypes = nil
 	}
 
 	// Log warnings

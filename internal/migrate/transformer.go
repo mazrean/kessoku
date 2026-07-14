@@ -54,17 +54,21 @@ func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *
 	// implementation type strings. This lets transformElements know when a
 	// WireSetRef points to a top-level bind variable (so the explicit constructor
 	// call can be suppressed – the bind already wraps the constructor) (BUG-14).
-	t.bindVarTypes = make(map[string]string)
-	for _, p := range patterns {
-		wb, ok := p.(*WireBind)
-		if !ok || wb.VarName == "" {
-			continue
+	//
+	// t.bindVarTypes may have been pre-populated by the caller with a package-wide
+	// index (so that bind vars defined in a different file of the same package are
+	// visible when processing a file that only contains a wire.NewSet referencing
+	// them). Merge file-local bind vars into the existing index without overwriting
+	// entries already present from other files.
+	fileBVT := buildBindVarTypes(patterns)
+	if t.bindVarTypes == nil {
+		t.bindVarTypes = fileBVT
+	} else {
+		for k, v := range fileBVT {
+			if _, exists := t.bindVarTypes[k]; !exists {
+				t.bindVarTypes[k] = v
+			}
 		}
-		implType := wb.Implementation
-		if ptr, ok2 := implType.(*types.Pointer); ok2 {
-			implType = ptr.Elem()
-		}
-		t.bindVarTypes[wb.VarName] = implType.String()
 	}
 
 	var result []KessokuPattern
