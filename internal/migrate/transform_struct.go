@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"reflect"
 )
 
 // fieldInfo holds information about a struct field for code generation.
@@ -44,8 +45,14 @@ func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) *Kesso
 	// Collect fields to include.
 	// When using "*", wire always means exported fields only, regardless of package.
 	// When listing fields by name, unexported fields from external packages are skipped.
+	// Fields with the struct tag wire:"-" are always skipped, matching wire's isPrevented logic.
 	var fieldInfos []fieldInfo
-	for field := range st.Fields() {
+	for i := range st.NumFields() {
+		field := st.Field(i)
+		// Skip fields marked wire:"-" (wire's isPrevented logic)
+		if reflect.StructTag(st.Tag(i)).Get("wire") == "-" {
+			continue
+		}
 		switch {
 		case ws.Fields[0] == "*":
 			// Skip unexported fields: wire's "*" always means exported fields only
