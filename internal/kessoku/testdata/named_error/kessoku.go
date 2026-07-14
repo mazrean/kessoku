@@ -4,7 +4,8 @@ package main
 
 import "github.com/mazrean/kessoku"
 
-// Test provider returning a named concrete error type (not the error interface).
+// Test that a provider returning a named concrete error type (not the error
+// interface itself) is not mis-identified as the error return slot.
 var _ = kessoku.Inject[*Service](
 	"InitializeService",
 	kessoku.Provide(NewConfig),

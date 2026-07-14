@@ -22,8 +22,11 @@ type Database struct {
 	config *Config
 }
 
-// NewDatabase returns a concrete *MyError instead of the error interface.
-// When *MyError is nil, this must NOT trigger an error path.
+// NewDatabase returns a concrete *MyError alongside *Database. *MyError
+// implements the error interface but is NOT the error interface type itself,
+// so kessoku must treat it as a normal provided type — not as the error
+// return slot. Since no other provider requires *MyError here, its value is
+// discarded (blank identifier) in the generated code.
 func NewDatabase(config *Config) (*Database, *MyError) {
 	return &Database{config: config}, nil
 }
