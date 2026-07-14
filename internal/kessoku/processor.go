@@ -204,11 +204,18 @@ func checkDuplicateInjectorNames(srcFile, ownOutputFile string, injectors []*Inj
 
 	dir := filepath.Dir(srcFile)
 
-	// Collect all *_band.go files in the same directory, excluding the one we
-	// are about to write so that re-running the tool is idempotent.
+	// Collect all *_band.go files in the same directory, excluding:
+	//   1. The output file we are about to (re)write (idempotency).
+	//   2. The source file itself — it may end in _band.go (e.g.
+	//      inject_band.go), in which case scanning it would cause false-positive
+	//      duplicate errors for any function whose name matches an injector name.
 	absOwn, err := filepath.Abs(ownOutputFile)
 	if err != nil {
 		absOwn = ownOutputFile
+	}
+	absSrc, err := filepath.Abs(srcFile)
+	if err != nil {
+		absSrc = srcFile
 	}
 
 	entries, err := os.ReadDir(dir)
@@ -231,8 +238,9 @@ func checkDuplicateInjectorNames(srcFile, ownOutputFile string, injectors []*Inj
 		if absErr != nil {
 			absBand = bandPath
 		}
-		// Skip the output file we are about to (re)write.
-		if absBand == absOwn {
+		// Skip the output file we are about to (re)write and the source file
+		// itself (which may also match the *_band.go pattern).
+		if absBand == absOwn || absBand == absSrc {
 			continue
 		}
 
