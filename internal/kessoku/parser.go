@@ -585,14 +585,27 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 	return nil
 }
 
-// isCleanupFunc reports whether t is a wire-style cleanup function: func() with no
-// parameters and no return values. kessoku has no way to hand a cleanup back to the
-// injector's caller, so such providers are rejected with an explicit error instead
-// of silently discarding the cleanup or (worse) deferring it inside the injector,
-// which would tear the resource down before the caller ever uses it.
+// isCleanupFunc reports whether t is a wire-style cleanup function: func() or
+// func() error, with no parameters. Wire supports both forms as cleanup returns.
+// kessoku has no way to hand a cleanup back to the injector's caller, so such
+// providers are rejected with an explicit error instead of silently discarding
+// the cleanup or (worse) deferring it inside the injector, which would tear the
+// resource down before the caller ever uses it.
 func isCleanupFunc(t types.Type) bool {
 	sig, ok := t.Underlying().(*types.Signature)
-	return ok && sig.Params().Len() == 0 && sig.Results().Len() == 0
+	if !ok || sig.Params().Len() != 0 {
+		return false
+	}
+	// bare func() — no return values
+	if sig.Results().Len() == 0 {
+		return true
+	}
+	// func() error — single error return value
+	if sig.Results().Len() == 1 {
+		errorIface, _ := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
+		return errorIface != nil && types.Implements(sig.Results().At(0).Type(), errorIface)
+	}
+	return false
 }
 
 // parseProviderTypeResult holds the result of parsing a provider type.

@@ -680,6 +680,31 @@ var _ = kessoku.Inject[*DB](
 			expectedBuilds:  0,
 			shouldHaveError: true,
 		},
+		{
+			// Wire also supports func() error as a cleanup return type.
+			// Previously isCleanupFunc only detected bare func() (no results),
+			// so func() error fell through to the provides list with zero refcount,
+			// silently binding the cleanup to _ in generated code and leaking the
+			// resource.
+			name: "provider returning wire-style cleanup func() error is rejected",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type DB struct{}
+
+func NewDB() (*DB, func() error) {
+	return &DB{}, func() error { return nil }
+}
+
+var _ = kessoku.Inject[*DB](
+	"InitializeDB",
+	kessoku.Provide(NewDB),
+)
+`,
+			expectedBuilds:  0,
+			shouldHaveError: true,
+		},
 	}
 
 	// Run edge case tests
