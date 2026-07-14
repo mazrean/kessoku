@@ -902,9 +902,13 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 		// Use the Param from the argument directly, not from Params slice
 		existingContextArg.Param.Ref(false)
 
-		// Mark context import as used
-		if imp, exists := metaData.Imports[contextPkgPath]; exists {
-			imp.IsUsed = true
+		// Mark context import as used, unless the argument is spelled via a
+		// user-defined alias (type Ctx = context.Context): the signature then
+		// renders the alias name and never references the context package.
+		if _, isAlias := existingContextArg.Type.(*types.Alias); !isAlias {
+			if imp, exists := metaData.Imports[contextPkgPath]; exists {
+				imp.IsUsed = true
+			}
 		}
 
 		return nil

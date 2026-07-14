@@ -73,9 +73,10 @@ func Generate(w io.Writer, filename string, metaData *MetaData, injectors []*Inj
 	return nil
 }
 
-// isContextType checks if a type is context.Context
+// isContextType checks if a type is context.Context, including user-defined
+// aliases such as `type Ctx = context.Context`.
 func isContextType(t types.Type) bool {
-	if named, ok := t.(*types.Named); ok {
+	if named, ok := types.Unalias(t).(*types.Named); ok {
 		if obj := named.Obj(); obj != nil && obj.Pkg() != nil {
 			return obj.Pkg().Path() == contextPkgPath && obj.Name() == contextTypeName
 		}
