@@ -5,6 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	// TestMigration type-checks testdata fixtures that import the real
+	// github.com/google/wire package (go/packages needs real types to
+	// resolve). "testdata" dirs are excluded from `go mod tidy`'s package
+	// scan, so this import keeps the module requirement from being pruned.
+	_ "github.com/google/wire"
 )
 
 // TestMigration runs golden file tests for migration.
