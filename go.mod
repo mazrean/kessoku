@@ -8,6 +8,9 @@ require (
 	golang.org/x/tools v0.48.0
 )
 
-require golang.org/x/mod v0.38.0 // indirect
+require (
+	github.com/google/go-cmp v0.7.0 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
 
 tool github.com/mazrean/kessoku/cmd/kessoku
