@@ -77,17 +77,20 @@ type StructFieldSpec struct {
 
 // ProviderSpec represents a provider specification from annotations.
 type ProviderSpec struct {
-	ASTExpr           ast.Expr
+	ErrorType         types.Type
 	StructType        types.Type
+	ErrorTypeExpr     ast.Expr
+	ASTExpr           ast.Expr
 	ReferencedImports map[string]*Import
 	SourceField       *StructFieldSpec
 	Type              ProviderType
-	Provides          [][]types.Type
 	Requires          []types.Type
 	StructFields      []*StructFieldSpec
+	Provides          [][]types.Type
 	DeclOrder         int
 	IsReturnError     bool
 	IsAsync           bool
+	IsVariadic        bool
 }
 
 type Return struct {
@@ -157,6 +160,12 @@ func collectImportsFromType(t types.Type, pkg string, imports map[string]*Import
 				referencedImports[pkgPath] = newImp
 			}
 		}
+		// Recurse into type arguments (e.g. Container[*config.Config] needs config imported)
+		if typeArgs := typ.TypeArgs(); typeArgs != nil {
+			for typeArg := range typeArgs.Types() {
+				collectImportsFromType(typeArg, pkg, imports, referencedImports, varPool)
+			}
+		}
 	case *types.Alias:
 		if objPkg := typ.Obj().Pkg(); objPkg != nil && objPkg.Path() != pkg {
 			pkgPath := objPkg.Path()
@@ -173,6 +182,12 @@ func collectImportsFromType(t types.Type, pkg string, imports map[string]*Import
 				}
 				imports[pkgPath] = newImp
 				referencedImports[pkgPath] = newImp
+			}
+		}
+		// Recurse into type arguments for generic aliases
+		if typeArgs := typ.TypeArgs(); typeArgs != nil {
+			for typeArg := range typeArgs.Types() {
+				collectImportsFromType(typeArg, pkg, imports, referencedImports, varPool)
 			}
 		}
 	case *types.Pointer:
@@ -259,7 +274,10 @@ type InjectorReturn struct {
 }
 
 type InjectorStmt interface {
-	Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(errExpr ast.Expr) []ast.Stmt) ([]ast.Stmt, []string)
+	// Stmt generates the statements for this injector statement.
+	// inChain reports whether the statements are emitted inside an errgroup
+	// goroutine (an InjectorChainStmt body) rather than on the main goroutine.
+	Stmt(varPool *VarPool, injector *Injector, returnErrStmts func(errExpr ast.Expr) []ast.Stmt, inChain bool) ([]ast.Stmt, []string)
 	HasAsync() bool
 }
 
@@ -272,6 +290,11 @@ type InjectorProviderCallStmt struct {
 	Provider  *ProviderSpec
 	Arguments []*InjectorCallArgument
 	Returns   []*InjectorParam
+	// VariadicElemMatch is true when the variadic last parameter was satisfied by a
+	// single element-type provider (e.g. NewOption() Option for ...Option).  The
+	// generated call must then omit the `...` spread operator so that the element
+	// is passed as a plain argument rather than being expanded from a slice.
+	VariadicElemMatch bool
 }
 
 func (stmt *InjectorProviderCallStmt) HasAsync() bool {
@@ -300,9 +323,13 @@ type InjectorFieldAccessStmt struct {
 }
 
 // Stmt generates: fieldVar := structVar.FieldName (or = when predeclared in async builds)
-func (stmt *InjectorFieldAccessStmt) Stmt(varPool *VarPool, _ *Injector, _ func(errExpr ast.Expr) []ast.Stmt) ([]ast.Stmt, []string) {
-	// Determine if we need to use = instead of := (when variables are predeclared in async builds)
+func (stmt *InjectorFieldAccessStmt) Stmt(varPool *VarPool, injector *Injector, _ func(errExpr ast.Expr) []ast.Stmt, _ bool) ([]ast.Stmt, []string) {
+	// In async builds all injector variables are predeclared in a var block,
+	// so plain assignment is required to avoid shadowing them with :=.
 	useAssign := stmt.ReturnParam.WithChannel()
+	if injector != nil && hasChainStmts(injector) {
+		useAssign = true
+	}
 
 	tokenType := token.DEFINE
 	if useAssign {
@@ -343,11 +370,32 @@ func (stmt *InjectorFieldAccessStmt) HasAsync() bool {
 }
 
 type Injector struct {
-	Return        *InjectorReturn
-	Name          string
-	Params        []*InjectorParam
-	Args          []*InjectorArgument
-	Vars          []*InjectorParam
-	Stmts         []InjectorStmt
-	IsReturnError bool
+	Return *InjectorReturn
+	Name   string
+	// asyncEgName is the generated errgroup variable name (async builds only).
+	asyncEgName string
+	// asyncCancelName is the generated context.CancelFunc variable name.
+	// It is set only for error-returning async builds.
+	asyncCancelName string
+	// asyncCtxName is the name of the cancellable context variable used for
+	// channel-wait select statements. It is empty when the generated code
+	// must wait on channels unconditionally (non-error-returning builds).
+	asyncCtxName string
+	// asyncContextAlias is the import alias allocated for the stdlib context
+	// package. It is set only for error-returning async builds, where the
+	// channel-wait select statements reference context.Cause.
+	asyncContextAlias string
+	Params            []*InjectorParam
+	Args              []*InjectorArgument
+	Vars              []*InjectorParam
+	Stmts             []InjectorStmt
+	IsReturnError     bool
+}
+
+// egName returns the errgroup variable name used in generated async code.
+func (injector *Injector) egName() string {
+	if injector.asyncEgName != "" {
+		return injector.asyncEgName
+	}
+	return "eg"
 }

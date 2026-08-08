@@ -16,12 +16,12 @@ func InitializeUserService() (*UserService, error) {
 	return userService, nil
 }
 func InitializeCacheService() *CacheService {
-	config0 := kessoku.Provide(NewConfig).Fn()()
-	cache := kessoku.Provide(NewCache).Fn()(config0)
+	config := kessoku.Provide(NewConfig).Fn()()
+	cache := kessoku.Provide(NewCache).Fn()(config)
 	cacheService := kessoku.Provide(NewCacheService).Fn()(cache)
 	return cacheService
 }
 func InitializeConfig() *Config {
-	config1 := kessoku.Provide(NewConfig).Fn()()
-	return config1
+	config := kessoku.Provide(NewConfig).Fn()()
+	return config
 }

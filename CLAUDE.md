@@ -81,7 +81,7 @@ go tool kessoku migrate ./... -o providers.go
 
 Supported wire patterns:
 - `wire.NewSet(providers...)` → `kessoku.Set(providers...)`
-- `wire.Bind(new(Interface), new(Impl))` → `kessoku.Bind[Interface]()`
+- `wire.Bind(new(Interface), new(Impl))` → `kessoku.Bind[Interface](kessoku.Provide(ImplConstructor))`
 - `wire.Value(v)` → `kessoku.Value(v)`
 - `wire.InterfaceValue(new(I), v)` → `kessoku.Bind[I](kessoku.Value(v))`
 - `wire.Struct(new(T), "Field1", "Field2")` → `kessoku.Provide(func(f1, f2) *T { ... })`

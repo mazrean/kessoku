@@ -1,17 +1,21 @@
 package kessoku
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/build/constraint"
 	"go/constant"
 	"go/parser"
 	"go/token"
 	"go/types"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
@@ -25,6 +29,17 @@ const (
 	// asyncProviderMinTypeArgs is the minimum number of type arguments required for asyncProvider
 	asyncProviderMinTypeArgs = 2
 )
+
+// injectorValidationError represents a fatal validation error in a kessoku.Inject call,
+// such as an invalid or empty injector name. Unlike soft parse errors, these cause the
+// tool to exit with an error rather than skipping the directive.
+type injectorValidationError struct {
+	msg string
+}
+
+func (e *injectorValidationError) Error() string {
+	return e.msg
+}
 
 // Parser analyzes Go source code to find wire build directives and providers.
 type Parser struct {
@@ -42,9 +57,10 @@ func NewParser() *Parser {
 
 // ParseFile parses a Go file and extracts wire build directives.
 func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*BuildDirective, error) {
-	astFile, err := parser.ParseFile(p.fset, filename, nil, parser.ParseComments)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse file %s: %w", filename, err)
+	// Return the raw error unwrapped: processor.go's processFile is the single
+	// place that adds the "parse file %s:" prefix (avoids a duplicated prefix).
+	if _, err := parser.ParseFile(p.fset, filename, nil, parser.ParseComments); err != nil {
+		return nil, nil, err
 	}
 
 	pkg, err := p.initializePackages(filename)
@@ -58,6 +74,36 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 	if !ok || kessokuPkg == nil {
 		slog.Warn("kessoku package is not imported", "filename", filename)
 		return nil, nil, nil
+	}
+
+	// Find the syntax file that matches our target filename.
+	// pkg.Syntax corresponds to pkg.CompiledGoFiles (not pkg.GoFiles);
+	// the two slices differ when cgo is present because cgo-generated Go files
+	// are inserted into CompiledGoFiles.  Using GoFiles to index Syntax would
+	// pick the wrong AST node for any cgo-containing package.
+	var targetFile *ast.File
+	absFilename, _ := filepath.Abs(filename)
+	for i, f := range pkg.Syntax {
+		if f != nil && i < len(pkg.CompiledGoFiles) {
+			absGoFile, _ := filepath.Abs(pkg.CompiledGoFiles[i])
+			if absGoFile == absFilename {
+				targetFile = f
+				break
+			}
+		}
+	}
+
+	// Dot imports hide the package qualifier the directive scanner relies on,
+	// so Inject calls would be silently ignored. Reject them explicitly.
+	if targetFile != nil {
+		for _, imp := range targetFile.Imports {
+			if imp.Name == nil || imp.Name.Name != "." {
+				continue
+			}
+			if path, unquoteErr := strconv.Unquote(imp.Path.Value); unquoteErr == nil && path == kessokuPkgPath {
+				return nil, nil, fmt.Errorf("%s: dot import of %s is not supported; import it with a package qualifier", filename, kessokuPkgPath)
+			}
+		}
 	}
 
 	if kessokuPkg.Types == nil {
@@ -80,19 +126,6 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 	}
 
 	slog.Debug("kessoku package", "kessokuPkg", kessokuPkg)
-
-	// Find the syntax file that matches our target filename
-	var targetFile *ast.File
-	absFilename, _ := filepath.Abs(filename)
-	for i, f := range pkg.Syntax {
-		if f != nil && i < len(pkg.GoFiles) {
-			absGoFile, _ := filepath.Abs(pkg.GoFiles[i])
-			if absGoFile == absFilename {
-				targetFile = f
-				break
-			}
-		}
-	}
 
 	for _, f := range pkg.Syntax {
 		if f == nil {
@@ -168,7 +201,7 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 		return nil, nil, fmt.Errorf("target file not found in package syntax")
 	}
 
-	builds, err := p.findInjectDirectives(targetFile, pkg, kessokuPackageScope, metaData.Imports, astFile.Imports, varPool)
+	builds, err := p.findInjectDirectives(targetFile, pkg, kessokuPackageScope, metaData.Imports, varPool)
 	if err != nil {
 		return nil, nil, fmt.Errorf("find inject directives: %w", err)
 	}
@@ -176,35 +209,204 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 	return metaData, builds, nil
 }
 
-// initializeSSA initializes SSA analysis for a file.
-func (p *Parser) initializePackages(filename string) (*packages.Package, error) {
-	// Load packages using the new packages API
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-			packages.NeedImports | packages.NeedTypes | packages.NeedTypesSizes |
-			packages.NeedSyntax | packages.NeedTypesInfo,
-		Fset: p.fset,
+// isGeneratedFile reports whether f is a machine-generated Go file, detected
+// by the conventional "// Code generated ... DO NOT EDIT." comment that Go
+// tools are expected to place at the top of generated files (see go help
+// generate).  kessoku uses this to skip files it (or another generator) has
+// already produced so that their top-level declarations do not trigger a false
+// name-collision error.
+func isGeneratedFile(f *ast.File) bool {
+	const generatedPrefix = "// Code generated "
+	for _, cg := range f.Comments {
+		for _, c := range cg.List {
+			if strings.HasPrefix(c.Text, generatedPrefix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// moduleRootForFile walks parent directories of dir looking for a go.mod file
+// and returns the directory that contains it. If no go.mod is found the empty
+// string is returned.
+func moduleRootForFile(filename string) string {
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Dir(absPath)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// reached filesystem root without finding go.mod
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// fileHasWireinjectTag reports whether the named file has a //go:build wireinject
+// (or the legacy // +build wireinject) build constraint.  Only the leading
+// comment block before the package clause is scanned, which is sufficient for
+// build constraints and avoids reading the entire file.
+func fileHasWireinjectTag(filename string) bool {
+	f, err := os.Open(filename)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+
+		// Stop once we pass the leading comment block (package clause reached).
+		if strings.HasPrefix(trimmed, "package ") {
+			break
+		}
+
+		// Skip blank lines between comment blocks.
+		if trimmed == "" {
+			continue
+		}
+
+		// Only process lines that look like build constraints.
+		if !constraint.IsGoBuild(trimmed) && !constraint.IsPlusBuild(trimmed) {
+			continue
+		}
+
+		expr, err := constraint.Parse(trimmed)
+		if err != nil {
+			continue
+		}
+
+		if expr.Eval(func(tag string) bool { return tag == "wireinject" }) {
+			return true
+		}
 	}
 
-	// Load the specific file and its dependencies
-	pkgs, err := packages.Load(cfg, "file="+filename)
+	return false
+}
+
+// initializeSSA initializes SSA analysis for a file.
+func (p *Parser) initializePackages(filename string) (*packages.Package, error) {
+	// Resolve the filename to an absolute path so that the file= query and
+	// module root detection both work regardless of the process CWD.
+	absFilename, err := filepath.Abs(filename)
+	if err != nil {
+		return nil, fmt.Errorf("get absolute path: %w", err)
+	}
+
+	// If the source file is guarded by //go:build wireinject we must pass
+	// -tags=wireinject to packages.Load.  Without it the build tool excludes
+	// the file from the package, so the membership check below never finds it
+	// and returns "file is not in the same package".
+	var buildFlags []string
+	if fileHasWireinjectTag(absFilename) {
+		buildFlags = []string{"-tags=wireinject"}
+	}
+
+	// Load packages using the new packages API.
+	// Set Dir to the module root that contains the target file so that
+	// go/packages can locate go.mod regardless of the process CWD.  This
+	// allows `kessoku /abs/path/to/file.go` to work even when the CWD is
+	// outside the target module.  When no go.mod is found above the file we
+	// leave Dir empty, preserving the existing behaviour of relying on the
+	// process CWD.
+	cfg := &packages.Config{
+		Dir: moduleRootForFile(absFilename),
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+			packages.NeedImports | packages.NeedTypes | packages.NeedTypesSizes |
+			packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedDeps,
+		BuildFlags: buildFlags,
+		Fset:       p.fset,
+	}
+
+	// Use the absolute filename in the file= query so that go/packages
+	// can locate the file regardless of which directory Dir is set to.
+	pkgs, err := packages.Load(cfg, "file="+absFilename)
 	if err != nil {
 		return nil, fmt.Errorf("load packages: %w", err)
 	}
 
-	// Allow some errors but continue if we have valid packages
-	errorCount := packages.PrintErrors(pkgs)
-	if errorCount > 0 && len(pkgs) == 0 {
-		return nil, fmt.Errorf("package loading errors occurred and no packages loaded")
+	// Check package errors, but only treat errors that originate in the target
+	// file as fatal. Type errors in other files of the same package (e.g. calls
+	// to not-yet-generated injector functions in main.go) are warnings: the
+	// kessoku.Inject declaration in the target file can still be type-checked
+	// correctly even when the rest of the package has unresolved references to
+	// the function that kessoku is about to generate. Treating those cross-file
+	// errors as fatal would create a chicken-and-egg deadlock where the user
+	// can never run `go generate` for the first time.
+	//
+	// pkg.Errors entries with Kind != TypeError (ParseError, ListError, etc.) are
+	// always fatal because they indicate problems unrelated to missing generated
+	// code (e.g. syntax errors, missing imports, package-graph failures).
+	// Kind==ListError entries whose Pos is empty are summaries that the Go
+	// toolchain emits to bundle multiple TypeErrors; we skip them here because
+	// the individual TypeError entries already carry the per-file positions.
+	var fatalPkgErrors []packages.Error
+	var skippedOtherFileTypeErrors int
+
+	for _, pkg := range pkgs {
+		for _, pkgErr := range pkg.Errors {
+			switch pkgErr.Kind {
+			case packages.TypeError:
+				// Extract filename from "file:line:col" position string.
+				errFile := pkgErr.Pos
+				if idx := strings.IndexByte(errFile, ':'); idx >= 0 {
+					errFile = errFile[:idx]
+				}
+				absErrFile, absErr := filepath.Abs(errFile)
+				if absErr != nil {
+					absErrFile = errFile
+				}
+				if absErrFile == absFilename {
+					fatalPkgErrors = append(fatalPkgErrors, pkgErr)
+				} else {
+					skippedOtherFileTypeErrors++
+					slog.Debug("ignoring type error in non-target file (may reference not-yet-generated injector)",
+						"file", pkgErr.Pos, "msg", pkgErr.Msg)
+				}
+			case packages.ListError:
+				// ListError with an empty Pos is a bundled summary of TypeErrors
+				// that the toolchain groups under the package name line (e.g.
+				// "# pkg/path\nfile:line: msg"). We skip these here because the
+				// underlying TypeErrors are examined individually above.
+				if pkgErr.Pos == "" {
+					slog.Debug("skipping ListError summary (underlying TypeErrors handled individually)",
+						"msg", pkgErr.Msg)
+					continue
+				}
+				// A ListError with a non-empty Pos is a genuine package-load
+				// failure (e.g. missing dependency); treat it as fatal.
+				fatalPkgErrors = append(fatalPkgErrors, pkgErr)
+			case packages.ParseError, packages.UnknownError:
+				// ParseError and UnknownError are always fatal: they indicate
+				// syntax errors or problems that prevent the package graph from
+				// loading correctly.
+				fatalPkgErrors = append(fatalPkgErrors, pkgErr)
+			}
+		}
+	}
+
+	if skippedOtherFileTypeErrors > 0 {
+		slog.Warn("type errors in package files other than the target were ignored; they may resolve once kessoku generates the injector functions",
+			"ignored_count", skippedOtherFileTypeErrors)
+	}
+	if len(fatalPkgErrors) > 0 {
+		// Print only the fatal errors so the user sees what needs to be fixed.
+		for _, e := range fatalPkgErrors {
+			fmt.Fprintf(os.Stderr, "%s\n", e)
+		}
+		return nil, fmt.Errorf("package loading errors occurred (%d error(s)); fix them before running kessoku", len(fatalPkgErrors))
 	}
 
 	for _, pkg := range pkgs {
-		absFilename, err := filepath.Abs(filename)
-		if err != nil {
-			slog.Debug("failed to get absolute filename", "error", err, "filename", filename)
-			continue
-		}
-
 		for _, goFile := range pkg.GoFiles {
 			absGoFile, err := filepath.Abs(goFile)
 			if err != nil {
@@ -222,7 +424,7 @@ func (p *Parser) initializePackages(filename string) (*packages.Package, error) 
 }
 
 // FindInjectDirectives finds all kessoku.Inject calls in the AST.
-func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kessokuPackageScope *types.Scope, imports map[string]*Import, fileImports []*ast.ImportSpec, varPool *VarPool) ([]*BuildDirective, error) {
+func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kessokuPackageScope *types.Scope, imports map[string]*Import, varPool *VarPool) ([]*BuildDirective, error) {
 	injectorObj := kessokuPackageScope.Lookup("Inject")
 	if injectorObj == nil || injectorObj.Type() == nil {
 		slog.Warn("kessoku package is imported, but kessoku.Inject function is not found")
@@ -237,64 +439,130 @@ func (p *Parser) findInjectDirectives(file *ast.File, pkg *packages.Package, kes
 
 	var builds []*BuildDirective
 
-	ast.Inspect(file, func(n ast.Node) bool {
-		callExpr, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
+	// Only inspect top-level var declarations. Using ast.Inspect over the entire
+	// file would also walk function bodies, causing kessoku.Inject calls inside
+	// functions (e.g. init()) to be treated as valid injection points. (QA-9)
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || genDecl.Tok != token.VAR {
+			continue
 		}
 
-		var baseFunc *ast.SelectorExpr
-
-		switch fun := callExpr.Fun.(type) {
-		case *ast.IndexExpr:
-			if sel, ok := fun.X.(*ast.SelectorExpr); ok {
-				baseFunc = sel
+		for _, spec := range genDecl.Specs {
+			valSpec, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
 			}
-		case *ast.IndexListExpr:
-			if sel, ok := fun.X.(*ast.SelectorExpr); ok {
-				baseFunc = sel
+
+			for _, val := range valSpec.Values {
+				callExpr, ok := val.(*ast.CallExpr)
+				if !ok {
+					continue
+				}
+
+				var baseFunc *ast.SelectorExpr
+
+				callFun := callExpr.Fun
+				for {
+					paren, ok := callFun.(*ast.ParenExpr)
+					if !ok {
+						break
+					}
+					callFun = paren.X
+				}
+
+				switch fun := callFun.(type) {
+				case *ast.IndexExpr:
+					if sel, ok := fun.X.(*ast.SelectorExpr); ok {
+						baseFunc = sel
+					}
+				case *ast.IndexListExpr:
+					if sel, ok := fun.X.(*ast.SelectorExpr); ok {
+						baseFunc = sel
+					}
+				case *ast.SelectorExpr:
+					baseFunc = fun
+				}
+
+				if baseFunc == nil {
+					// callFun is neither *ast.IndexExpr, *ast.IndexListExpr, nor *ast.SelectorExpr.
+					// It may be an *ast.Ident when the user stores kessoku.Inject[*T] in a variable
+					// and calls it indirectly (e.g. var injectFn = kessoku.Inject[*T]; injectFn(...)).
+					// Detect this pattern by checking TypesInfo.Instances: any generic function
+					// instantiation whose origin is kessoku.Inject and whose instantiated type
+					// matches the type of callFun is a variable holding an injector.
+					ident, isIdent := callFun.(*ast.Ident)
+					if !isIdent {
+						slog.Debug("baseFunc is nil and callFun is not an identifier", "callExpr", callExpr)
+						continue
+					}
+					identType := pkg.TypesInfo.TypeOf(ident)
+					if identType == nil {
+						slog.Debug("baseFunc is nil, callFun type unknown", "callExpr", callExpr)
+						continue
+					}
+					foundInjector := false
+					for instIdent, inst := range pkg.TypesInfo.Instances {
+						useObj := pkg.TypesInfo.Uses[instIdent]
+						if useObj == nil || !types.Identical(useObj.Type(), injectorType) {
+							continue
+						}
+						if types.Identical(inst.Type, identType) {
+							foundInjector = true
+							break
+						}
+					}
+					if !foundInjector {
+						slog.Debug("callFun identifier does not hold a kessoku.Inject instantiation", "callExpr", callExpr)
+						continue
+					}
+					// Fall through to parseInjectCall; the *ast.Ident case there will
+					// recover the return type from TypesInfo.Instances.
+				} else {
+					calleeType := pkg.TypesInfo.TypeOf(baseFunc)
+					if calleeType == nil {
+						slog.Debug("calleeType is nil", "callExpr", callExpr, "baseFunc", baseFunc)
+						continue
+					}
+
+					if !types.Identical(calleeType, injectorType) {
+						slog.Debug("calleeType is not injectorType", "callExpr", callExpr, "calleeType", calleeType, "injectorType", injectorType)
+						continue
+					}
+				}
+
+				build, err := p.parseInjectCall(pkg, kessokuPackageScope, callExpr, imports, varPool)
+				if err != nil {
+					pos := p.fset.Position(callExpr.Pos())
+					return nil, fmt.Errorf("%s: parse kessoku.Inject call: %w", pos, err)
+				}
+
+				builds = append(builds, build)
 			}
-		case *ast.SelectorExpr:
-			baseFunc = fun
 		}
-
-		if baseFunc == nil {
-			slog.Debug("baseFunc is nil", "callExpr", callExpr)
-			return true
-		}
-
-		calleeType := pkg.TypesInfo.TypeOf(baseFunc)
-		if calleeType == nil {
-			slog.Debug("calleeType is nil", "callExpr", callExpr, "baseFunc", baseFunc)
-			return true
-		}
-
-		if !types.Identical(calleeType, injectorType) {
-			slog.Debug("calleeType is not injectorType", "callExpr", callExpr, "calleeType", calleeType, "injectorType", injectorType)
-			return true
-		}
-
-		build, err := p.parseInjectCall(pkg, kessokuPackageScope, callExpr, imports, fileImports, varPool)
-		if err != nil {
-			slog.Warn("parseInjectCall failed", "callExpr", callExpr, "error", err)
-			return true
-		}
-
-		builds = append(builds, build)
-		return false
-	})
+	}
 
 	return builds, nil
 }
 
 // parseInjectCall parses a kessoku.Inject call expression.
-func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *types.Scope, call *ast.CallExpr, imports map[string]*Import, fileImports []*ast.ImportSpec, varPool *VarPool) (*BuildDirective, error) {
+func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *types.Scope, call *ast.CallExpr, imports map[string]*Import, varPool *VarPool) (*BuildDirective, error) {
 	build := &BuildDirective{
 		Providers: make([]*ProviderSpec, 0),
 	}
 
-	// Extract return type from generic parameter
-	switch fun := call.Fun.(type) {
+	// Extract return type from generic parameter.
+	// Unwrap any parentheses around the function expression (e.g. (kessoku.Inject[*T])(...)).
+	callFun := call.Fun
+	for {
+		paren, ok := callFun.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		callFun = paren.X
+	}
+
+	switch fun := callFun.(type) {
 	case *ast.IndexExpr:
 		returnType := pkg.TypesInfo.TypeOf(fun.Index)
 		build.Return = &Return{
@@ -304,7 +572,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 		// Collect dependencies from return type expression
 		fun.Index, _ = p.collectDependencies(fun.Index, pkg.TypesInfo, imports, varPool)
 	case *ast.IndexListExpr:
-		if len(call.Fun.(*ast.IndexListExpr).Indices) == 0 {
+		if len(fun.Indices) == 0 {
 			return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
 		}
 		returnType := pkg.TypesInfo.TypeOf(fun.Indices[0])
@@ -314,6 +582,42 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 		}
 		// Collect dependencies from return type expression
 		fun.Indices[0], _ = p.collectDependencies(fun.Indices[0], pkg.TypesInfo, imports, varPool)
+	case *ast.Ident:
+		// Variable indirection: the user stored kessoku.Inject[*T] in a variable and
+		// calls it as injectFn("Name", providers...).  There is no type-argument AST
+		// node in the call expression itself, so we recover the type argument from
+		// TypesInfo.Instances, which records every instantiation of a generic function.
+		injectorObj := kessokuPackageScope.Lookup("Inject")
+		if injectorObj == nil {
+			return nil, fmt.Errorf("kessoku.Inject not found in kessoku package scope")
+		}
+		injType := injectorObj.Type()
+		identType := pkg.TypesInfo.TypeOf(fun)
+		if identType == nil {
+			return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
+		}
+		var typeArg types.Type
+		for instIdent, inst := range pkg.TypesInfo.Instances {
+			useObj := pkg.TypesInfo.Uses[instIdent]
+			if useObj == nil || !types.Identical(useObj.Type(), injType) {
+				continue
+			}
+			if types.Identical(inst.Type, identType) && inst.TypeArgs != nil && inst.TypeArgs.Len() > 0 {
+				typeArg = inst.TypeArgs.At(0)
+				break
+			}
+		}
+		if typeArg == nil {
+			return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
+		}
+		astExpr, err := createASTTypeExpr(pkg.Types.Path(), typeArg, varPool, imports)
+		if err != nil {
+			return nil, fmt.Errorf("create AST type expression for return type: %w", err)
+		}
+		build.Return = &Return{
+			Type:        typeArg,
+			ASTTypeExpr: astExpr,
+		}
 	default:
 		return nil, fmt.Errorf("kessoku.Inject requires at least 1 type argument")
 	}
@@ -334,9 +638,85 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 
 	build.InjectorName = constant.StringVal(tv.Value)
 
+	// Validate injector name: must be a valid Go identifier and not a keyword.
+	if !token.IsIdentifier(build.InjectorName) {
+		return nil, &injectorValidationError{
+			msg: fmt.Sprintf("injector name %q is not a valid Go identifier", build.InjectorName),
+		}
+	}
+	if token.IsKeyword(build.InjectorName) {
+		return nil, &injectorValidationError{
+			msg: fmt.Sprintf("injector name %q is a Go keyword and cannot be used as a function name", build.InjectorName),
+		}
+	}
+	// "init" is a predeclared identifier (not a keyword), but the Go spec requires
+	// every func init to have no arguments and no return values. Generating
+	// func init() *T { ... } would therefore fail to compile (QA-25).
+	if build.InjectorName == "init" {
+		return nil, &injectorValidationError{
+			msg: fmt.Sprintf("injector name %q is reserved: func init must have no arguments and no return values", build.InjectorName),
+		}
+	}
+	// "main" in package main: the Go spec requires func main to have no arguments
+	// and no return values. Generating func main() *T { ... } in package main
+	// would therefore fail to compile.
+	if build.InjectorName == "main" && pkg.Name == "main" {
+		return nil, &injectorValidationError{
+			msg: fmt.Sprintf("injector name %q is reserved in package main: func main must have no arguments and no return values", build.InjectorName),
+		}
+	}
+
+	// Check that the injector name does not collide with any existing package-level
+	// declaration in the package (functions, types, vars, consts).  We scan the
+	// AST of every source file loaded by packages.Load, skipping:
+	//   - files whose names end in "_band.go" (tool output — will be overwritten)
+	//   - files marked "// Code generated by ..." (any generated file)
+	// This catches both same-file and cross-file collisions that the type checker
+	// would later surface as "redeclared in this block" compile errors.
+	for i, f := range pkg.Syntax {
+		if f == nil || i >= len(pkg.CompiledGoFiles) {
+			continue
+		}
+		srcFile := pkg.CompiledGoFiles[i]
+		// Skip files that are themselves generated output: they will either be
+		// overwritten by this run (*_band.go) or are not real user source code.
+		if strings.HasSuffix(srcFile, "_band.go") || isGeneratedFile(f) {
+			continue
+		}
+		for _, decl := range f.Decls {
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if d.Name != nil && d.Name.Name == build.InjectorName {
+					return nil, &injectorValidationError{
+						msg: fmt.Sprintf("injector name %q conflicts with an existing package-level declaration in %s", build.InjectorName, srcFile),
+					}
+				}
+			case *ast.GenDecl:
+				for _, spec := range d.Specs {
+					switch s := spec.(type) {
+					case *ast.TypeSpec:
+						if s.Name != nil && s.Name.Name == build.InjectorName {
+							return nil, &injectorValidationError{
+								msg: fmt.Sprintf("injector name %q conflicts with an existing package-level declaration in %s", build.InjectorName, srcFile),
+							}
+						}
+					case *ast.ValueSpec:
+						for _, name := range s.Names {
+							if name != nil && name.Name == build.InjectorName {
+								return nil, &injectorValidationError{
+									msg: fmt.Sprintf("injector name %q conflicts with an existing package-level declaration in %s", build.InjectorName, srcFile),
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Parse provider arguments (starting from index 1)
 	for _, arg := range call.Args[1:] {
-		if err := p.parseProviderArgument(pkg, kessokuPackageScope, arg, build, imports, fileImports, varPool); err != nil {
+		if err := p.parseProviderArgument(pkg, kessokuPackageScope, arg, build, imports, varPool); err != nil {
 			return nil, fmt.Errorf("parse provider argument: %w", err)
 		}
 	}
@@ -345,7 +725,7 @@ func (p *Parser) parseInjectCall(pkg *packages.Package, kessokuPackageScope *typ
 }
 
 // parseProviderArgument parses a provider argument in kessoku.Inject call.
-func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScope *types.Scope, arg ast.Expr, build *BuildDirective, imports map[string]*Import, fileImports []*ast.ImportSpec, varPool *VarPool) error {
+func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScope *types.Scope, arg ast.Expr, build *BuildDirective, imports map[string]*Import, varPool *VarPool) error {
 	providerType := pkg.TypesInfo.TypeOf(arg)
 	if providerType == nil {
 		return fmt.Errorf("get type of argument")
@@ -372,6 +752,9 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 			switch v := currentArg.(type) {
 			case *ast.CallExpr:
 				callExpr = v
+			case *ast.ParenExpr:
+				currentArg = v.X
+				continue
 			case *ast.Ident:
 				obj := pkg.TypesInfo.ObjectOf(v)
 				if obj == nil {
@@ -384,7 +767,22 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 				}
 
 				if varObj.Pkg().Path() != pkg.PkgPath {
-					slog.Warn("Set call expression is not in the same package. This is not supported.", "object package", varObj.Pkg().Path(), "pkg", pkg.PkgPath)
+					// The Set variable is from a different package, which happens when the
+					// package is dot-imported (import . "other").  Because NeedDeps is set
+					// in the packages.Load config, pkg.Imports entries have Syntax and
+					// TypesInfo populated, so we can look up the declaration directly.
+					importedPkgPath := varObj.Pkg().Path()
+					importedPkg, ok := pkg.Imports[importedPkgPath]
+					if !ok || importedPkg == nil {
+						return fmt.Errorf("dot-imported package not found: %s", importedPkgPath)
+					}
+					varDeclExpr := p.getVarDecl(importedPkg, varObj)
+					if varDeclExpr == nil {
+						return fmt.Errorf("var declaration not found in dot-imported package %s: %s", importedPkgPath, varObj.Name())
+					}
+					if err := p.parseProviderArgument(importedPkg, kessokuPackageScope, varDeclExpr, build, imports, varPool); err != nil {
+						return fmt.Errorf("parse dot-imported Set %s.%s: %w", importedPkgPath, varObj.Name(), err)
+					}
 					return nil
 				}
 
@@ -407,7 +805,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 		}
 
 		for _, setArg := range callExpr.Args {
-			if err := p.parseProviderArgument(pkg, kessokuPackageScope, setArg, build, imports, fileImports, varPool); err != nil {
+			if err := p.parseProviderArgument(pkg, kessokuPackageScope, setArg, build, imports, varPool); err != nil {
 				return fmt.Errorf("parse Set provider argument: %w", err)
 			}
 		}
@@ -445,6 +843,7 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 			Provides:          result.Provides,
 			Requires:          result.Requires,
 			IsReturnError:     result.IsReturnError,
+			ErrorType:         result.ErrorType,
 			IsAsync:           result.IsAsync,
 			ReferencedImports: referencedImports,
 		})
@@ -455,7 +854,9 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 			Provides:          result.Provides,
 			Requires:          result.Requires,
 			IsReturnError:     result.IsReturnError,
+			ErrorType:         result.ErrorType,
 			IsAsync:           result.IsAsync,
+			IsVariadic:        result.IsVariadic,
 			ReferencedImports: referencedImports,
 		})
 	}
@@ -466,11 +867,13 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 // parseProviderTypeResult holds the result of parsing a provider type.
 type parseProviderTypeResult struct {
 	StructType    types.Type
+	ErrorType     types.Type
 	Requires      []types.Type
 	Provides      [][]types.Type
 	IsReturnError bool
 	IsAsync       bool
 	IsStruct      bool
+	IsVariadic    bool
 }
 
 func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Type, varPool *VarPool) (*parseProviderTypeResult, error) {
@@ -504,14 +907,31 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 			return nil, fmt.Errorf("parse internal provider type: %w", err)
 		}
 
+		if len(result.Provides) == 0 {
+			return nil, fmt.Errorf("bind requires a provider that returns at least one non-error value; the given provider returns nothing")
+		}
+
+		implementingType := false
 		for i, provide := range result.Provides {
 			for _, providedType := range provide {
 				if types.Implements(providedType, intrfcType) {
-					// If the provided type is the interface type, we can skip it
 					result.Provides[i] = append(result.Provides[i], interfaceType)
+					implementingType = true
 					break
 				}
 			}
+		}
+
+		if !implementingType {
+			// Find the first provided type for a useful error message
+			var providedTypeName string
+			for _, provide := range result.Provides {
+				if len(provide) > 0 {
+					providedTypeName = provide[0].String()
+					break
+				}
+			}
+			return nil, fmt.Errorf("provided type %s does not implement interface %s", providedTypeName, interfaceType)
 		}
 
 		// Propagate struct info through bind wrapper
@@ -543,14 +963,36 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 
 		requires := make([]types.Type, 0, providerFnSig.Params().Len())
 		for v := range providerFnSig.Params().Variables() {
-			requires = append(requires, v.Type())
+			t := v.Type()
+			// Guard against types.Invalid, which occurs when the source has type errors
+			// (e.g. undefined types).  The initializePackages call should have already
+			// returned an error in this case, but we check here as a defence-in-depth
+			// measure to avoid emitting syntactically broken generated code.
+			if basic, ok := t.(*types.Basic); ok && basic.Kind() == types.Invalid {
+				return nil, fmt.Errorf("provider parameter %q has an invalid (unresolved) type; fix type errors in the source first", v.Name())
+			}
+			requires = append(requires, t)
 		}
 
+		// errorType is the named "error" type from the universe scope. We use
+		// types.Identical (exact type equality) rather than types.Implements so
+		// that concrete types implementing the error interface (e.g. *MyError,
+		// *ValidationError) are NOT mistaken for the error return slot. Only a
+		// return value whose type IS the built-in error interface is treated as
+		// the provider's error return.
+		errorNamedType := types.Universe.Lookup("error").Type()
 		isReturnError := false
-		provides := make([][]types.Type, 0, providerFnSig.Results().Len())
-		for v := range providerFnSig.Results().Variables() {
-			if types.Identical(v.Type(), types.Universe.Lookup("error").Type()) {
+		var errorType types.Type
+		results := providerFnSig.Results()
+		provides := make([][]types.Type, 0, results.Len())
+		for i := range results.Len() {
+			v := results.At(i)
+			if types.Identical(v.Type(), errorNamedType) {
+				if i != results.Len()-1 {
+					return nil, fmt.Errorf("provider function has error return in non-last position (index %d of %d); error must be the last return value", i, results.Len()-1)
+				}
 				isReturnError = true
+				errorType = v.Type()
 				continue
 			}
 
@@ -560,9 +1002,11 @@ func (p *Parser) parseProviderType(pkg *packages.Package, providerType types.Typ
 		return &parseProviderTypeResult{
 			Requires:      requires,
 			Provides:      provides,
+			ErrorType:     errorType,
 			IsReturnError: isReturnError,
 			IsAsync:       false,
 			IsStruct:      false,
+			IsVariadic:    providerFnSig.Variadic(),
 		}, nil
 	case "structProvider":
 		if typeArgs.Len() < 1 {
@@ -653,11 +1097,46 @@ func (p *Parser) getVarDecl(pkg *packages.Package, obj *types.Var) ast.Expr {
 	return nil
 }
 
-// collectDependencies extracts package dependencies from an AST expression and returns both the modified expression and referenced imports
+// collectDependencies extracts package dependencies from an AST expression and
+// returns both the modified expression and referenced imports.
+//
+// Two classes of identifiers are handled:
+//
+//  1. *types.PkgName — a bare package qualifier that appears as the X of a
+//     SelectorExpr (e.g. the "pkg" in "pkg.Foo").  Its Name is rewritten to
+//     match the alias recorded in imports.
+//
+//  2. Any object (*types.Func, *types.TypeName, *types.Var, *types.Const)
+//     whose owning package differs from the package that declares the
+//     identifier in the AST.  This happens exclusively when a package is
+//     dot-imported: the identifier appears as a bare Ident in the source but
+//     the object's package is different.  In this case the identifier is
+//     rewritten to a SelectorExpr (pkgAlias.Name) so that the generated code,
+//     which does not carry the dot-import, can still resolve the symbol.
 func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, imports map[string]*Import, varPool *VarPool) (ast.Expr, map[string]*Import) {
 	referencedImports := make(map[string]*Import)
-	ast.Inspect(expr, func(n ast.Node) bool {
-		ident, ok := n.(*ast.Ident)
+
+	// resolveImport finds or registers the Import entry for pkgPath and pkgBaseName,
+	// records it in referencedImports, and returns the alias string to use in code.
+	resolveImport := func(pkgPath, pkgBaseName string) string {
+		if imp, ok := imports[pkgPath]; ok {
+			referencedImports[pkgPath] = imp
+			return imp.Name
+		}
+		// Package not yet registered — add it.
+		name := varPool.GetName(pkgBaseName)
+		newImp := &Import{
+			Name:          name,
+			IsDefaultName: name == pkgBaseName,
+			IsUsed:        false,
+		}
+		imports[pkgPath] = newImp
+		referencedImports[pkgPath] = newImp
+		return name
+	}
+
+	newExpr := astutil.Apply(expr, func(cursor *astutil.Cursor) bool {
+		ident, ok := cursor.Node().(*ast.Ident)
 		if !ok {
 			return true
 		}
@@ -668,39 +1147,64 @@ func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, import
 			return true
 		}
 
-		pkgName, ok := obj.(*types.PkgName)
-		if !ok {
-			slog.Debug("object is not a package name", "identifier", ident.Name, "object", obj)
-			return true
-		}
-
-		imported := pkgName.Imported()
-		if imported == nil {
-			slog.Warn("imported package is nil", "identifier", ident.Name, "object", obj)
-			return true
-		}
-
-		pkgPath := imported.Path()
-		if imp, ok := imports[pkgPath]; ok {
-			ident.Name = imp.Name
-			// Record reference but don't mark as used yet - will be marked during code generation
-			referencedImports[pkgPath] = imp
-		} else {
-			slog.Warn("import not found for package", "package", pkgPath, "identifier", ident.Name)
-
-			// Register the package name to prevent shadowing
-			name := varPool.GetName(ident.Name)
-			newImp := &Import{
-				Name:          name,
-				IsDefaultName: name == pkgName.Name(),
-				IsUsed:        false, // Will be marked during code generation
+		switch typedObj := obj.(type) {
+		case *types.PkgName:
+			// Case 1: bare package qualifier (X of SelectorExpr).
+			imported := typedObj.Imported()
+			if imported == nil {
+				slog.Warn("imported package is nil", "identifier", ident.Name, "object", obj)
+				return true
 			}
-			imports[pkgPath] = newImp
-			referencedImports[pkgPath] = newImp
+			alias := resolveImport(imported.Path(), typedObj.Name())
+			ident.Name = alias
+
+		default:
+			// Case 2: dot-imported symbol — the owning package differs from the
+			// package in which the identifier syntactically appears.
+			objPkg := obj.Pkg()
+			if objPkg == nil {
+				return true
+			}
+			// Determine the package path that the AST node lives in by looking
+			// up the identifier's position in typeInfo.  If typeInfo has no
+			// package for this position we cannot determine the source package,
+			// so we fall back to the object's package.
+			identPkg := typeInfo.ObjectOf(ident)
+			if identPkg == nil {
+				return true
+			}
+			// The identifier is a dot-imported symbol when its declaring package
+			// (objPkg) is NOT the same as the package that contains the
+			// SelectorExpr's Sel or a non-PkgName ident at the top of the AST.
+			// A simpler heuristic: if the ident's parent is a SelectorExpr and
+			// the ident is the Sel (right-hand side), the package qualifier is
+			// already present — skip.
+			if sel, parentIsSel := cursor.Parent().(*ast.SelectorExpr); parentIsSel && sel.Sel == ident {
+				return true
+			}
+			// If the identifier is also a PkgName it was handled above.
+			if _, isPkg := obj.(*types.PkgName); isPkg {
+				return true
+			}
+			// Check whether the owning package is in our imports map.  If it is
+			// not, the symbol is from the current package and needs no qualifier.
+			if _, inImports := imports[objPkg.Path()]; !inImports {
+				// Not in imports — could be a current-package symbol; skip.
+				return true
+			}
+			alias := resolveImport(objPkg.Path(), objPkg.Name())
+			// Replace the bare Ident with a SelectorExpr: alias.Name
+			cursor.Replace(&ast.SelectorExpr{
+				X:   &ast.Ident{Name: alias},
+				Sel: &ast.Ident{Name: ident.Name},
+			})
 		}
 
 		return true
-	})
+	}, nil)
 
+	if newExpr, ok := newExpr.(ast.Expr); ok {
+		return newExpr, referencedImports
+	}
 	return expr, referencedImports
 }

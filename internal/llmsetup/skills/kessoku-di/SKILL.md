@@ -115,7 +115,7 @@ var _ = kessoku.Inject[*DB](
 - **No build tag needed**: Unlike wire's `//go:build wireinject`
 - **Async requires context**: Generated function gets `context.Context` parameter
 - **Error propagation**: Providers returning `error` make injector return `error`
-- **Cleanup functions**: Providers can return `func()` for cleanup
+- **No cleanup functions**: Wire-style cleanup `func()` returns are **not supported** — an unused cleanup return is silently discarded by codegen, and `kessoku migrate` rejects wire code using them; use an explicit `Close` method on the returned type instead
 
 ## Support Files
 

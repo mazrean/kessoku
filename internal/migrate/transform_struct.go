@@ -1,9 +1,11 @@
 package migrate
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
+	"reflect"
 )
 
 // fieldInfo holds information about a struct field for code generation.
@@ -13,55 +15,24 @@ type fieldInfo struct {
 	exported bool
 }
 
-// transformStruct transforms wire.Struct to kessoku.Provide with function literal.
-func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) *KessokuProvide {
+// transformStruct transforms wire.Struct to one or more kessoku.Provide patterns.
+//
+// Wire's processStructProvider provides both T and *T when wire.Struct(new(T)) is
+// used (value-type provision, IsPointer=false), and only *T when wire.Struct(new(*T))
+// is used (pointer-type provision, IsPointer=true).  We replicate that behaviour:
+//   - IsPointer=false → two KessokuProvide: one returning T, one returning *T
+//   - IsPointer=true  → one KessokuProvide returning *T
+//
+// When an explicit field list is provided (non-"*"), each requested name is
+// validated via types.LookupFieldOrMethod.  An unrecognised name returns an error
+// instead of silently dropping the field (mirroring wire's own behaviour and the
+// approach already used by transformFieldsOf).
+func (t *Transformer) transformStruct(ws *WireStruct, pkg *types.Package) ([]KessokuPattern, error) {
+	// Unwrap all pointer layers to reach the underlying struct type.
+	// wire.Struct(new(*T)) yields **T from extractTypeFromNew; we must strip
+	// both layers to reach T before calling Underlying().
+	// transformFieldsOf uses the same loop — mirror it here.
 	structType := unwrapPointer(ws.StructType)
-	underlying := structType.Underlying()
-	st, ok := underlying.(*types.Struct)
-	if !ok {
-		return &KessokuProvide{SourcePos: ws.Pos}
-	}
-
-	// Check if struct is from external package
-	isExternalPkg := false
-	if named, ok := structType.(*types.Named); ok {
-		if named.Obj().Pkg() != nil && named.Obj().Pkg() != pkg {
-			isExternalPkg = true
-		}
-	}
-
-	// Collect fields to include (skip unexported fields from external packages)
-	var fieldInfos []fieldInfo
-	for field := range st.Fields() {
-		if ws.Fields[0] == "*" || contains(ws.Fields, field.Name()) {
-			// Skip unexported fields from external packages
-			if isExternalPkg && !field.Exported() {
-				continue
-			}
-			fieldInfos = append(fieldInfos, fieldInfo{
-				name:     field.Name(),
-				typ:      field.Type(),
-				exported: field.Exported(),
-			})
-		}
-	}
-
-	// Build function literal
-	funcLit := t.buildStructConstructor(structType, fieldInfos, ws.IsPointer)
-
-	return &KessokuProvide{
-		FuncExpr:  funcLit,
-		SourcePos: ws.Pos,
-	}
-}
-
-// transformFieldsOf transforms wire.FieldsOf to kessoku.Provide with accessor function.
-func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *KessokuProvide {
-	// Unwrap pointer(s) to get the struct type
-	// wire.FieldsOf(new(T), ...) -> *T, unwrap once -> T
-	// wire.FieldsOf(new(*T), ...) -> **T, unwrap once -> *T, unwrap again -> T
-	structType := unwrapPointer(wf.StructType)
-	// Keep unwrapping if still a pointer
 	for {
 		if ptr, ok := structType.(*types.Pointer); ok {
 			structType = ptr.Elem()
@@ -72,7 +43,7 @@ func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *K
 	underlying := structType.Underlying()
 	st, ok := underlying.(*types.Struct)
 	if !ok {
-		return &KessokuProvide{SourcePos: wf.Pos}
+		return []KessokuPattern{&KessokuProvide{SourcePos: ws.Pos}}, nil
 	}
 
 	// Check if struct is from external package
@@ -83,41 +54,140 @@ func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) *K
 		}
 	}
 
-	// Collect field types (skip unexported fields from external packages)
-	var fieldInfos []fieldInfo
-	for _, fieldName := range wf.Fields {
-		for field := range st.Fields() {
-			if field.Name() == fieldName {
-				// Skip unexported fields from external packages
-				if isExternalPkg && !field.Exported() {
-					break
-				}
-				fieldInfos = append(fieldInfos, fieldInfo{
-					name:     field.Name(),
-					typ:      field.Type(),
-					exported: field.Exported(),
-				})
-				break
+	// When an explicit field list is provided (non-"*"), validate every requested
+	// name before collecting.  wire.Struct itself would error for non-existent
+	// fields; we mirror that behaviour here so the migration does not silently
+	// drop the field and produce an incomplete constructor.
+	// Use LookupFieldOrMethod so that promoted (embedded) fields are also found,
+	// matching wire's own lookup semantics.
+	if len(ws.Fields) > 0 && ws.Fields[0] != "*" {
+		for _, fieldName := range ws.Fields {
+			obj, _, _ := types.LookupFieldOrMethod(structType, true, pkg, fieldName)
+			if _, ok := obj.(*types.Var); !ok {
+				return nil, fmt.Errorf("field %q not found on struct %s", fieldName, structType.String())
 			}
 		}
 	}
 
-	// Build accessor function
-	funcLit := t.buildFieldAccessor(structType, fieldInfos)
+	// Collect fields to include.
+	// When using "*", wire always means exported fields only, regardless of package.
+	// When listing fields by name, unexported fields from external packages are skipped.
+	// Fields with the struct tag wire:"-" are always skipped, matching wire's isPrevented logic.
+	var fieldInfos []fieldInfo
+	for i := range st.NumFields() {
+		field := st.Field(i)
+		// Skip fields marked wire:"-" (wire's isPrevented logic)
+		if reflect.StructTag(st.Tag(i)).Get("wire") == "-" {
+			continue
+		}
+		switch {
+		case ws.Fields[0] == "*":
+			// Skip unexported fields: wire's "*" always means exported fields only
+			if !field.Exported() {
+				continue
+			}
+		case contains(ws.Fields, field.Name()):
+			// Skip unexported fields from external packages
+			if isExternalPkg && !field.Exported() {
+				continue
+			}
+		default:
+			continue
+		}
+		fieldInfos = append(fieldInfos, fieldInfo{
+			name:     field.Name(),
+			typ:      field.Type(),
+			exported: field.Exported(),
+		})
+	}
+
+	if ws.IsPointer {
+		// wire.Struct(new(*T)) — only *T is provided.
+		funcLit := t.buildStructConstructor(structType, fieldInfos, true)
+		return []KessokuPattern{&KessokuProvide{
+			FuncExpr:  funcLit,
+			SourcePos: ws.Pos,
+		}}, nil
+	}
+
+	// wire.Struct(new(T)) — wire provides both T and *T.
+	// Emit the value-type provider first, then the pointer-type provider.
+	valueFuncLit := t.buildStructConstructor(structType, fieldInfos, false)
+	ptrFuncLit := t.buildStructConstructor(structType, fieldInfos, true)
+	return []KessokuPattern{
+		&KessokuProvide{FuncExpr: valueFuncLit, SourcePos: ws.Pos},
+		&KessokuProvide{FuncExpr: ptrFuncLit, SourcePos: ws.Pos},
+	}, nil
+}
+
+// transformFieldsOf transforms wire.FieldsOf to kessoku.Provide with accessor function.
+func (t *Transformer) transformFieldsOf(wf *WireFieldsOf, pkg *types.Package) (*KessokuProvide, error) {
+	// wf.StructType comes from extractTypeFromNew which wraps the new(T) arg in one extra pointer:
+	//   new(T)   -> *T   (paramType = T,  a value type)
+	//   new(*T)  -> **T  (paramType = *T, a pointer type)
+	// Strip exactly the one pointer layer that extractTypeFromNew added to get the real parameter type.
+	paramType := unwrapPointer(wf.StructType)
+
+	// Now strip any remaining pointer layers to reach the plain struct type for field lookup.
+	structType := paramType
+	for {
+		if ptr, ok := structType.(*types.Pointer); ok {
+			structType = ptr.Elem()
+		} else {
+			break
+		}
+	}
+	underlying := structType.Underlying()
+	if _, ok := underlying.(*types.Struct); !ok {
+		return &KessokuProvide{SourcePos: wf.Pos}, nil
+	}
+
+	// Check if struct is from external package
+	isExternalPkg := false
+	if named, ok := structType.(*types.Named); ok {
+		if named.Obj().Pkg() != nil && named.Obj().Pkg() != pkg {
+			isExternalPkg = true
+		}
+	}
+
+	// Collect field types (skip unexported fields from external packages).
+	// Use LookupFieldOrMethod instead of st.Fields() so that promoted
+	// (embedded) fields are found in addition to direct fields.
+	var fieldInfos []fieldInfo
+	for _, fieldName := range wf.Fields {
+		obj, _, _ := types.LookupFieldOrMethod(structType, true, pkg, fieldName)
+		field, ok := obj.(*types.Var)
+		if !ok {
+			return nil, fmt.Errorf("field %q not found on struct %s", fieldName, structType.String())
+		}
+		// Skip unexported fields from external packages
+		if isExternalPkg && !field.Exported() {
+			continue
+		}
+		fieldInfos = append(fieldInfos, fieldInfo{
+			name:     field.Name(),
+			typ:      field.Type(),
+			exported: field.Exported(),
+		})
+	}
+
+	// Build accessor function using the real parameter type (value or pointer).
+	funcLit := t.buildFieldAccessor(paramType, fieldInfos, wf.IsPtrToStruct)
 
 	return &KessokuProvide{
 		FuncExpr:  funcLit,
 		SourcePos: wf.Pos,
-	}
+	}, nil
 }
 
 // buildStructConstructor builds a function literal for struct construction.
 func (t *Transformer) buildStructConstructor(structType types.Type, fields []fieldInfo, isPointer bool) *ast.FuncLit {
-	// Build parameter list
+	// Build parameter list, resolving keyword conflicts and name collisions.
+	usedNames := make(map[string]int)
 	var params []*ast.Field
 	var paramNames []string
 	for _, f := range fields {
-		paramName := toLowerCamel(f.name)
+		paramName := uniqueParamName(sanitizeParamName(toLowerCamel(f.name)), usedNames)
 		paramNames = append(paramNames, paramName)
 		params = append(params, &ast.Field{
 			Names: []*ast.Ident{ast.NewIdent(paramName)},
@@ -168,23 +238,40 @@ func (t *Transformer) buildStructConstructor(structType types.Type, fields []fie
 }
 
 // buildFieldAccessor builds a function literal for field extraction.
-func (t *Transformer) buildFieldAccessor(structType types.Type, fields []fieldInfo) *ast.FuncLit {
-	// Parameter: pointer to struct
+// paramType is the actual parameter type for the accessor (T for new(T), *T for new(*T)).
+// When isPtrToStruct is true (new(*S) form), wire provides both FieldType and *FieldType
+// for each field, so the generated accessor returns both value and pointer for each field.
+func (t *Transformer) buildFieldAccessor(paramType types.Type, fields []fieldInfo, isPtrToStruct bool) *ast.FuncLit {
+	// Parameter: use the type as-is (value or pointer depending on wire.FieldsOf usage).
 	paramName := "s"
 	param := &ast.Field{
 		Names: []*ast.Ident{ast.NewIdent(paramName)},
-		Type:  &ast.StarExpr{X: t.typeExpr(structType)},
+		Type:  t.typeExpr(paramType),
 	}
 
-	// Return types
+	// Return types and expressions.
+	// When isPtrToStruct, each field produces two outputs: FieldType and *FieldType.
 	var resultTypes []*ast.Field
 	var returnExprs []ast.Expr
 	for _, f := range fields {
-		resultTypes = append(resultTypes, &ast.Field{Type: t.typeExpr(f.typ)})
-		returnExprs = append(returnExprs, &ast.SelectorExpr{
+		fieldExpr := &ast.SelectorExpr{
 			X:   ast.NewIdent(paramName),
 			Sel: ast.NewIdent(f.name),
-		})
+		}
+		resultTypes = append(resultTypes, &ast.Field{Type: t.typeExpr(f.typ)})
+		returnExprs = append(returnExprs, fieldExpr)
+
+		if isPtrToStruct {
+			// Also provide *FieldType by taking address of the field.
+			resultTypes = append(resultTypes, &ast.Field{Type: &ast.StarExpr{X: t.typeExpr(f.typ)}})
+			returnExprs = append(returnExprs, &ast.UnaryExpr{
+				Op: token.AND,
+				X: &ast.SelectorExpr{
+					X:   ast.NewIdent(paramName),
+					Sel: ast.NewIdent(f.name),
+				},
+			})
+		}
 	}
 
 	return &ast.FuncLit{

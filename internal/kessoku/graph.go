@@ -15,6 +15,104 @@ import (
 	"github.com/mazrean/kessoku/internal/pkg/collection"
 )
 
+// namedASTTypeExpr builds the AST expression for a named or aliased type,
+// qualifying it with its package and instantiating type arguments if present.
+func namedASTTypeExpr(pkg string, obj *types.TypeName, typeArgs *types.TypeList, varPool *VarPool, imports map[string]*Import) (ast.Expr, error) {
+	var baseExpr ast.Expr = ast.NewIdent(obj.Name())
+	if objPkg := obj.Pkg(); objPkg != nil && objPkg.Path() != pkg {
+		// For types from other packages, create a selector expression
+		// Format: package.TypeName
+		pkgPath := objPkg.Path()
+		pkgName := objPkg.Name()
+
+		// Check if package is already imported
+		if imp, exists := imports[pkgPath]; exists {
+			pkgName = imp.Name
+		} else {
+			newPkgName := varPool.GetName(pkgName)
+			imports[pkgPath] = &Import{
+				Name:          newPkgName,
+				IsDefaultName: newPkgName == pkgName,
+				IsUsed:        false, // Will be marked during code generation
+			}
+			pkgName = newPkgName
+		}
+
+		baseExpr = &ast.SelectorExpr{
+			X:   ast.NewIdent(pkgName),
+			Sel: ast.NewIdent(obj.Name()),
+		}
+	}
+
+	// Instantiated generic types keep their type arguments
+	// (e.g. Container[string]); without them the generated var
+	// declarations would reference an uninstantiated generic type.
+	if typeArgs == nil || typeArgs.Len() == 0 {
+		return baseExpr, nil
+	}
+
+	argExprs := make([]ast.Expr, 0, typeArgs.Len())
+	for i := 0; i < typeArgs.Len(); i++ {
+		argExpr, err := createASTTypeExpr(pkg, typeArgs.At(i), varPool, imports)
+		if err != nil {
+			return nil, fmt.Errorf("type argument %d: %w", i, err)
+		}
+		argExprs = append(argExprs, argExpr)
+	}
+
+	if len(argExprs) == 1 {
+		return &ast.IndexExpr{
+			X:     baseExpr,
+			Index: argExprs[0],
+		}, nil
+	}
+
+	return &ast.IndexListExpr{
+		X:       baseExpr,
+		Indices: argExprs,
+	}, nil
+}
+
+// typeKey returns a canonical string key for a types.Type.
+// Named types and type aliases each get their own key based on their declared
+// package path and name, so that two distinct aliases sharing the same
+// underlying type (e.g. type DBConnStr = string and type CacheConnStr = string)
+// are treated as different dependency keys and are never silently shared.
+func typeKey(t types.Type) string {
+	switch typ := t.(type) {
+	case *types.Alias:
+		// Use the alias's own fully-qualified name as the key.
+		// Do NOT call types.Unalias here: that would collapse distinct aliases
+		// (e.g. DBConnectionString = string and CacheConnectionString = string)
+		// into the same key, causing silent provider sharing or misleading errors.
+		obj := typ.Obj()
+		if pkg := obj.Pkg(); pkg != nil {
+			return pkg.Path() + "." + obj.Name()
+		}
+		return obj.Name()
+	case *types.Pointer:
+		return "*" + typeKey(typ.Elem())
+	case *types.Slice:
+		return "[]" + typeKey(typ.Elem())
+	case *types.Array:
+		return fmt.Sprintf("[%d]%s", typ.Len(), typeKey(typ.Elem()))
+	case *types.Map:
+		return fmt.Sprintf("map[%s]%s", typeKey(typ.Key()), typeKey(typ.Elem()))
+	case *types.Chan:
+		switch typ.Dir() {
+		case types.SendOnly:
+			return "chan<- " + typeKey(typ.Elem())
+		case types.RecvOnly:
+			return "<-chan " + typeKey(typ.Elem())
+		case types.SendRecv:
+			return "chan " + typeKey(typ.Elem())
+		}
+		return t.String()
+	default:
+		return t.String()
+	}
+}
+
 // createASTTypeExpr creates an AST type expression from a types.Type and updates existingImports
 func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[string]*Import) (ast.Expr, error) {
 	switch typ := t.(type) {
@@ -30,59 +128,11 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 			X: expr,
 		}, nil
 	case *types.Named:
-		name := typ.Obj().Name()
-		if objPkg := typ.Obj().Pkg(); objPkg != nil && objPkg.Path() != pkg {
-			// For types from other packages, create a selector expression
-			// Format: package.TypeName
-			pkgPath := objPkg.Path()
-			pkgName := objPkg.Name()
-
-			// Check if package is already imported
-			if imp, exists := imports[pkgPath]; exists {
-				pkgName = imp.Name
-			} else {
-				newPkgName := varPool.GetName(pkgName)
-				imports[pkgPath] = &Import{
-					Name:          newPkgName,
-					IsDefaultName: newPkgName == pkgName,
-					IsUsed:        false, // Will be marked during code generation
-				}
-			}
-
-			return &ast.SelectorExpr{
-				X:   ast.NewIdent(pkgName),
-				Sel: ast.NewIdent(name),
-			}, nil
-		}
-
-		return ast.NewIdent(name), nil
+		return namedASTTypeExpr(pkg, typ.Obj(), typ.TypeArgs(), varPool, imports)
 	case *types.Alias:
-		name := typ.Obj().Name()
-		if objPkg := typ.Obj().Pkg(); objPkg != nil && objPkg.Path() != pkg {
-			// For types from other packages, create a selector expression
-			// Format: package.TypeName
-			pkgPath := objPkg.Path()
-			pkgName := objPkg.Name()
-
-			// Check if package is already imported
-			if imp, exists := imports[pkgPath]; exists {
-				pkgName = imp.Name
-			} else {
-				newPkgName := varPool.GetName(pkgName)
-				imports[pkgPath] = &Import{
-					Name:          newPkgName,
-					IsDefaultName: newPkgName == pkgName,
-					IsUsed:        false, // Will be marked during code generation
-				}
-			}
-
-			return &ast.SelectorExpr{
-				X:   ast.NewIdent(pkgName),
-				Sel: ast.NewIdent(name),
-			}, nil
-		}
-
-		return ast.NewIdent(name), nil
+		return namedASTTypeExpr(pkg, typ.Obj(), typ.TypeArgs(), varPool, imports)
+	case *types.TypeParam:
+		return ast.NewIdent(typ.Obj().Name()), nil
 	case *types.Slice:
 		expr, err := createASTTypeExpr(pkg, typ.Elem(), varPool, imports)
 		if err != nil {
@@ -159,9 +209,27 @@ func createASTTypeExpr(pkg string, t types.Type, varPool *VarPool, imports map[s
 	case *types.Signature:
 		funcFields := make([]*ast.Field, 0, typ.Params().Len())
 		for i := 0; i < typ.Params().Len(); i++ {
-			expr, err := createASTTypeExpr(pkg, typ.Params().At(i).Type(), varPool, imports)
-			if err != nil {
-				return nil, fmt.Errorf("param %d: %w", i, err)
+			paramType := typ.Params().At(i).Type()
+			isLastVariadic := typ.Variadic() && i == typ.Params().Len()-1
+			var expr ast.Expr
+			if isLastVariadic {
+				// The last param of a variadic function is stored as *types.Slice.
+				// Unwrap it and emit ...ElemType instead of []ElemType.
+				sliceType, ok := paramType.(*types.Slice)
+				if !ok {
+					return nil, fmt.Errorf("param %d: variadic parameter is not a slice type", i)
+				}
+				elemExpr, err := createASTTypeExpr(pkg, sliceType.Elem(), varPool, imports)
+				if err != nil {
+					return nil, fmt.Errorf("param %d: %w", i, err)
+				}
+				expr = &ast.Ellipsis{Elt: elemExpr}
+			} else {
+				var err error
+				expr, err = createASTTypeExpr(pkg, paramType, varPool, imports)
+				if err != nil {
+					return nil, fmt.Errorf("param %d: %w", i, err)
+				}
 			}
 			funcFields = append(funcFields, &ast.Field{
 				Names: []*ast.Ident{ast.NewIdent(fmt.Sprintf("arg%d", i))},
@@ -237,6 +305,15 @@ type node struct {
 	providerSpec *ProviderSpec
 	providerArgs []*InjectorCallArgument
 	returnValues []*InjectorParam
+	// argProviderOrder and argRequiresIndex record the discovery order for arg nodes:
+	// the DeclOrder of the first provider that requires this arg, and the index within
+	// that provider's Requires slice. Used to sort external arguments in declaration order.
+	argProviderOrder int
+	argRequiresIndex int
+	// variadicElemMatch is true when the variadic last parameter of this provider was
+	// satisfied by an element-type provider (e.g. NewOption() Option satisfies ...Option).
+	// In this case the generated call must NOT use the `...` spread operator.
+	variadicElemMatch bool
 }
 
 type edgeNode struct {
@@ -257,6 +334,15 @@ type Graph struct {
 	returnValue  *returnVal
 	injectorName string
 	nodes        []*node
+	// hasError is true when any provider in the build directive is a zero-provides
+	// error sentinel (e.g. kessoku.Value((error)(nil))). This forces the generated
+	// injector to return error even when no reachable provider returns an error,
+	// preserving a wire injector's declared (*T, error) signature after migration.
+	hasError bool
+	// hasAsyncStruct is true when any Async(Struct[T]()) is present. Struct providers
+	// are expanded into synthetic field accessors and never become graph nodes, so
+	// their IsAsync flag must be captured here for hasAsyncProviders to see it.
+	hasAsyncStruct bool
 }
 
 func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Graph, error) {
@@ -265,6 +351,39 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 		returnType:   build.Return,
 		edges:        make(map[*node][]*edgeNode),
 		reverseEdges: make(map[*node][]*node),
+	}
+
+	// Upfront pass: detect zero-provides error-only providers (e.g. kessoku.Value((error)(nil))).
+	// These providers are unreachable in graph traversal (they provide nothing needed by the
+	// dependency graph) but they carry the caller's intent: the injector must return error.
+	// We capture that intent here so isReturnError() can see it even if the node is never visited.
+	for _, provider := range build.Providers {
+		if provider.IsReturnError && len(provider.Provides) == 0 {
+			graph.hasError = true
+			break
+		}
+	}
+
+	// Populate ErrorTypeExpr for all providers that return an error. When the
+	// provider returns a concrete type (e.g. *MyError) instead of the error
+	// interface, the generated var declaration must use that concrete type so
+	// that a nil return value is not wrapped in a non-nil interface.
+	errorIfaceType := types.Universe.Lookup("error").Type()
+	for _, provider := range build.Providers {
+		if !provider.IsReturnError || provider.ErrorType == nil {
+			continue
+		}
+		if types.Identical(provider.ErrorType, errorIfaceType) {
+			// The provider returns the error interface itself — use the bare identifier.
+			provider.ErrorTypeExpr = ast.NewIdent("error")
+		} else {
+			// Concrete type implementing error: generate the exact AST type expression.
+			expr, err := createASTTypeExpr(metaData.Package.Path, provider.ErrorType, varPool, metaData.Imports)
+			if err != nil {
+				return nil, fmt.Errorf("create error type expression for provider: %w", err)
+			}
+			provider.ErrorTypeExpr = expr
+		}
 	}
 
 	type fnProvider struct {
@@ -292,7 +411,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 				if t == nil {
 					return nil, fmt.Errorf("provider has nil type at group %d, index %d", groupIndex, typeIndex)
 				}
-				key := t.String()
+				key := typeKey(t)
 
 				if existing, ok := fnProviderMap[key]; ok {
 					// Allow the same provider to provide multiple types (e.g., concrete and interface)
@@ -319,8 +438,13 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 			return nil, fmt.Errorf("struct provider has nil StructType")
 		}
 
+		// Propagate async flag: Async(Struct[T]()) should trigger ctx injection
+		if structProvider.IsAsync {
+			graph.hasAsyncStruct = true
+		}
+
 		// Find the provider that provides this struct type
-		structTypeKey := structProvider.StructType.String()
+		structTypeKey := typeKey(structProvider.StructType)
 		if _, ok := fnProviderMap[structTypeKey]; !ok {
 			return nil, fmt.Errorf("no provider for struct type %s", structTypeKey)
 		}
@@ -337,8 +461,14 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 			}
 			declOrder++
 
-			fieldTypeKey := field.Type.String()
-			if _, ok := fnProviderMap[fieldTypeKey]; ok {
+			fieldTypeKey := typeKey(field.Type)
+			if existing, ok := fnProviderMap[fieldTypeKey]; ok {
+				if existing.provider.Type == ProviderTypeFieldAccess && existing.provider.StructType != nil && types.Identical(existing.provider.StructType, structProvider.StructType) {
+					return nil, fmt.Errorf(
+						"struct[%s] has two exported fields of the same type %s (%s and %s): Struct[T] requires all exported fields to have distinct types; use Provide with an explicit constructor instead",
+						structProvider.StructType.String(), fieldTypeKey, existing.provider.SourceField.Name, field.Name,
+					)
+				}
 				return nil, fmt.Errorf("multiple providers provide %s (field %s conflicts with existing provider)", fieldTypeKey, field.Name)
 			}
 
@@ -349,25 +479,37 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 			// Add to build.Providers so it's included in graph processing
 			build.Providers = append(build.Providers, fieldProvider)
 		}
+
+		// Register any interface types added by Bind[I](Struct[T]()) wrapping.
+		// The parser appends the interface type to Provides[0] (after the struct
+		// type itself), but the field-expansion loop above only registers field
+		// types. Without this, the graph treats I as an unresolved external
+		// dependency and leaks it as an injector parameter.
+		if len(structProvider.Provides) > 0 {
+			structFnProvider := fnProviderMap[structTypeKey]
+			for _, extraType := range structProvider.Provides[0][1:] {
+				if extraType == nil {
+					continue
+				}
+				extraKey := typeKey(extraType)
+				if _, ok := fnProviderMap[extraKey]; !ok {
+					fnProviderMap[extraKey] = &fnProvider{
+						provider:    structFnProvider.provider,
+						returnIndex: structFnProvider.returnIndex,
+					}
+				}
+			}
+		}
 	}
 
 	if build.Return.Type == nil {
 		return nil, fmt.Errorf("return type is nil")
 	}
-	returnTypeKey := build.Return.Type.String()
+	returnTypeKey := typeKey(build.Return.Type)
 
 	returnProvider, ok := fnProviderMap[returnTypeKey]
 	if !ok {
-		n, err := graph.autoAddMissingDependencies(metaData, build.Return.Type, varPool)
-		if err != nil {
-			return nil, fmt.Errorf("auto add missing return dependency: %w", err)
-		}
-		graph.returnValue = &returnVal{
-			node:        n,
-			returnIndex: 0,
-		}
-		graph.nodes = append(graph.nodes, n)
-		return graph, nil
+		return nil, fmt.Errorf("no provider found for return type %s in injector %q; add kessoku.Provide() for a constructor that returns %s", build.Return.Type, build.InjectorName, build.Return.Type)
 	}
 
 	providerNodeMap := make(map[*ProviderSpec]*node)
@@ -383,6 +525,7 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 		node:        returnNode,
 		returnIndex: returnProvider.returnIndex,
 	}
+	providerNodeMap[returnProvider.provider] = returnNode
 	queue.Push(returnNode)
 	graph.nodes = append(graph.nodes, returnNode)
 
@@ -402,11 +545,27 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 			if t == nil {
 				return nil, fmt.Errorf("provider has nil required type at index %d", i)
 			}
-			key := t.String()
+			key := typeKey(t)
 			var (
 				n2       *node
 				srcIndex int
 			)
+
+			// For the last parameter of a variadic provider, the stored requirement is
+			// the slice type []T (from types.Signature.Params().At(last).Type()).  If
+			// no []T provider exists, check whether an element-type T provider is
+			// available and use it directly (the call site must then omit `...`).
+			isLastVariadic := n1.providerSpec.IsVariadic && i == len(n1.providerSpec.Requires)-1
+			var elemTypeProvider *fnProvider
+			if isLastVariadic {
+				if sliceT, ok := t.(*types.Slice); ok {
+					elemKey := typeKey(sliceT.Elem())
+					if ep, ok := fnProviderMap[elemKey]; ok {
+						elemTypeProvider = ep
+					}
+				}
+			}
+
 			if provider, ok := fnProviderMap[key]; ok {
 				n2, ok = providerNodeMap[provider.provider]
 				if !ok {
@@ -420,7 +579,34 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 				}
 
 				srcIndex = provider.returnIndex
+			} else if elemTypeProvider != nil {
+				// The variadic last parameter is satisfied by a single element-type
+				// provider.  Use it directly; the call site must NOT use `...`.
+				n1.variadicElemMatch = true
+				n2, ok = providerNodeMap[elemTypeProvider.provider]
+				if !ok {
+					n2 = &node{
+						providerSpec: elemTypeProvider.provider,
+						providerArgs: make([]*InjectorCallArgument, len(elemTypeProvider.provider.Requires)),
+					}
+					providerNodeMap[elemTypeProvider.provider] = n2
+					queue.Push(n2)
+					graph.nodes = append(graph.nodes, n2)
+				}
+				srcIndex = elemTypeProvider.returnIndex
 			} else if n2, ok = argNodeMap[key]; ok {
+				// Check if this provider already depends on this arg node (same type used
+				// at a different parameter position). If so, create a new distinct arg node
+				// so each parameter position receives its own injector argument.
+				if slices.Contains(graph.reverseEdges[n1], n2) {
+					var err error
+					n2, err = graph.autoAddMissingDependencies(metaData, t, varPool)
+					if err != nil {
+						return nil, fmt.Errorf("auto add missing dependency as argument: %w", err)
+					}
+					queue.Push(n2)
+					graph.nodes = append(graph.nodes, n2)
+				}
 				srcIndex = 0
 			} else {
 				// Auto-detect missing dependency and create an argument for it
@@ -429,6 +615,13 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 				if err != nil {
 					return nil, fmt.Errorf("auto add missing dependency as argument: %w", err)
 				}
+
+				// Record the discovery order based on the requiring provider's DeclOrder and
+				// the index within that provider's Requires slice. This preserves a stable,
+				// declaration-relative ordering of external arguments in the generated injector
+				// signature, preventing BFS traversal order from reordering parameters.
+				n2.argProviderOrder = n1.providerSpec.DeclOrder
+				n2.argRequiresIndex = i
 
 				argNodeMap[key] = n2
 				queue.Push(n2)
@@ -442,6 +635,126 @@ func NewGraph(metaData *MetaData, build *BuildDirective, varPool *VarPool) (*Gra
 				provideArgDst: i,
 			})
 			graph.reverseEdges[n1] = append(graph.reverseEdges[n1], n2)
+		}
+	}
+
+	// Third pass: include error-only validator providers (Provides == nil, IsReturnError == true)
+	// that are silently dropped by the backward traversal since they produce no consumed types.
+	for _, provider := range build.Providers {
+		if len(provider.Provides) > 0 || !provider.IsReturnError {
+			continue
+		}
+		// Skip struct providers — they always have Provides populated
+		if provider.Type == ProviderTypeStruct {
+			continue
+		}
+		// This is an error-only validator; add it to the graph now.
+		if _, alreadyAdded := providerNodeMap[provider]; alreadyAdded {
+			continue
+		}
+
+		validatorNode := &node{
+			providerSpec: provider,
+			providerArgs: make([]*InjectorCallArgument, len(provider.Requires)),
+		}
+		providerNodeMap[provider] = validatorNode
+		graph.nodes = append(graph.nodes, validatorNode)
+
+		// Resolve dependencies for the validator node.
+		for i, t := range provider.Requires {
+			if t == nil {
+				return nil, fmt.Errorf("validator provider has nil required type at index %d", i)
+			}
+			key := typeKey(t)
+			var (
+				n2       *node
+				srcIndex int
+			)
+			if dep, ok := fnProviderMap[key]; ok {
+				n2, ok = providerNodeMap[dep.provider]
+				if !ok {
+					n2 = &node{
+						providerSpec: dep.provider,
+						providerArgs: make([]*InjectorCallArgument, len(dep.provider.Requires)),
+					}
+					providerNodeMap[dep.provider] = n2
+					queue.Push(n2)
+					graph.nodes = append(graph.nodes, n2)
+				}
+				srcIndex = dep.returnIndex
+			} else if n2, ok = argNodeMap[key]; ok {
+				srcIndex = 0
+			} else {
+				var err error
+				n2, err = graph.autoAddMissingDependencies(metaData, t, varPool)
+				if err != nil {
+					return nil, fmt.Errorf("auto add missing dependency for validator: %w", err)
+				}
+				argNodeMap[key] = n2
+				graph.nodes = append(graph.nodes, n2)
+				srcIndex = 0
+			}
+
+			graph.edges[n2] = append(graph.edges[n2], &edgeNode{
+				node:          validatorNode,
+				provideArgSrc: srcIndex,
+				provideArgDst: i,
+			})
+			graph.reverseEdges[validatorNode] = append(graph.reverseEdges[validatorNode], n2)
+		}
+
+		// Drain any newly queued nodes (in case validator deps needed new provider nodes).
+		for n1 := range queue.Iter {
+			if n1 == nil || visited[n1] {
+				continue
+			}
+			visited[n1] = true
+
+			if n1.providerSpec == nil {
+				continue
+			}
+
+			for i, t := range n1.providerSpec.Requires {
+				if t == nil {
+					return nil, fmt.Errorf("provider has nil required type at index %d", i)
+				}
+				key := typeKey(t)
+				var (
+					n2       *node
+					srcIndex int
+				)
+				if dep, ok := fnProviderMap[key]; ok {
+					n2, ok = providerNodeMap[dep.provider]
+					if !ok {
+						n2 = &node{
+							providerSpec: dep.provider,
+							providerArgs: make([]*InjectorCallArgument, len(dep.provider.Requires)),
+						}
+						providerNodeMap[dep.provider] = n2
+						queue.Push(n2)
+						graph.nodes = append(graph.nodes, n2)
+					}
+					srcIndex = dep.returnIndex
+				} else if n2, ok = argNodeMap[key]; ok {
+					srcIndex = 0
+				} else {
+					var err error
+					n2, err = graph.autoAddMissingDependencies(metaData, t, varPool)
+					if err != nil {
+						return nil, fmt.Errorf("auto add missing dependency as argument: %w", err)
+					}
+					argNodeMap[key] = n2
+					graph.nodes = append(graph.nodes, n2)
+					srcIndex = 0
+				}
+
+				graph.edges[n2] = append(graph.edges[n2], &edgeNode{
+					node:          n1,
+					provideArgSrc: srcIndex,
+					provideArgDst: i,
+				})
+				graph.reverseEdges[n1] = append(graph.reverseEdges[n1], n2)
+			}
 		}
 	}
 
@@ -472,6 +785,7 @@ func (e *CycleError) Error() string {
 		return "circular dependency detected"
 	}
 
+	// Collect type names in the order stored in Cycle (provides-to direction).
 	var providerTypes []string
 	for _, n := range e.Cycle {
 		if n.providerSpec != nil && len(n.providerSpec.Provides) > 0 && len(n.providerSpec.Provides[0]) > 0 {
@@ -484,6 +798,14 @@ func (e *CycleError) Error() string {
 
 	if len(providerTypes) == 0 {
 		return "circular dependency detected"
+	}
+
+	// Reverse the slice so that -> reads as "depends on" (not "provides to").
+	// The DFS traverses edges in provides-to order, so the collected cycle is in
+	// provides-to order: "A provides to B" meaning "B depends on A".
+	// Reversing converts it to depends-on order, which is more natural for users.
+	for i, j := 0, len(providerTypes)-1; i < j; i, j = i+1, j-1 {
+		providerTypes[i], providerTypes[j] = providerTypes[j], providerTypes[i]
 	}
 
 	// Build the cycle path: TypeA -> TypeB -> TypeC -> TypeA
@@ -567,6 +889,9 @@ func (g *Graph) buildCyclePath(cycleStart, cycleEnd *node, parent map[*node]*nod
 
 // hasAsyncProviders checks if any providers in the graph are async
 func (g *Graph) hasAsyncProviders() bool {
+	if g.hasAsyncStruct {
+		return true
+	}
 	for _, n := range g.nodes {
 		if n.providerSpec != nil && n.providerSpec.IsAsync {
 			return true
@@ -575,9 +900,15 @@ func (g *Graph) hasAsyncProviders() bool {
 	return false
 }
 
-// injectContextArg injects context.Context as the first argument when async providers exist
+// injectContextArg injects context.Context as the first argument when the graph
+// contains any async provider, even if the pool-assignment logic collapses all
+// async nodes into a single pool (e.g. a single async provider with no siblings
+// to parallelize with) and no goroutines are emitted. Tying the parameter to the
+// presence of kessoku.Async rather than to the generated statements keeps the
+// injector signature stable while the dependency graph evolves: adding or removing
+// a sibling provider never breaks existing callers.
 func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool *VarPool) error {
-	if !g.hasAsyncProviders() {
+	if !g.hasAsyncProviders() && !hasChainStmts(injector) {
 		return nil
 	}
 
@@ -604,9 +935,13 @@ func (g *Graph) injectContextArg(injector *Injector, metaData *MetaData, varPool
 		// Use the Param from the argument directly, not from Params slice
 		existingContextArg.Param.Ref(false)
 
-		// Mark context import as used
-		if imp, exists := metaData.Imports[contextPkgPath]; exists {
-			imp.IsUsed = true
+		// Mark context import as used, unless the argument is spelled via a
+		// user-defined alias (type Ctx = context.Context): the signature then
+		// renders the alias name and never references the context package.
+		if _, isAlias := existingContextArg.Type.(*types.Alias); !isAlias {
+			if imp, exists := metaData.Imports[contextPkgPath]; exists {
+				imp.IsUsed = true
+			}
 		}
 
 		return nil
@@ -805,6 +1140,9 @@ func (g *Graph) Build(metaData *MetaData, varPool *VarPool) (*Injector, error) {
 }
 
 func (g *Graph) isReturnError() bool {
+	if g.hasError {
+		return true
+	}
 	for _, node := range g.nodes {
 		if node.providerSpec != nil && node.providerSpec.IsReturnError {
 			return true
@@ -869,6 +1207,11 @@ func (g *Graph) topologicalSortIter() func(yield func(*node) bool) {
 	requireCounts := make(map[*node]*requireCounter)
 	visited := make(map[*node]struct{})
 
+	// Separate arg nodes from provider nodes so we can sort arg nodes by their
+	// discovery order (argProviderOrder, argRequiresIndex). This preserves the
+	// declaration-relative ordering of external arguments in the generated injector
+	// function signature instead of using BFS traversal order.
+	var argNodes []*node
 	for _, n := range g.nodes {
 		requireCount := len(g.reverseEdges[n])
 		requireCounts[n] = &requireCounter{
@@ -877,8 +1220,43 @@ func (g *Graph) topologicalSortIter() func(yield func(*node) bool) {
 		}
 
 		if requireCount == 0 {
-			waitNodes.Push(n)
+			if n.arg != nil {
+				argNodes = append(argNodes, n)
+			} else {
+				waitNodes.Push(n)
+			}
 		}
+	}
+
+	// Sort arg nodes by (argProviderOrder, argRequiresIndex) to ensure stable,
+	// declaration-relative ordering in the generated function signature.
+	// context.Context always sorts first: Go convention puts ctx as the first
+	// parameter, and injectContextArg applies the same rule for async injectors.
+	slices.SortStableFunc(argNodes, func(a, b *node) int {
+		aCtx := a.arg != nil && isContextType(a.arg.Type)
+		bCtx := b.arg != nil && isContextType(b.arg.Type)
+		if aCtx != bCtx {
+			if aCtx {
+				return -1
+			}
+			return 1
+		}
+		if a.argProviderOrder != b.argProviderOrder {
+			if a.argProviderOrder < b.argProviderOrder {
+				return -1
+			}
+			return 1
+		}
+		if a.argRequiresIndex < b.argRequiresIndex {
+			return -1
+		}
+		if a.argRequiresIndex > b.argRequiresIndex {
+			return 1
+		}
+		return 0
+	})
+	for _, n := range argNodes {
+		waitNodes.Push(n)
 	}
 
 	return func(yield func(*node) bool) {
@@ -944,25 +1322,14 @@ func (g *Graph) findOptimalPool(n *node, pools [][]*node, poolProvidedNodes []ma
 		return 0
 	}
 
-	if maxProvidedCount == len(dependencies) {
-	POOL_LOOP:
+	// For sync providers only: if all dependencies are satisfied by a single pool,
+	// place the node in that pool to avoid unnecessary goroutine overhead.
+	// Async providers are intentionally excluded from this optimization: they
+	// must be placed in a separate (possibly empty) pool so that siblings that
+	// share the same dependency can be scheduled in parallel goroutines.
+	if maxProvidedCount == len(dependencies) && !n.providerSpec.IsAsync {
 		for _, poolIdx := range maxProvidedPools {
-			if !n.providerSpec.IsAsync {
-				return poolIdx
-			}
-
-			for i := range pools[poolIdx] {
-				nd := pools[poolIdx][len(pools[poolIdx])-1-i]
-				if slices.Contains(dependencies, nd) {
-					return poolIdx
-				}
-				if nd.providerSpec.IsAsync {
-					continue POOL_LOOP
-				}
-			}
-			if poolIdx == 0 {
-				return 0
-			}
+			return poolIdx
 		}
 	}
 
@@ -1169,9 +1536,10 @@ func (g *Graph) buildPoolStmtsSimple(pool []*node) ([]InjectorStmt, error) {
 			})
 		} else {
 			stmts = append(stmts, &InjectorProviderCallStmt{
-				Provider:  n.providerSpec,
-				Arguments: n.providerArgs,
-				Returns:   n.returnValues,
+				Provider:          n.providerSpec,
+				Arguments:         n.providerArgs,
+				Returns:           n.returnValues,
+				VariadicElemMatch: n.variadicElemMatch,
 			})
 		}
 	}

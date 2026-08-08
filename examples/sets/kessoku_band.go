@@ -17,38 +17,38 @@ func InitializeAppBasic() (*App, error) {
 	return app, nil
 }
 func InitializeAppWithInlineSet() (*App, error) {
-	config0 := kessoku.Provide(NewConfig).Fn()()
-	var err0 error
-	database0, err0 := kessoku.Provide(NewDatabase).Fn()(config0)
-	if err0 != nil {
+	config := kessoku.Provide(NewConfig).Fn()()
+	var err error
+	database, err := kessoku.Provide(NewDatabase).Fn()(config)
+	if err != nil {
 		var zero *App
-		return zero, err0
+		return zero, err
 	}
-	userService0 := kessoku.Provide(NewUserService).Fn()(database0)
-	app0 := kessoku.Provide(NewApp).Fn()(userService0)
-	return app0, nil
+	userService := kessoku.Provide(NewUserService).Fn()(database)
+	app := kessoku.Provide(NewApp).Fn()(userService)
+	return app, nil
 }
 func InitializeAppWithSetVariable() (*App, error) {
-	config1 := kessoku.Provide(NewConfig).Fn()()
-	var err1 error
-	database1, err1 := kessoku.Provide(NewDatabase).Fn()(config1)
-	if err1 != nil {
+	config := kessoku.Provide(NewConfig).Fn()()
+	var err error
+	database, err := kessoku.Provide(NewDatabase).Fn()(config)
+	if err != nil {
 		var zero *App
-		return zero, err1
+		return zero, err
 	}
-	userService1 := kessoku.Provide(NewUserService).Fn()(database1)
-	app1 := kessoku.Provide(NewApp).Fn()(userService1)
-	return app1, nil
+	userService := kessoku.Provide(NewUserService).Fn()(database)
+	app := kessoku.Provide(NewApp).Fn()(userService)
+	return app, nil
 }
 func InitializeAppWithNestedSets() (*App, error) {
-	config2 := kessoku.Provide(NewConfig).Fn()()
-	var err2 error
-	database2, err2 := kessoku.Provide(NewDatabase).Fn()(config2)
-	if err2 != nil {
+	config := kessoku.Provide(NewConfig).Fn()()
+	var err error
+	database, err := kessoku.Provide(NewDatabase).Fn()(config)
+	if err != nil {
 		var zero *App
-		return zero, err2
+		return zero, err
 	}
-	userService2 := kessoku.Provide(NewUserService).Fn()(database2)
-	app2 := kessoku.Provide(NewApp).Fn()(userService2)
-	return app2, nil
+	userService := kessoku.Provide(NewUserService).Fn()(database)
+	app := kessoku.Provide(NewApp).Fn()(userService)
+	return app, nil
 }

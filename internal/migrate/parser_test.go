@@ -141,9 +141,10 @@ func TestExtractImports(t *testing.T) {
 	p := NewParser()
 
 	tests := []struct {
-		want map[string]string
-		name string
-		src  string
+		want          map[string]string
+		pkgNameByPath map[string]string
+		name          string
+		src           string
 	}{
 		{
 			name: "no imports",
@@ -209,11 +210,47 @@ import _ "embed"
 			want: map[string]string{},
 		},
 		{
-			name: "nested package path",
+			name: "nested package path fallback without pkgNameByPath",
 			src: `package test
 import "github.com/traPtitech/traQ/repository/gorm2/v1"
 `,
+			// Without pkgNameByPath, falls back to lastPathElement which returns "v1".
 			want: map[string]string{"v1": "github.com/traPtitech/traQ/repository/gorm2/v1"},
+		},
+		{
+			// Major-version suffix: "example.com/lib/v2" declares "package lib".
+			// Without pkgNameByPath the key would be "v2" (wrong); with the map it is "lib".
+			name: "major version suffix uses actual package name from pkgNameByPath",
+			src: `package test
+import "example.com/lib/v2"
+`,
+			pkgNameByPath: map[string]string{
+				"example.com/lib/v2": "lib",
+			},
+			want: map[string]string{"lib": "example.com/lib/v2"},
+		},
+		{
+			// gopkg.in-style: "gopkg.in/yaml.v3" declares "package yaml".
+			// Without pkgNameByPath the key would be "yaml.v3" (wrong); with the map it is "yaml".
+			name: "gopkg.in-style path uses actual package name from pkgNameByPath",
+			src: `package test
+import "gopkg.in/yaml.v3"
+`,
+			pkgNameByPath: map[string]string{
+				"gopkg.in/yaml.v3": "yaml",
+			},
+			want: map[string]string{"yaml": "gopkg.in/yaml.v3"},
+		},
+		{
+			// Explicit alias always wins regardless of pkgNameByPath.
+			name: "explicit alias overrides pkgNameByPath",
+			src: `package test
+import mylib "example.com/lib/v2"
+`,
+			pkgNameByPath: map[string]string{
+				"example.com/lib/v2": "lib",
+			},
+			want: map[string]string{"mylib": "example.com/lib/v2"},
 		},
 	}
 
@@ -225,7 +262,7 @@ import "github.com/traPtitech/traQ/repository/gorm2/v1"
 				t.Fatalf("failed to parse: %v", err)
 			}
 
-			got := p.ExtractImports(file)
+			got, _ := p.ExtractImports(file, tt.pkgNameByPath)
 			if len(got) != len(tt.want) {
 				t.Errorf("ExtractImports() got %d imports, want %d", len(got), len(tt.want))
 			}

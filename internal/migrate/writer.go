@@ -2,12 +2,15 @@ package migrate
 
 import (
 	"bytes"
+	"fmt"
 	"go/ast"
 	"go/format"
 	"go/token"
 	"go/types"
 	"io/fs"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 )
 
@@ -144,7 +147,58 @@ func (w *Writer) Write(output *MergedOutput, path string) error {
 		return err
 	}
 
-	return os.WriteFile(path, buf.Bytes(), filePermissions)
+	return writeAtomically(path, buf.Bytes())
+}
+
+// writeAtomically writes content to a temporary file in the same directory as
+// dst, sets the file's permissions to match dst (if it exists) or
+// filePermissions otherwise, and renames the temp file to dst on success.
+// If any step fails the temporary file is removed and dst is left untouched,
+// protecting against the data-loss that would occur if os.WriteFile truncated
+// dst on open and then a subsequent write or close failed.
+func writeAtomically(dst string, content []byte) error {
+	dir := filepath.Dir(dst)
+
+	tmp, err := os.CreateTemp(dir, ".kessoku-migrate-tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	cleanup := func() {
+		if removeErr := os.Remove(tmpName); removeErr != nil && !os.IsNotExist(removeErr) {
+			slog.Error("failed to remove migrate temp file", "file", tmpName, "error", removeErr)
+		}
+	}
+
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+
+	// Preserve existing file permissions, or fall back to the default.
+	perm := filePermissions
+	if fi, statErr := os.Stat(dst); statErr == nil {
+		perm = fi.Mode().Perm()
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpName, dst); err != nil {
+		cleanup()
+		return fmt.Errorf("rename temp file to %s: %w", dst, err)
+	}
+
+	return nil
 }
 
 // buildFile builds an AST file from the merged output.
@@ -334,17 +388,53 @@ func (w *Writer) bindToExpr(kb *KessokuBind) ast.Expr {
 }
 
 // valueToExpr converts a KessokuValue to kessoku.Value(...) expression.
+// When kv.TypeExpr is non-nil (e.g. for untyped nil literals), the generated
+// expression includes an explicit type parameter: kessoku.Value[T](...).
 func (w *Writer) valueToExpr(kv *KessokuValue) ast.Expr {
 	expr := kv.Expr
 	if expr == nil {
 		expr = ast.NewIdent("nil")
 	}
+
+	var fun ast.Expr
+	if kv.TypeExpr != nil {
+		// Emit kessoku.Value[T](expr)
+		fun = &ast.IndexExpr{
+			X: &ast.SelectorExpr{
+				X:   ast.NewIdent("kessoku"),
+				Sel: ast.NewIdent("Value"),
+			},
+			Index: kv.TypeExpr,
+		}
+	} else {
+		fun = &ast.SelectorExpr{
+			X:   ast.NewIdent("kessoku"),
+			Sel: ast.NewIdent("Value"),
+		}
+	}
+
+	return &ast.CallExpr{
+		Fun:  fun,
+		Args: []ast.Expr{expr},
+	}
+}
+
+// errorSentinelExpr builds a kessoku.Value((error)(nil)) expression that, when
+// processed by the kessoku code generator, forces the generated injector function
+// to include an error return even when no provider returns an error.
+// This preserves a wire injector's declared (*T, error) return signature after migration.
+func errorSentinelExpr() ast.Expr {
 	return &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
 			X:   ast.NewIdent("kessoku"),
 			Sel: ast.NewIdent("Value"),
 		},
-		Args: []ast.Expr{expr},
+		Args: []ast.Expr{
+			&ast.CallExpr{
+				Fun:  &ast.ParenExpr{X: ast.NewIdent("error")},
+				Args: []ast.Expr{ast.NewIdent("nil")},
+			},
+		},
 	}
 }
 
@@ -360,10 +450,21 @@ func (w *Writer) injectToDecl(ki *KessokuInject) *ast.GenDecl {
 		},
 	}
 
-	// Append provider elements
-	args = append(args, w.buildElementArgs(ki.Elements, providerStartLine)...)
+	// When the wire injector declared an error return but no provider returns error,
+	// emit a sentinel kessoku.Value((error)(nil)) provider. The kessoku code generator
+	// recognises this as a zero-provides, error-typed provider and sets IsReturnError=true
+	// on the injector, preserving the (*T, error) return signature.
+	sentinelLine := providerStartLine
+	if ki.NeedsErrorSentinel {
+		sentinel := w.exprWithPos(errorSentinelExpr(), token.Pos(sentinelLine*lineOffsetBytes))
+		args = append(args, sentinel)
+		sentinelLine++
+	}
 
-	lastLine := providerStartLine + len(ki.Elements) - 1
+	// Append provider elements
+	args = append(args, w.buildElementArgs(ki.Elements, sentinelLine)...)
+
+	lastLine := sentinelLine + len(ki.Elements) - 1
 
 	// Build type parameter for Inject[T]
 	typeExpr := w.typeToExpr(ki.ReturnType)

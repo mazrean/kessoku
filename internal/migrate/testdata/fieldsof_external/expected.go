@@ -8,7 +8,7 @@ import (
 )
 
 var ConfigSet = kessoku.Set(
-	kessoku.Provide(func(s *external.Config) (string, string) {
-		return s.DB, s.Cache
+	kessoku.Provide(func(s *external.Config) (string, *string, string, *string) {
+		return s.DB, &s.DB, s.Cache, &s.Cache
 	}),
 )

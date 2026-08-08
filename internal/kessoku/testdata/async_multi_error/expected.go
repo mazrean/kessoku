@@ -17,11 +17,20 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		messagingCh = make(chan struct{})
 		app         *App
 	)
+	parentCtx := ctx
+	ctx, cancel := context.WithCancel(ctx)
 	eg, ctx := errgroup.WithContext(ctx)
+	defer func() {
+		cancel()
+		_ = eg.Wait()
+	}()
 	eg.Go(func() error {
 		var err error
 		cache, err = kessoku.Async(kessoku.Provide(NewCache)).Fn()()
 		if err != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				return cause
+			}
 			return err
 		}
 		close(cacheCh)
@@ -31,6 +40,9 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		var err0 error
 		messaging, err0 = kessoku.Async(kessoku.Provide(NewMessaging)).Fn()()
 		if err0 != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				return cause
+			}
 			return err0
 		}
 		close(messagingCh)
@@ -39,6 +51,10 @@ func InitializeApp(ctx context.Context) (*App, error) {
 	var err1 error
 	database, err1 = kessoku.Async(kessoku.Provide(NewDatabase)).Fn()()
 	if err1 != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			var zero *App
+			return zero, cause
+		}
 		var zero *App
 		return zero, err1
 	}
@@ -47,12 +63,17 @@ func InitializeApp(ctx context.Context) (*App, error) {
 		case <-ch:
 		case <-ctx.Done():
 			var zero *App
-			return zero, ctx.Err()
+			return zero, context.Cause(ctx)
 		}
 	}
 	app = kessoku.Provide(NewApp).Fn()(database, cache, messaging)
 	if err := eg.Wait(); err != nil {
-		return nil, err
+		var zero *App
+		return zero, err
+	}
+	if err := context.Cause(parentCtx); err != nil {
+		var zero *App
+		return zero, err
 	}
 	return app, nil
 }

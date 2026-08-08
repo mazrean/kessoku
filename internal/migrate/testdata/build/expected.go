@@ -8,6 +8,7 @@ import (
 
 var _ = kessoku.Inject[*App](
 	"InitializeApp",
+	kessoku.Value((error)(nil)),
 	kessoku.Provide(NewDB),
 	kessoku.Provide(NewApp),
 )

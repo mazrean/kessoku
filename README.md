@@ -63,24 +63,27 @@ gantt
 go get -tool github.com/mazrean/kessoku/cmd/kessoku
 ```
 
-**Create `main.go`:**
+**Create `di.go`** (dependency injection declarations):
 ```go
 package main
 
 import (
     "fmt"
-    "time"
+
     "github.com/mazrean/kessoku"
 )
 
-func SlowDB() string {
-    time.Sleep(200 * time.Millisecond)
-    return "DB-connected"
+type DB struct{ Addr string }
+type Cache struct{ Addr string }
+
+func SlowDB() *DB {
+    // time.Sleep(200 * time.Millisecond)
+    return &DB{Addr: "db:5432"}
 }
 
-func SlowCache() string {
-    time.Sleep(150 * time.Millisecond)
-    return "Cache-ready"
+func SlowCache() *Cache {
+    // time.Sleep(150 * time.Millisecond)
+    return &Cache{Addr: "cache:6379"}
 }
 
 //go:generate go tool kessoku $GOFILE
@@ -88,22 +91,41 @@ func SlowCache() string {
 var _ = kessoku.Inject[string]("InitApp",
     kessoku.Async(kessoku.Provide(SlowDB)),
     kessoku.Async(kessoku.Provide(SlowCache)),
-    kessoku.Provide(func(db, cache string) string {
-        return fmt.Sprintf("App running with %s and %s", db, cache)
+    kessoku.Provide(func(db *DB, cache *Cache) string {
+        return fmt.Sprintf("App running with %s and %s", db.Addr, cache.Addr)
     }),
+)
+```
+
+**Create `main.go`** (application entry point):
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
 )
 
 func main() {
     start := time.Now()
-    result, _ := InitApp()
+    result := InitApp(context.Background())
     fmt.Printf("%s in %v\n", result, time.Since(start))
 }
 ```
 
+> **Note:** Keep the `kessoku.Inject` declarations and your `main()` function in **separate files**.
+> kessoku type-checks the whole package before generating code, so if `main()` calls `InitApp`
+> in the same file (or any file) where `InitApp` is not yet defined, the type-checker will
+> report `undefined: InitApp` and no code will be generated — a chicken-and-egg deadlock.
+> Running `go generate` on `di.go` first produces `di_band.go` (which defines `InitApp`),
+> after which `go build` / `go run .` succeeds.
+
 **Run:**
 ```bash
-go generate && go run main.go
-# Shows: App running with DB-connected and Cache-ready (parallel startup)
+go generate ./...   # generates di_band.go, which defines InitApp
+go run .
+# Shows: App running with db:5432 and cache:6379 in ~200ms (parallel startup)
 ```
 
 ## Installation
@@ -247,7 +269,7 @@ Already using google/wire? Kessoku provides a migration tool to convert your wir
 go tool kessoku migrate
 
 # or specify wire config directory with patterns
-go tool kessoku migrate ./pkg/wire -o kessoku.go
+go tool kessoku migrate ./pkg/wire -o ./pkg/wire/kessoku.go
 ```
 
 <details>

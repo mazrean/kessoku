@@ -84,6 +84,7 @@ func (*WireNewSet) wirePattern() {}
 type WireBind struct {
 	Interface      types.Type
 	Implementation types.Type
+	VarName        string // non-empty when declared as a package-level variable
 	baseWirePattern
 }
 
@@ -120,8 +121,9 @@ func (*WireStruct) wirePattern() {}
 // WireFieldsOf represents wire.FieldsOf(new(Type), fields...) pattern.
 type WireFieldsOf struct {
 	baseWirePattern
-	StructType types.Type
-	Fields     []string
+	StructType    types.Type
+	Fields        []string
+	IsPtrToStruct bool // true when new(*S) form is used; wire then provides both FieldType and *FieldType
 }
 
 func (*WireFieldsOf) wirePattern() {}
@@ -182,14 +184,19 @@ func (*KessokuProvide) kessokuPattern() {}
 type KessokuBind struct {
 	Interface types.Type
 	Provider  KessokuPattern
+	VarName   string // non-empty when this bind is declared as a package-level variable
 	SourcePos token.Pos
 }
 
 func (*KessokuBind) kessokuPattern() {}
 
 // KessokuValue represents kessoku.Value(expr) pattern.
+// When TypeExpr is non-nil, the generated code includes an explicit type parameter:
+// kessoku.Value[T](expr). This is required when expr is an untyped nil literal,
+// because Go cannot infer T from untyped nil.
 type KessokuValue struct {
 	Expr      ast.Expr
+	TypeExpr  ast.Expr // optional explicit type parameter (e.g. for nil literals)
 	SourcePos token.Pos
 }
 
@@ -211,7 +218,11 @@ type KessokuInject struct {
 	FuncName   string
 	Elements   []KessokuPattern
 	SourcePos  token.Pos
-	HasError   bool
+	// NeedsErrorSentinel is true when the wire injector declared an error
+	// return but none of its providers returns an error, so the generated
+	// kessoku.Inject needs a kessoku.Value((error)(nil)) sentinel to keep
+	// the (*T, error) signature.
+	NeedsErrorSentinel bool
 }
 
 func (*KessokuInject) kessokuPattern() {}
@@ -256,13 +267,14 @@ type ImportSpec struct {
 
 // MigrationResult represents the result of migrating a single file.
 type MigrationResult struct {
-	SourceFile    string
-	Package       string
-	TypesPackage  *types.Package
-	SourceImports map[string]string // package name (or alias) -> import path
-	Imports       []ImportSpec
-	Patterns      []KessokuPattern
-	Warnings      []Warning
+	SourceFile         string
+	Package            string
+	TypesPackage       *types.Package
+	SourceImports      map[string]string // package name (or alias) -> import path
+	ExplicitAliasPaths map[string]bool   // import path -> true when the source declared an explicit alias
+	Imports            []ImportSpec
+	Patterns           []KessokuPattern
+	Warnings           []Warning
 }
 
 // MergedOutput represents the result of merging multiple file migrations.

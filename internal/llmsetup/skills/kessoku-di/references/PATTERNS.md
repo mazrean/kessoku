@@ -47,18 +47,33 @@ var _ = kessoku.Inject[*App](
 // Generates: func InitializeApp() (*App, error)
 ```
 
-### Provider with Cleanup
+### Resource Cleanup (No cleanup func() Support)
 
-Return a cleanup function for resource management:
+Kessoku does **not** support wire-style `func()` cleanup returns. The code
+generator treats every non-error return value as an ordinary provided value;
+a cleanup `func()` that nothing consumes is bound to `_` in the generated
+injector and never called, so the cleanup silently does not run. The
+`kessoku migrate` tool rejects wire code using cleanup returns with:
+
+```
+provider "NewDB" returns a wire-style cleanup function (func()); kessoku does not support cleanup functions
+```
+
+**Recommended pattern**: expose a `Close` method on the returned type and call
+it explicitly at the call site.
 
 ```go
-func NewDB() (*DB, func(), error) {
+// Good: Close method on the type
+type DB struct{ db *sql.DB }
+
+func (d *DB) Close() { d.db.Close() }
+
+func NewDB() (*DB, error) {
     db, err := sql.Open("postgres", dsn)
     if err != nil {
-        return nil, nil, err
+        return nil, err
     }
-    cleanup := func() { db.Close() }
-    return &DB{db: db}, cleanup, nil
+    return &DB{db: db}, nil
 }
 
 var _ = kessoku.Inject[*App](
@@ -66,17 +81,17 @@ var _ = kessoku.Inject[*App](
     kessoku.Provide(NewDB),
     kessoku.Provide(NewApp),
 )
-// Generates: func InitializeApp() (*App, func(), error)
+// Generates: func InitializeApp() (*App, error)
 ```
 
 Usage:
 
 ```go
-app, cleanup, err := InitializeApp()
+app, err := InitializeApp()
 if err != nil {
     log.Fatal(err)
 }
-defer cleanup()
+defer app.DB.Close()  // explicit cleanup via method
 ```
 
 ### Multiple Return Values
@@ -273,13 +288,12 @@ Extract struct fields as individual dependencies:
 
 ```go
 type Config struct {
-    DBHost   string
-    DBPort   int
-    CacheURL string
+    DBHost string
+    DBPort int
 }
 
 func NewConfig() *Config {
-    return &Config{DBHost: "localhost", DBPort: 5432, CacheURL: "redis://..."}
+    return &Config{DBHost: "localhost", DBPort: 5432}
 }
 
 func NewDB(host string, port int) *DB {
@@ -289,12 +303,25 @@ func NewDB(host string, port int) *DB {
 var _ = kessoku.Inject[*DB](
     "InitializeDB",
     kessoku.Provide(NewConfig),   // Provides *Config
-    kessoku.Struct[*Config](),    // Expands to DBHost(string), DBPort(int), CacheURL(string)
+    kessoku.Struct[*Config](),    // Expands to DBHost(string), DBPort(int)
     kessoku.Provide(NewDB),       // Receives string and int (matched by type)
 )
 ```
 
 **Important**: `kessoku.Struct[T]()` takes NO arguments. It expands ALL exported fields.
+
+**Constraint**: All exported fields must have distinct types. If two fields share the same type (e.g., two `string` fields), use `kessoku.Provide` with an explicit constructor instead:
+
+```go
+// This would fail — two string fields:
+// type Config struct { DBHost string; CacheURL string; DBPort int }
+// kessoku.Struct[*Config]()  // Error: two exported fields of the same type string
+
+// Fix: use an explicit constructor
+func NewDB(cfg *Config) *DB {
+    return &DB{host: cfg.DBHost, port: cfg.DBPort}
+}
+```
 
 ### Struct vs Provide
 

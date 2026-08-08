@@ -4,7 +4,75 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
 )
+
+// TestSyntaxAlignedWithCompiledGoFiles verifies that pkg.Syntax is indexed by
+// pkg.CompiledGoFiles, not pkg.GoFiles, as required by the golang.org/x/tools/go/packages
+// API contract ("Syntax is kept in the same order as CompiledGoFiles").
+// This is a regression test for QA-11: the parser previously used pkg.GoFiles[i] to
+// find the filename for pkg.Syntax[i], which is incorrect for packages with cgo sources.
+func TestSyntaxAlignedWithCompiledGoFiles(t *testing.T) {
+	t.Parallel()
+
+	content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Config struct{ Value string }
+
+func NewConfig() *Config { return &Config{Value: "test"} }
+
+type Service struct{ config *Config }
+
+func NewService(config *Config) *Service { return &Service{config: config} }
+
+var _ = kessoku.Inject[*Service](
+	"InitializeService",
+	kessoku.Provide(NewConfig),
+	kessoku.Provide(NewService),
+)
+`
+
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.go")
+
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	// Load the package the same way ParseFile does.
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+			packages.NeedImports | packages.NeedTypes | packages.NeedTypesSizes |
+			packages.NeedSyntax | packages.NeedTypesInfo,
+	}
+	pkgs, err := packages.Load(cfg, "file="+testFile)
+	if err != nil || len(pkgs) == 0 {
+		t.Fatalf("packages.Load failed: %v", err)
+	}
+	pkg := pkgs[0]
+
+	// The API guarantee: len(pkg.Syntax) == len(pkg.CompiledGoFiles).
+	// GoFiles may have a different length (e.g., when cgo adds generated Go files).
+	if len(pkg.Syntax) != len(pkg.CompiledGoFiles) {
+		t.Errorf("len(pkg.Syntax)=%d != len(pkg.CompiledGoFiles)=%d; indexing Syntax with GoFiles would be wrong",
+			len(pkg.Syntax), len(pkg.CompiledGoFiles))
+	}
+
+	// Verify that ParseFile correctly identifies the target file using CompiledGoFiles.
+	// If the old (GoFiles) indexing were used on a package where GoFiles and CompiledGoFiles
+	// differ, targetFile would be nil and ParseFile would return an error.
+	parser := NewParser()
+	_, builds, parseErr := parser.ParseFile(testFile, NewVarPool())
+	if parseErr != nil {
+		t.Fatalf("ParseFile failed (target file not found with CompiledGoFiles indexing): %v", parseErr)
+	}
+	if len(builds) != 1 {
+		t.Errorf("Expected 1 build directive, got %d", len(builds))
+	}
+}
 
 func TestNewParser(t *testing.T) {
 	t.Parallel()
@@ -193,6 +261,36 @@ func main() {
 			shouldError:    false,
 		},
 		{
+			name: "empty injector name",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Obj struct{}
+
+func NewObj() *Obj { return &Obj{} }
+
+var _ = kessoku.Inject[*Obj]("", kessoku.Provide(NewObj))
+`,
+			shouldError:   true,
+			errorContains: "injector name",
+		},
+		{
+			name: "injector name that is a Go keyword",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Obj struct{}
+
+func NewObj() *Obj { return &Obj{} }
+
+var _ = kessoku.Inject[*Obj]("func", kessoku.Provide(NewObj))
+`,
+			shouldError:   true,
+			errorContains: "injector name",
+		},
+		{
 			name: "invalid syntax",
 			content: `package main
 
@@ -201,7 +299,26 @@ import "github.com/mazrean/kessoku"
 func invalid syntax here {
 `,
 			shouldError:   true,
-			errorContains: "parse file",
+			errorContains: "expected",
+		},
+		{
+			// BUG-01: type errors (undefined types) must cause ParseFile to fail, not silently
+			// generate corrupt output with types.Invalid ("invalid" identifiers).
+			name: "undefined type in provider causes error",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Foo struct{}
+
+func NewFoo(b UndefinedType) *Foo {
+	return &Foo{}
+}
+
+var _ = kessoku.Inject[*Foo]("GetFoo", kessoku.Provide(NewFoo))
+`,
+			shouldError:   true,
+			errorContains: "initialize packages",
 		},
 		{
 			name: "kessoku inline Set call",
@@ -457,6 +574,52 @@ var _ = kessoku.Inject[*Service](
 			expectedInjectorName: "InitializeService",
 			shouldError:          false,
 		},
+		{
+			// QA-25: "init" is a predeclared identifier, not a keyword, so token.IsKeyword
+			// returns false. The generator would emit func init() *T { ... } which the
+			// Go compiler rejects because func init must have no arguments and no return values.
+			name: "init as injector name is rejected",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type App struct{}
+
+func NewApp() *App {
+	return &App{}
+}
+
+var _ = kessoku.Inject[*App](
+	"init",
+	kessoku.Provide(NewApp),
+)
+`,
+			shouldError:   true,
+			errorContains: `injector name "init" is reserved`,
+		},
+		{
+			// "main" in package main: the Go spec requires func main to have no arguments
+			// and no return values. Kessoku would emit func main() *App { ... } which the
+			// Go compiler rejects: "func main must have no arguments and no return values".
+			name: "main as injector name in package main is rejected",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type App struct{}
+
+func NewApp() *App {
+	return &App{}
+}
+
+var _ = kessoku.Inject[*App](
+	"main",
+	kessoku.Provide(NewApp),
+)
+`,
+			shouldError:   true,
+			errorContains: `injector name "main" is reserved`,
+		},
 	}
 
 	// Additional test for edge cases related to Set variable parsing
@@ -467,7 +630,10 @@ var _ = kessoku.Inject[*Service](
 		shouldHaveError bool
 	}{
 		{
-			name: "undefined Set variable graceful handling",
+			// BUG-01: an undefined identifier in a Set argument is a type error;
+			// packages.Load reports it as an error so initializePackages must fail.
+			// Previously the parser silently ignored the injector and exited 0.
+			name: "undefined Set variable fails loudly",
 			content: `package main
 
 import "github.com/mazrean/kessoku"
@@ -486,8 +652,77 @@ var _ = kessoku.Inject[*Service](
 	kessoku.Provide(NewService),
 )
 `,
-			expectedBuilds:  0,     // Should skip this injector due to parse error
-			shouldHaveError: false, // Parser should not fail completely, just skip the injector
+			expectedBuilds:  0,    // No injector is generated from the invalid directive
+			shouldHaveError: true, // Undefined identifier is a type error → must fail
+		},
+		{
+			name: "provider with error in non-last return position is rejected",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type A struct{}
+type B struct{}
+
+// error is in position 1 (not last), which kessoku must reject at parse time
+// to avoid generating uncompilable code with swapped assignment types.
+func NewAB() (*A, error, *B) {
+	return &A{}, nil, &B{}
+}
+
+var _ = kessoku.Inject[*B](
+	"InitializeB",
+	kessoku.Provide(NewAB),
+)
+`,
+			expectedBuilds:  0,    // No injector is generated from the invalid directive
+			shouldHaveError: true, // Misplaced error return is rejected loudly at parse time
+		},
+		{
+			// A provider returning (*T, func()) is accepted: the func() is treated
+			// as an ordinary provided value like any other return. Rejecting
+			// wire-style cleanup functions is the migrate tool's job, not the code
+			// generator's — when nothing consumes the func(), the generated code
+			// binds it to _ and it is discarded.
+			name: "provider returning extra func value is accepted",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type DB struct{}
+
+func NewDB() (*DB, func()) {
+	return &DB{}, func() {}
+}
+
+var _ = kessoku.Inject[*DB](
+	"InitializeDB",
+	kessoku.Provide(NewDB),
+)
+`,
+			expectedBuilds:  1,
+			shouldHaveError: false,
+		},
+		{
+			// Same for func() error: an ordinary provided value, not a cleanup slot.
+			name: "provider returning extra func() error value is accepted",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type DB struct{}
+
+func NewDB() (*DB, func() error) {
+	return &DB{}, func() error { return nil }
+}
+
+var _ = kessoku.Inject[*DB](
+	"InitializeDB",
+	kessoku.Provide(NewDB),
+)
+`,
+			expectedBuilds:  1,
+			shouldHaveError: false,
 		},
 	}
 
@@ -763,6 +998,251 @@ var _ = kessoku.Inject[*ConcreteService](
 				if totalTypes != 2 {
 					t.Errorf("Expected bind provider to provide 2 types (concrete and interface), got %d", totalTypes)
 				}
+			}
+		})
+	}
+}
+
+// TestBindProviderNonImplementingTypeError is a regression test for BUG-16:
+// Bind[I](Provide(f)) silently dropped when the provided type does not implement I.
+// After the fix, parseProviderType returns an error and the injector is skipped with a warning.
+func TestBindProviderNonImplementingTypeError(t *testing.T) {
+	t.Parallel()
+
+	content := `package main
+
+import "github.com/mazrean/kessoku"
+
+type Doer interface {
+	Do()
+}
+
+type MyThing struct{}
+
+// MyThing intentionally does NOT implement Doer (no Do method)
+
+func NewMyThing() *MyThing {
+	return &MyThing{}
+}
+
+type Service struct {
+	doer Doer
+}
+
+func NewService(doer Doer) *Service {
+	return &Service{doer: doer}
+}
+
+var _ = kessoku.Inject[*Service](
+	"InitService",
+	kessoku.Bind[Doer](kessoku.Provide(NewMyThing)),
+	kessoku.Provide(NewService),
+)
+`
+
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.go")
+
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	parser := NewParser()
+	_, _, err := parser.ParseFile(testFile, NewVarPool())
+
+	// ParseFile must return an error when Bind[I](Provide(f)) is used and the
+	// provided type does not implement the interface. Since commit 141475e,
+	// parseInjectCall failures are propagated as hard errors (not WARN+skip).
+	if err == nil {
+		t.Fatal("ParseFile should have returned an error for non-implementing Bind type, got nil")
+	}
+
+	// The error message should mention the type mismatch
+	errMsg := err.Error()
+	if !containsString(errMsg, "does not implement interface") {
+		t.Errorf("Expected error to mention 'does not implement interface', got: %v", err)
+	}
+}
+
+// TestBindProviderVoidFunctionError is a regression test for QA-14:
+// Bind[I](Provide(voidFn)) produced a blank error message "provided type  does not
+// implement interface X" because result.Provides was empty when the inner function
+// returns only error or nothing.  After the fix, a clear diagnostic is returned.
+func TestBindProviderVoidFunctionError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name: "Bind wrapping error-only return",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type MyInterface interface{ DoThing() }
+
+// InitSideEffect returns only error — no non-error values.
+func InitSideEffect() error { return nil }
+
+type Service struct{}
+func NewService(i MyInterface) *Service { return &Service{} }
+
+var _ = kessoku.Inject[*Service](
+	"Init",
+	kessoku.Bind[MyInterface](kessoku.Provide(InitSideEffect)),
+	kessoku.Provide(NewService),
+)
+`,
+		},
+		{
+			name: "Bind wrapping no-return function",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type MyInterface interface{ DoThing() }
+
+// NoReturn returns nothing at all.
+func NoReturn() {}
+
+type Service struct{}
+func NewService(i MyInterface) *Service { return &Service{} }
+
+var _ = kessoku.Inject[*Service](
+	"Init",
+	kessoku.Bind[MyInterface](kessoku.Provide(NoReturn)),
+	kessoku.Provide(NewService),
+)
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			testFile := filepath.Join(tempDir, "test.go")
+
+			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			parser := NewParser()
+			_, _, err := parser.ParseFile(testFile, NewVarPool())
+
+			// ParseFile must return a hard error because the void-provider guard
+			// returns an error from parseProviderType, which is propagated up.
+			if err == nil {
+				t.Fatal("ParseFile should have returned an error for Bind wrapping a void provider, got nil")
+			}
+
+			// The error message should mention the specific reason.
+			if !containsString(err.Error(), "bind requires a provider that returns at least one non-error value") {
+				t.Errorf("Expected error to mention void provider, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestParseFile_InjectInsideFunction verifies that kessoku.Inject calls placed
+// inside function bodies are silently ignored and do not produce build directives.
+// Only top-level var declarations are valid injection points (QA-9).
+func TestParseFile_InjectInsideFunction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		content        string
+		name           string
+		expectedBuilds int
+	}{
+		{
+			name: "inject inside init function is ignored",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Service struct{}
+
+func NewService() *Service { return &Service{} }
+
+func init() {
+	_ = kessoku.Inject[*Service]("InitService", kessoku.Provide(NewService))
+}
+`,
+			expectedBuilds: 0,
+		},
+		{
+			name: "inject inside regular function is ignored",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Service struct{}
+
+func NewService() *Service { return &Service{} }
+
+func setup() {
+	_ = kessoku.Inject[*Service]("InitService", kessoku.Provide(NewService))
+}
+`,
+			expectedBuilds: 0,
+		},
+		{
+			name: "top-level inject is still found",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Service struct{}
+
+func NewService() *Service { return &Service{} }
+
+var _ = kessoku.Inject[*Service]("InitService", kessoku.Provide(NewService))
+`,
+			expectedBuilds: 1,
+		},
+		{
+			name: "top-level inject found, inject inside function ignored",
+			content: `package main
+
+import "github.com/mazrean/kessoku"
+
+type Service struct{}
+
+func NewService() *Service { return &Service{} }
+
+var _ = kessoku.Inject[*Service]("InitService", kessoku.Provide(NewService))
+
+func init() {
+	_ = kessoku.Inject[*Service]("InitServiceDup", kessoku.Provide(NewService))
+}
+`,
+			expectedBuilds: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			testFile := filepath.Join(tempDir, "test.go")
+
+			if err := os.WriteFile(testFile, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			parser := NewParser()
+			_, builds, err := parser.ParseFile(testFile, NewVarPool())
+			if err != nil {
+				t.Fatalf("ParseFile failed unexpectedly: %v", err)
+			}
+
+			if len(builds) != tt.expectedBuilds {
+				t.Errorf("Expected %d build directives, got %d", tt.expectedBuilds, len(builds))
 			}
 		})
 	}
@@ -1490,4 +1970,75 @@ var _ = kessoku.Inject[*App](
 			t.Logf("Bind provider currently provides: %v", bindProvider.Provides)
 		})
 	}
+}
+
+// TestModuleRootForFile verifies that moduleRootForFile locates the directory
+// that contains go.mod when walking up from the given file's path.
+// This is the unit-level regression test for QA-26.
+func TestModuleRootForFile(t *testing.T) {
+	t.Parallel()
+
+	// Create a temporary directory tree:
+	//   root/
+	//     go.mod
+	//     sub/
+	//       file.go
+	root := t.TempDir()
+	subDir := filepath.Join(root, "sub")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	goModPath := filepath.Join(root, "go.mod")
+	if err := os.WriteFile(goModPath, []byte("module example.com/test\n\ngo 1.24\n"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	filePath := filepath.Join(subDir, "file.go")
+	if err := os.WriteFile(filePath, []byte("package sub\n"), 0644); err != nil {
+		t.Fatalf("write file.go: %v", err)
+	}
+
+	t.Run("finds go.mod in parent directory", func(t *testing.T) {
+		t.Parallel()
+		got := moduleRootForFile(filePath)
+		if got != root {
+			t.Errorf("moduleRootForFile(%q) = %q, want %q", filePath, got, root)
+		}
+	})
+
+	t.Run("finds go.mod in same directory", func(t *testing.T) {
+		t.Parallel()
+		directFile := filepath.Join(root, "main.go")
+		if err := os.WriteFile(directFile, []byte("package main\n"), 0644); err != nil {
+			t.Fatalf("write main.go: %v", err)
+		}
+		got := moduleRootForFile(directFile)
+		if got != root {
+			t.Errorf("moduleRootForFile(%q) = %q, want %q", directFile, got, root)
+		}
+	})
+
+	t.Run("returns empty string when no go.mod found", func(t *testing.T) {
+		t.Parallel()
+		// Use a path in a directory that has no go.mod ancestry
+		// (t.TempDir() returns a path under /tmp which typically has no go.mod)
+		isolatedDir := t.TempDir()
+		isolatedFile := filepath.Join(isolatedDir, "file.go")
+		if err := os.WriteFile(isolatedFile, []byte("package foo\n"), 0644); err != nil {
+			t.Fatalf("write file.go: %v", err)
+		}
+		got := moduleRootForFile(isolatedFile)
+		if got != "" {
+			t.Errorf("moduleRootForFile(%q) = %q, want empty string (no go.mod in tree)", isolatedFile, got)
+		}
+	})
+
+	t.Run("relative filename returns empty string when no go.mod in cwd ancestry", func(t *testing.T) {
+		t.Parallel()
+		// A relative path "." — its Abs resolution depends on CWD.
+		// This subtest just verifies the function does not panic or error.
+		got := moduleRootForFile("nonexistent_relative.go")
+		// We cannot assert the exact value because CWD varies, but the
+		// function must return either a valid directory path or "".
+		_ = got
+	})
 }
