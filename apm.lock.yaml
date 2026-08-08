@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-08-08T05:17:12.621623+00:00'
+generated_at: '2026-08-08T05:23:04.090440+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: mazrean/apm-plackage
@@ -50,6 +50,56 @@ dependencies:
     .claude/rules/goreleaser-conventions.md: sha256:e28daa306783f3dc4b395db9f66c0417b75c1110c7dd5f8012a52bf60d77357d
     .claude/skills/apm-dependency-goreleaser/SKILL.md: sha256:e9d49cbb4d9d6f6f9dfcb6e8da9125a7a309e61cf18bc6def94d0b1acb03737a
   content_hash: sha256:13ef0d81679ae454d35686e5e699cf9ec2b6c849ca7d2d2404cf39780e1eaa4a
+- repo_url: anthropics/skills
+  name: skill-creator
+  host: github.com
+  resolved_commit: f17010c9bb483898c1d9c9f42dde2b3a98889434
+  version: unknown
+  virtual_path: skills/skill-creator
+  is_virtual: true
+  depth: 2
+  resolved_by: mazrean/apm-plackage
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/skill-creator
+  - .claude/skills/skill-creator/LICENSE.txt
+  - .claude/skills/skill-creator/SKILL.md
+  - .claude/skills/skill-creator/agents/analyzer.md
+  - .claude/skills/skill-creator/agents/comparator.md
+  - .claude/skills/skill-creator/agents/grader.md
+  - .claude/skills/skill-creator/assets/eval_review.html
+  - .claude/skills/skill-creator/eval-viewer/generate_review.py
+  - .claude/skills/skill-creator/eval-viewer/viewer.html
+  - .claude/skills/skill-creator/references/schemas.md
+  - .claude/skills/skill-creator/scripts/__init__.py
+  - .claude/skills/skill-creator/scripts/aggregate_benchmark.py
+  - .claude/skills/skill-creator/scripts/generate_report.py
+  - .claude/skills/skill-creator/scripts/improve_description.py
+  - .claude/skills/skill-creator/scripts/package_skill.py
+  - .claude/skills/skill-creator/scripts/quick_validate.py
+  - .claude/skills/skill-creator/scripts/run_eval.py
+  - .claude/skills/skill-creator/scripts/run_loop.py
+  - .claude/skills/skill-creator/scripts/utils.py
+  deployed_file_hashes:
+    .claude/skills/skill-creator/LICENSE.txt: sha256:bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362
+    .claude/skills/skill-creator/SKILL.md: sha256:dcd4803e61e913e6fc27294184cd3a71f09f5e924ff20c8a9a20173e7b3c2bcf
+    .claude/skills/skill-creator/agents/analyzer.md: sha256:bf68f4cac5a56c673a928c2e6d619586c5b93ea364026ab37547772cb45a663a
+    .claude/skills/skill-creator/agents/comparator.md: sha256:fe1fc9787c495d864c5d6eada47396478572325fde1b33a96d78bf4b849b7a3e
+    .claude/skills/skill-creator/agents/grader.md: sha256:57134da0c1a4eea33fbd74a1c9c44aa814f07d6bc64de303edb586f941e5d21a
+    .claude/skills/skill-creator/assets/eval_review.html: sha256:ce477dcc74dc1c0d1d3352646a79167b5a63634e936b1019160025065974e452
+    .claude/skills/skill-creator/eval-viewer/generate_review.py: sha256:fc9d1b9243fe5ab6012ebd579bd76d0035de1b79fd3b969de114defab26478fb
+    .claude/skills/skill-creator/eval-viewer/viewer.html: sha256:a53213426ee1100441d701a3a0d49cda7a842f992d2c36463f4d3cc0258575fa
+    .claude/skills/skill-creator/references/schemas.md: sha256:8e8876180a8989b406a4d3edddf875b04cdfd5805cc8616686d552b11ce4455f
+    .claude/skills/skill-creator/scripts/__init__.py: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    .claude/skills/skill-creator/scripts/aggregate_benchmark.py: sha256:123ef128ea5ccc01a4b1ac212ef5567f21e9c13d3d240609780beeb3200c49aa
+    .claude/skills/skill-creator/scripts/generate_report.py: sha256:13df7118a3c50c83c4c3250a606d5f2b20b25a3d44cbc392b3d669ec75281453
+    .claude/skills/skill-creator/scripts/improve_description.py: sha256:87d864570220b699fac52da309d2d6efdb060647bfebc74f768128e646accf80
+    .claude/skills/skill-creator/scripts/package_skill.py: sha256:1a33059b0db1ef73375d46d513e5ea81369d2e8838c970597b0d52ddef8d1c0f
+    .claude/skills/skill-creator/scripts/quick_validate.py: sha256:67cf5703402013936c8fb75ad6a1afecd8841d45cc5e606b634eb05825fde365
+    .claude/skills/skill-creator/scripts/run_eval.py: sha256:43e3b8f80dbf69c343967ba77e268fae991d9fa3ed68b32a0ff02532cd48657f
+    .claude/skills/skill-creator/scripts/run_loop.py: sha256:7bd6f674203168520517eec94c55f493c0d154339b061b4d7c0f0dad187d0f21
+    .claude/skills/skill-creator/scripts/utils.py: sha256:3af8ae62c40c73ab712207436a0d9a981e845f25c5a7040229eb189cc8e45bb1
+  content_hash: sha256:b2bfe91d69ca99994c0566baede889e7d2b9bb8791c6b6106c5d387392f717f6
 - repo_url: mazrean/agent-skills
   name: committing-code
   host: github.com
@@ -70,28 +120,6 @@ dependencies:
     .claude/skills/committing-code/references/ATOMIC-COMMITS.md: sha256:805a44f9109098762d11ce8ad50fa48f211a5751e12b75ccab04d0a6b00e6674
     .claude/skills/committing-code/references/CONVENTIONAL-COMMITS.md: sha256:3b25441bdf16a619ffa82c19e0c4ca579e71cf446d91a9b485e14ff662641cc5
   content_hash: sha256:9f70f6c02839defb887c6eb2ab1e16291b2ccb076f7b3b72dfb4aad6e33b9a07
-- repo_url: mazrean/agent-skills
-  name: creating-agent-skills
-  host: github.com
-  resolved_commit: 7af14d020210ae97aacefaf8f830b248ec131e62
-  version: unknown
-  virtual_path: skills/creating-agent-skills
-  is_virtual: true
-  depth: 2
-  resolved_by: mazrean/apm-plackage
-  package_type: claude_skill
-  deployed_files:
-  - .claude/skills/creating-agent-skills
-  - .claude/skills/creating-agent-skills/SKILL.md
-  - .claude/skills/creating-agent-skills/references/BEST-PRACTICES.md
-  - .claude/skills/creating-agent-skills/references/SPECIFICATION.md
-  - .claude/skills/creating-agent-skills/references/TEMPLATES.md
-  deployed_file_hashes:
-    .claude/skills/creating-agent-skills/SKILL.md: sha256:fb720fabf52dc67a533b091b072a2dc317d6215cdabe28ab7b3854a5918f503c
-    .claude/skills/creating-agent-skills/references/BEST-PRACTICES.md: sha256:b3c0f396fae2ba7457c1de1dc9a1b5c290a78cc86f2cc4dbc306df993cf86d45
-    .claude/skills/creating-agent-skills/references/SPECIFICATION.md: sha256:c5aac767b4066b176505132fa1b673ac9fcd6ae6d2026a842d04cbebf4d3da44
-    .claude/skills/creating-agent-skills/references/TEMPLATES.md: sha256:282be4ff433d7c4cfbad88283cae161ac5b65be1aa12d489819ed3f688c95daa
-  content_hash: sha256:97129d903137e924f3c0fa941a53ef55c5763aea1faac3696d4e0e44bca7240f
 - repo_url: mazrean/agent-skills
   name: creating-test-cases
   host: github.com
@@ -364,51 +392,6 @@ deployments:
   content_hash: sha256:3b25441bdf16a619ffa82c19e0c4ca579e71cf446d91a9b485e14ff662641cc5
 - kind: project-relative
   target: claude
-  value: .claude/skills/creating-agent-skills
-  runtime: null
-  scope: project
-  owners:
-  - mazrean/agent-skills/skills/creating-agent-skills
-  active_owner: mazrean/agent-skills/skills/creating-agent-skills
-  content_hash: null
-- kind: project-relative
-  target: claude
-  value: .claude/skills/creating-agent-skills/SKILL.md
-  runtime: null
-  scope: project
-  owners:
-  - mazrean/agent-skills/skills/creating-agent-skills
-  active_owner: mazrean/agent-skills/skills/creating-agent-skills
-  content_hash: sha256:fb720fabf52dc67a533b091b072a2dc317d6215cdabe28ab7b3854a5918f503c
-- kind: project-relative
-  target: claude
-  value: .claude/skills/creating-agent-skills/references/BEST-PRACTICES.md
-  runtime: null
-  scope: project
-  owners:
-  - mazrean/agent-skills/skills/creating-agent-skills
-  active_owner: mazrean/agent-skills/skills/creating-agent-skills
-  content_hash: sha256:b3c0f396fae2ba7457c1de1dc9a1b5c290a78cc86f2cc4dbc306df993cf86d45
-- kind: project-relative
-  target: claude
-  value: .claude/skills/creating-agent-skills/references/SPECIFICATION.md
-  runtime: null
-  scope: project
-  owners:
-  - mazrean/agent-skills/skills/creating-agent-skills
-  active_owner: mazrean/agent-skills/skills/creating-agent-skills
-  content_hash: sha256:c5aac767b4066b176505132fa1b673ac9fcd6ae6d2026a842d04cbebf4d3da44
-- kind: project-relative
-  target: claude
-  value: .claude/skills/creating-agent-skills/references/TEMPLATES.md
-  runtime: null
-  scope: project
-  owners:
-  - mazrean/agent-skills/skills/creating-agent-skills
-  active_owner: mazrean/agent-skills/skills/creating-agent-skills
-  content_hash: sha256:282be4ff433d7c4cfbad88283cae161ac5b65be1aa12d489819ed3f688c95daa
-- kind: project-relative
-  target: claude
   value: .claude/skills/creating-test-cases
   runtime: null
   scope: project
@@ -506,6 +489,177 @@ deployments:
   - mazrean/agent-skills/skills/releasing-zig-with-goreleaser
   active_owner: mazrean/agent-skills/skills/releasing-zig-with-goreleaser
   content_hash: sha256:334d97157ba6acf53c59191d72590cd5260526b000520e88d324a6fef5639ae1
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/LICENSE.txt
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:dcd4803e61e913e6fc27294184cd3a71f09f5e924ff20c8a9a20173e7b3c2bcf
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/agents/analyzer.md
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:bf68f4cac5a56c673a928c2e6d619586c5b93ea364026ab37547772cb45a663a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/agents/comparator.md
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:fe1fc9787c495d864c5d6eada47396478572325fde1b33a96d78bf4b849b7a3e
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/agents/grader.md
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:57134da0c1a4eea33fbd74a1c9c44aa814f07d6bc64de303edb586f941e5d21a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/assets/eval_review.html
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:ce477dcc74dc1c0d1d3352646a79167b5a63634e936b1019160025065974e452
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/eval-viewer/generate_review.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:fc9d1b9243fe5ab6012ebd579bd76d0035de1b79fd3b969de114defab26478fb
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/eval-viewer/viewer.html
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:a53213426ee1100441d701a3a0d49cda7a842f992d2c36463f4d3cc0258575fa
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/references/schemas.md
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:8e8876180a8989b406a4d3edddf875b04cdfd5805cc8616686d552b11ce4455f
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/__init__.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/aggregate_benchmark.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:123ef128ea5ccc01a4b1ac212ef5567f21e9c13d3d240609780beeb3200c49aa
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/generate_report.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:13df7118a3c50c83c4c3250a606d5f2b20b25a3d44cbc392b3d669ec75281453
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/improve_description.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:87d864570220b699fac52da309d2d6efdb060647bfebc74f768128e646accf80
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/package_skill.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:1a33059b0db1ef73375d46d513e5ea81369d2e8838c970597b0d52ddef8d1c0f
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/quick_validate.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:67cf5703402013936c8fb75ad6a1afecd8841d45cc5e606b634eb05825fde365
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/run_eval.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:43e3b8f80dbf69c343967ba77e268fae991d9fa3ed68b32a0ff02532cd48657f
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/run_loop.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:7bd6f674203168520517eec94c55f493c0d154339b061b4d7c0f0dad187d0f21
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/utils.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:3af8ae62c40c73ab712207436a0d9a981e845f25c5a7040229eb189cc8e45bb1
 - kind: project-relative
   target: claude
   value: .claude/skills/using-go-tool-directive
