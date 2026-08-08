@@ -18,7 +18,7 @@ require (
 	github.com/timakin/bodyclose v0.0.0-20260723120731-857993a2939c
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1
 	github.com/uudashr/iface v1.5.0
-	golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597
+	golang.org/x/exp v0.0.0-20260727155853-b88d891fe743
 	golang.org/x/tools v0.48.0
 )
 
