@@ -1,11 +1,11 @@
 lockfile_version: '1'
-generated_at: '2026-08-08T04:26:28.379196+00:00'
+generated_at: '2026-08-08T05:17:12.621623+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: mazrean/apm-plackage
   name: apm-plackage-common
   host: github.com
-  resolved_commit: dcb4719b17f2bf560434a131a6358817960bec9f
+  resolved_commit: fefb3e288ca7ff23959e5433696c3b7c18abff32
   version: 0.3.0
   virtual_path: common
   is_virtual: true
@@ -17,11 +17,11 @@ dependencies:
   deployed_file_hashes:
     .claude/rules/conventions.md: sha256:54c6d167efff3a33a4b30febca2fe03a7661774ebea06aabeeb42713b4d05603
     .claude/skills/apm-dependency-common/SKILL.md: sha256:8ed66c44c49f5c3b97328be5ad199d7774b805ade05eac953faf540126a2d9ca
-  content_hash: sha256:9aea97fbf4c47630686cfd13adf407ab4b50e8ef91fb1ff5249c8e83487302e4
+  content_hash: sha256:26f72930042bbf069388187793583544bccb5b98f50cdc7bb07290eab5a7b635
 - repo_url: mazrean/apm-plackage
   name: apm-plackage-go
   host: github.com
-  resolved_commit: dcb4719b17f2bf560434a131a6358817960bec9f
+  resolved_commit: fefb3e288ca7ff23959e5433696c3b7c18abff32
   version: 0.3.0
   virtual_path: go
   is_virtual: true
@@ -37,7 +37,7 @@ dependencies:
 - repo_url: mazrean/apm-plackage
   name: apm-plackage-goreleaser
   host: github.com
-  resolved_commit: dcb4719b17f2bf560434a131a6358817960bec9f
+  resolved_commit: fefb3e288ca7ff23959e5433696c3b7c18abff32
   version: 0.1.0
   virtual_path: goreleaser
   is_virtual: true
@@ -713,6 +713,24 @@ deployments:
   - mazrean/agent-skills/skills/writing-technical-design
   active_owner: mazrean/agent-skills/skills/writing-technical-design
   content_hash: sha256:414a3f03431008220736544fd4f9e7e072ac3bc74fdbf1408eb4f281fe82acb2
+- kind: uri
+  target: mcp
+  value: deepwiki
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: uri
+  target: mcp
+  value: gopls
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
 mcp_servers:
 - deepwiki
 - gopls
@@ -729,6 +747,10 @@ mcp_configs:
     - mcp
     registry: false
     command: gopls
+mcp_target_servers:
+  claude:
+  - deepwiki
+  - gopls
 mcp_config_provenance:
   deepwiki: apm-plackage-common
   gopls: apm-plackage-go

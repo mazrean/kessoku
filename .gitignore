@@ -1,8 +1,6 @@
 /dist
 /bin
 /.vscode
-/.claude
-/main.go
 
 # Example binaries
 examples/*/async_parallel
@@ -16,3 +14,5 @@ examples/*/simple
 
 # APM dependencies
 apm_modules/
+/.mcp.json
+/.claude
