@@ -10,8 +10,62 @@ go = "1.26.5"
 # goreleaser
 goreleaser = "2.17.1"
 
-# Note: golangci-lint is intentionally NOT pinned — use the per-repo `tools/lint`
-# Go module via `go tool lint ./...` (apm-plackage/go convention).
-# Note: claude-code / codex / other coding-agent CLIs are intentionally NOT pinned per project policy.
-# Note: python / uv / pipx-installed tools (serena, etc.) are intentionally NOT pinned
-# — gopls MCP from apm-plackage/go covers Go-only code intelligence for this repo.
+# skill validation
+uv = "0.12.3"
+"pipx:skills-ref[uvx=true]" = "0.1.1"
+
+[tasks.fmt]
+description = "Format all Go source"
+run = "go fmt ./..."
+
+[tasks.build]
+description = "Build the kessoku CLI binary"
+run = "go build -o bin/kessoku ./cmd/kessoku"
+
+[tasks.generate]
+description = "Run go:generate across the workspace"
+run = "go generate ./..."
+
+[tasks.test]
+description = "Run the full test suite"
+run = "go test -v ./..."
+
+[tasks."test:ci"]
+description = "Run tests with race detector + coverage (matches CI)"
+run = "go test -v -race -coverprofile=coverage.out ./internal/..."
+
+[tasks."test:golden-update"]
+description = "Regenerate golden codegen fixtures"
+run = "go test -v -run TestGoldenGeneration ./internal/kessoku/... -update"
+
+[tasks.lint]
+description = "Run the custom lint module (govet + staticcheck + stylecheck)"
+run = "go tool lint ./..."
+
+[tasks."lint:fix"]
+description = "Run the custom lint module with autofix"
+run = "go tool lint -fix ./..."
+
+[tasks.apicompat]
+description = "Check public API compatibility against the latest release"
+run = "go tool apicompat github.com/mazrean/kessoku@latest github.com/mazrean/kessoku"
+
+[tasks."validate-skills"]
+description = "Validate the kessoku-di Agent Skill"
+run = "agentskills validate internal/llmsetup/skills/kessoku-di"
+
+[tasks."release:build"]
+description = "Build release binaries with GoReleaser (no publish)"
+run = "goreleaser build --clean --skip=validate"
+
+[tasks."release:snapshot"]
+description = "Build a full snapshot release with GoReleaser (no publish)"
+run = "goreleaser release --snapshot --clean"
+
+[tasks."release:publish"]
+description = "Publish a release with GoReleaser"
+run = "goreleaser release --clean --skip=validate"
+
+[tasks.check]
+description = "Everything required before a commit: format, test, lint"
+depends = ["fmt", "test", "lint", "apicompat", "validate-skills"]

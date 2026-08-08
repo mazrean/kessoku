@@ -19,35 +19,45 @@ with zero runtime overhead.
 
 ## Common Commands
 
+Build, test, lint, and release operations are consolidated as `mise` tasks in
+`.mise.toml` (run `mise tasks` to list them); CI calls these same tasks so local
+runs match CI exactly.
+
 ```bash
 # Build
-go build -o bin/kessoku ./cmd/kessoku
+mise run build                             # go build -o bin/kessoku ./cmd/kessoku
 
 # Test
-go test -v ./...                           # run all tests
+mise run test                              # go test -v ./...
+mise run test:ci                           # go test -v -race -coverprofile=coverage.out ./internal/... (matches CI)
 go test -v -run TestName ./...             # run a specific test
 go test -v ./internal/kessoku/...          # run tests in a specific package
 
 # Golden tests (code generation validation)
-go test -v -run TestGoldenGeneration ./internal/kessoku/...           # run golden tests
-go test -v -run TestGoldenGeneration ./internal/kessoku/... -update   # update golden files
+go test -v -run TestGoldenGeneration ./internal/kessoku/...   # run golden tests
+mise run test:golden-update                # update golden files
 
 # Lint (mandatory before commit)
-go tool lint ./...
-go tool lint -fix ./...                    # auto-fix where possible
+mise run lint                              # go tool lint ./...
+mise run lint:fix                          # auto-fix where possible
 
 # Code generation
-go generate ./...                          # generate DI code via go:generate
+mise run generate                          # go generate ./...
 go tool kessoku [files...]                 # direct codegen for specific files
 
 # Wire migration
 go tool kessoku migrate [patterns...] -o kessoku.go
 
 # API compatibility check
-go tool apicompat github.com/mazrean/kessoku@latest github.com/mazrean/kessoku
+mise run apicompat                         # go tool apicompat github.com/mazrean/kessoku@latest github.com/mazrean/kessoku
 
 # Release
-go tool goreleaser release --snapshot --clean
+mise run release:snapshot                  # goreleaser release --snapshot --clean
+mise run release:build                     # goreleaser build --clean --skip=validate (CI build job)
+mise run release:publish                   # goreleaser release --clean --skip=validate (tag-triggered release)
+
+# Everything mandatory before a commit
+mise run check                             # fmt + test + lint
 ```
 
 ## Architecture
@@ -121,10 +131,8 @@ Migration tool location: `internal/migrate/`.
 
 ## Mandatory Before Commit
 
-- `go fmt ./...` — format
-- `go test -v ./...` — all tests must pass
-- `go tool lint ./...` — treat failures as blockers
-- `go tool tools apicompat <base> <target>` — when altering public API
+- `mise run check` — runs `fmt`, `test`, and `lint` in order; all must pass
+- `mise run apicompat` — when altering public API
 
 ## Commits & PRs
 
