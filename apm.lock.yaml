@@ -1,0 +1,910 @@
+lockfile_version: '1'
+generated_at: '2026-08-08T05:23:04.090440+00:00'
+apm_version: 0.28.0
+dependencies:
+- repo_url: mazrean/apm-plackage
+  name: apm-plackage-common
+  host: github.com
+  resolved_commit: fefb3e288ca7ff23959e5433696c3b7c18abff32
+  version: 0.3.0
+  virtual_path: common
+  is_virtual: true
+  package_type: apm_package
+  deployed_files:
+  - .claude/rules/conventions.md
+  - .claude/skills/apm-dependency-common
+  - .claude/skills/apm-dependency-common/SKILL.md
+  deployed_file_hashes:
+    .claude/rules/conventions.md: sha256:54c6d167efff3a33a4b30febca2fe03a7661774ebea06aabeeb42713b4d05603
+    .claude/skills/apm-dependency-common/SKILL.md: sha256:8ed66c44c49f5c3b97328be5ad199d7774b805ade05eac953faf540126a2d9ca
+  content_hash: sha256:26f72930042bbf069388187793583544bccb5b98f50cdc7bb07290eab5a7b635
+- repo_url: mazrean/apm-plackage
+  name: apm-plackage-go
+  host: github.com
+  resolved_commit: fefb3e288ca7ff23959e5433696c3b7c18abff32
+  version: 0.3.0
+  virtual_path: go
+  is_virtual: true
+  package_type: apm_package
+  deployed_files:
+  - .claude/rules/go-conventions.md
+  - .claude/skills/apm-dependency-go
+  - .claude/skills/apm-dependency-go/SKILL.md
+  deployed_file_hashes:
+    .claude/rules/go-conventions.md: sha256:0104258968bb9311b5af647b08662d18a0354a5f7c02adc2ae62e1a393080d8c
+    .claude/skills/apm-dependency-go/SKILL.md: sha256:1395090d6cf5c402261e9441a5859ae79e40aa6aee698d20eb133f2af5707a0b
+  content_hash: sha256:5f884f6f81346945d7466bd900b0c903551350b0a9ef09fa48e4c76ff1750c64
+- repo_url: mazrean/apm-plackage
+  name: apm-plackage-goreleaser
+  host: github.com
+  resolved_commit: fefb3e288ca7ff23959e5433696c3b7c18abff32
+  version: 0.1.0
+  virtual_path: goreleaser
+  is_virtual: true
+  package_type: apm_package
+  deployed_files:
+  - .claude/rules/goreleaser-conventions.md
+  - .claude/skills/apm-dependency-goreleaser
+  - .claude/skills/apm-dependency-goreleaser/SKILL.md
+  deployed_file_hashes:
+    .claude/rules/goreleaser-conventions.md: sha256:e28daa306783f3dc4b395db9f66c0417b75c1110c7dd5f8012a52bf60d77357d
+    .claude/skills/apm-dependency-goreleaser/SKILL.md: sha256:e9d49cbb4d9d6f6f9dfcb6e8da9125a7a309e61cf18bc6def94d0b1acb03737a
+  content_hash: sha256:13ef0d81679ae454d35686e5e699cf9ec2b6c849ca7d2d2404cf39780e1eaa4a
+- repo_url: anthropics/skills
+  name: skill-creator
+  host: github.com
+  resolved_commit: f17010c9bb483898c1d9c9f42dde2b3a98889434
+  version: unknown
+  virtual_path: skills/skill-creator
+  is_virtual: true
+  depth: 2
+  resolved_by: mazrean/apm-plackage
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/skill-creator
+  - .claude/skills/skill-creator/LICENSE.txt
+  - .claude/skills/skill-creator/SKILL.md
+  - .claude/skills/skill-creator/agents/analyzer.md
+  - .claude/skills/skill-creator/agents/comparator.md
+  - .claude/skills/skill-creator/agents/grader.md
+  - .claude/skills/skill-creator/assets/eval_review.html
+  - .claude/skills/skill-creator/eval-viewer/generate_review.py
+  - .claude/skills/skill-creator/eval-viewer/viewer.html
+  - .claude/skills/skill-creator/references/schemas.md
+  - .claude/skills/skill-creator/scripts/__init__.py
+  - .claude/skills/skill-creator/scripts/aggregate_benchmark.py
+  - .claude/skills/skill-creator/scripts/generate_report.py
+  - .claude/skills/skill-creator/scripts/improve_description.py
+  - .claude/skills/skill-creator/scripts/package_skill.py
+  - .claude/skills/skill-creator/scripts/quick_validate.py
+  - .claude/skills/skill-creator/scripts/run_eval.py
+  - .claude/skills/skill-creator/scripts/run_loop.py
+  - .claude/skills/skill-creator/scripts/utils.py
+  deployed_file_hashes:
+    .claude/skills/skill-creator/LICENSE.txt: sha256:bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362
+    .claude/skills/skill-creator/SKILL.md: sha256:dcd4803e61e913e6fc27294184cd3a71f09f5e924ff20c8a9a20173e7b3c2bcf
+    .claude/skills/skill-creator/agents/analyzer.md: sha256:bf68f4cac5a56c673a928c2e6d619586c5b93ea364026ab37547772cb45a663a
+    .claude/skills/skill-creator/agents/comparator.md: sha256:fe1fc9787c495d864c5d6eada47396478572325fde1b33a96d78bf4b849b7a3e
+    .claude/skills/skill-creator/agents/grader.md: sha256:57134da0c1a4eea33fbd74a1c9c44aa814f07d6bc64de303edb586f941e5d21a
+    .claude/skills/skill-creator/assets/eval_review.html: sha256:ce477dcc74dc1c0d1d3352646a79167b5a63634e936b1019160025065974e452
+    .claude/skills/skill-creator/eval-viewer/generate_review.py: sha256:fc9d1b9243fe5ab6012ebd579bd76d0035de1b79fd3b969de114defab26478fb
+    .claude/skills/skill-creator/eval-viewer/viewer.html: sha256:a53213426ee1100441d701a3a0d49cda7a842f992d2c36463f4d3cc0258575fa
+    .claude/skills/skill-creator/references/schemas.md: sha256:8e8876180a8989b406a4d3edddf875b04cdfd5805cc8616686d552b11ce4455f
+    .claude/skills/skill-creator/scripts/__init__.py: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    .claude/skills/skill-creator/scripts/aggregate_benchmark.py: sha256:123ef128ea5ccc01a4b1ac212ef5567f21e9c13d3d240609780beeb3200c49aa
+    .claude/skills/skill-creator/scripts/generate_report.py: sha256:13df7118a3c50c83c4c3250a606d5f2b20b25a3d44cbc392b3d669ec75281453
+    .claude/skills/skill-creator/scripts/improve_description.py: sha256:87d864570220b699fac52da309d2d6efdb060647bfebc74f768128e646accf80
+    .claude/skills/skill-creator/scripts/package_skill.py: sha256:1a33059b0db1ef73375d46d513e5ea81369d2e8838c970597b0d52ddef8d1c0f
+    .claude/skills/skill-creator/scripts/quick_validate.py: sha256:67cf5703402013936c8fb75ad6a1afecd8841d45cc5e606b634eb05825fde365
+    .claude/skills/skill-creator/scripts/run_eval.py: sha256:43e3b8f80dbf69c343967ba77e268fae991d9fa3ed68b32a0ff02532cd48657f
+    .claude/skills/skill-creator/scripts/run_loop.py: sha256:7bd6f674203168520517eec94c55f493c0d154339b061b4d7c0f0dad187d0f21
+    .claude/skills/skill-creator/scripts/utils.py: sha256:3af8ae62c40c73ab712207436a0d9a981e845f25c5a7040229eb189cc8e45bb1
+  content_hash: sha256:b2bfe91d69ca99994c0566baede889e7d2b9bb8791c6b6106c5d387392f717f6
+- repo_url: mazrean/agent-skills
+  name: committing-code
+  host: github.com
+  resolved_commit: 7af14d020210ae97aacefaf8f830b248ec131e62
+  version: unknown
+  virtual_path: skills/committing-code
+  is_virtual: true
+  depth: 2
+  resolved_by: mazrean/apm-plackage
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/committing-code
+  - .claude/skills/committing-code/SKILL.md
+  - .claude/skills/committing-code/references/ATOMIC-COMMITS.md
+  - .claude/skills/committing-code/references/CONVENTIONAL-COMMITS.md
+  deployed_file_hashes:
+    .claude/skills/committing-code/SKILL.md: sha256:92491a597541830ac5abdd3db820aade31869a6ee86ad8c1a6f423ed419f5622
+    .claude/skills/committing-code/references/ATOMIC-COMMITS.md: sha256:805a44f9109098762d11ce8ad50fa48f211a5751e12b75ccab04d0a6b00e6674
+    .claude/skills/committing-code/references/CONVENTIONAL-COMMITS.md: sha256:3b25441bdf16a619ffa82c19e0c4ca579e71cf446d91a9b485e14ff662641cc5
+  content_hash: sha256:9f70f6c02839defb887c6eb2ab1e16291b2ccb076f7b3b72dfb4aad6e33b9a07
+- repo_url: mazrean/agent-skills
+  name: creating-test-cases
+  host: github.com
+  resolved_commit: 7af14d020210ae97aacefaf8f830b248ec131e62
+  version: unknown
+  virtual_path: skills/creating-test-cases
+  is_virtual: true
+  depth: 2
+  resolved_by: mazrean/apm-plackage
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/creating-test-cases
+  - .claude/skills/creating-test-cases/SKILL.md
+  - .claude/skills/creating-test-cases/references/BUG-PATTERNS.md
+  - .claude/skills/creating-test-cases/references/GO-TESTING.md
+  - .claude/skills/creating-test-cases/references/HEURISTICS.md
+  - .claude/skills/creating-test-cases/references/TECHNIQUES.md
+  deployed_file_hashes:
+    .claude/skills/creating-test-cases/SKILL.md: sha256:ab2e83be598b38021eec9022e6a75ebf6c66d69acba1b02f61ad57e1ec425e51
+    .claude/skills/creating-test-cases/references/BUG-PATTERNS.md: sha256:21e704358181300a4a916a08febd6c5aeef94d39442f783b3d13ac58e3adadfe
+    .claude/skills/creating-test-cases/references/GO-TESTING.md: sha256:18687859fc9e49410f4745f8353dc4df5d6157924015ee454563208283eb0f60
+    .claude/skills/creating-test-cases/references/HEURISTICS.md: sha256:9cc3e1823ef5ff67915cb8fdb1eefe3c88a4ed5f8f581df60512f606c88dcd3e
+    .claude/skills/creating-test-cases/references/TECHNIQUES.md: sha256:e955f4b962d9c486450b489ff8db4c6dc719a3bddd13dbc1f06707b547fcd3a6
+  content_hash: sha256:54e50900780740d562ca0259168bca6765f0bf8e4b3e996bc653570175b03c08
+- repo_url: mazrean/agent-skills
+  name: releasing-zig-with-goreleaser
+  host: github.com
+  resolved_commit: 7af14d020210ae97aacefaf8f830b248ec131e62
+  version: unknown
+  virtual_path: skills/releasing-zig-with-goreleaser
+  is_virtual: true
+  depth: 2
+  resolved_by: mazrean/apm-plackage
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/releasing-zig-with-goreleaser
+  - .claude/skills/releasing-zig-with-goreleaser/SKILL.md
+  - .claude/skills/releasing-zig-with-goreleaser/references/GITHUB-ACTIONS.md
+  - .claude/skills/releasing-zig-with-goreleaser/references/GORELEASER-CONFIG.md
+  - .claude/skills/releasing-zig-with-goreleaser/references/PACKAGING.md
+  deployed_file_hashes:
+    .claude/skills/releasing-zig-with-goreleaser/SKILL.md: sha256:cfb242a15a31d4c81ce40829c42073dd856e6353d575088aac9c162469a55d3f
+    .claude/skills/releasing-zig-with-goreleaser/references/GITHUB-ACTIONS.md: sha256:5f93826e020dbaf47beda5351c972204dc7969cde378cbc579731f1d266fc84f
+    .claude/skills/releasing-zig-with-goreleaser/references/GORELEASER-CONFIG.md: sha256:0fdfed695eb778cc254ba4cf15e0fe4ae3d5e6348a07b613e6e46bdbb478793a
+    .claude/skills/releasing-zig-with-goreleaser/references/PACKAGING.md: sha256:334d97157ba6acf53c59191d72590cd5260526b000520e88d324a6fef5639ae1
+  content_hash: sha256:be6e9abdf86ab3e798075edff62ffc7458c1c25239390bb0a5b6c631f36b4c5b
+- repo_url: mazrean/agent-skills
+  name: using-go-tool-directive
+  host: github.com
+  resolved_commit: 7af14d020210ae97aacefaf8f830b248ec131e62
+  version: unknown
+  virtual_path: skills/using-go-tool-directive
+  is_virtual: true
+  depth: 2
+  resolved_by: mazrean/apm-plackage
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/using-go-tool-directive
+  - .claude/skills/using-go-tool-directive/SKILL.md
+  - .claude/skills/using-go-tool-directive/references/ADVANCED.md
+  - .claude/skills/using-go-tool-directive/references/COMMANDS.md
+  - .claude/skills/using-go-tool-directive/references/MIGRATION.md
+  deployed_file_hashes:
+    .claude/skills/using-go-tool-directive/SKILL.md: sha256:6ff1720b32e668173b687dcd24e39612f9df328ed26a6f9675176d7a8a7350ab
+    .claude/skills/using-go-tool-directive/references/ADVANCED.md: sha256:4d185111edce2c169dec4107610d613ad247ba01b847ed3dca81d409d7b5a96a
+    .claude/skills/using-go-tool-directive/references/COMMANDS.md: sha256:5cdf72fd6970256dfc59870b135ce1c0ad9192aae73c8ecc1022f183cbf14a65
+    .claude/skills/using-go-tool-directive/references/MIGRATION.md: sha256:79c786a1ee425abc5282e45505516e48831033b7fc08c7e985ed704af9824f71
+  content_hash: sha256:dfe68044c3e289582c65999ff4c08978e42d7c864e8e3a530db672fecb1822c4
+- repo_url: mazrean/agent-skills
+  name: writing-feature-spec
+  host: github.com
+  resolved_commit: 7af14d020210ae97aacefaf8f830b248ec131e62
+  version: unknown
+  virtual_path: skills/writing-feature-spec
+  is_virtual: true
+  depth: 2
+  resolved_by: mazrean/apm-plackage
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/writing-feature-spec
+  - .claude/skills/writing-feature-spec/SKILL.md
+  - .claude/skills/writing-feature-spec/references/CONTEXT-LAYERS.md
+  - .claude/skills/writing-feature-spec/references/EXAMPLES.md
+  deployed_file_hashes:
+    .claude/skills/writing-feature-spec/SKILL.md: sha256:c67d82e5f5a9eec14af5387debdbecc271a1310678206d54f526186b114f8be4
+    .claude/skills/writing-feature-spec/references/CONTEXT-LAYERS.md: sha256:97fa4095b0fbc93b39d2b0ac19a5e33ce294ce15420bc6c9cf4e88471933573c
+    .claude/skills/writing-feature-spec/references/EXAMPLES.md: sha256:b16f1c5f6ff87795fcf005175fd7e6274c5646d8db579e05b4f95ee735549e03
+  content_hash: sha256:74815020a22377e6a804aab5c89f1f9eca8f9e17ebd40115ddefeda87f3d3813
+- repo_url: mazrean/agent-skills
+  name: writing-implementation-tasks
+  host: github.com
+  resolved_commit: 7af14d020210ae97aacefaf8f830b248ec131e62
+  version: unknown
+  virtual_path: skills/writing-implementation-tasks
+  is_virtual: true
+  depth: 2
+  resolved_by: mazrean/apm-plackage
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/writing-implementation-tasks
+  - .claude/skills/writing-implementation-tasks/SKILL.md
+  - .claude/skills/writing-implementation-tasks/references/CONTEXT-LAYERS.md
+  - .claude/skills/writing-implementation-tasks/references/EXAMPLES.md
+  deployed_file_hashes:
+    .claude/skills/writing-implementation-tasks/SKILL.md: sha256:24837d8c6cb00840bb4ef3e6981a4709d62926beef3e3d433bf1e68ff0d5d15e
+    .claude/skills/writing-implementation-tasks/references/CONTEXT-LAYERS.md: sha256:8c123bbc9ebdc6231ec07c3a8eec376b97bb5e27bfab21c762a84a3020024081
+    .claude/skills/writing-implementation-tasks/references/EXAMPLES.md: sha256:ae60af1cc1853145eafd41a4357134acb9e7712421277a4a0287bf5533b1394e
+  content_hash: sha256:5acb35ae2203e63f132d9a9262d0b055ab1ed97592dabe46b14a3a98f2f28b94
+- repo_url: mazrean/agent-skills
+  name: writing-project-constitution
+  host: github.com
+  resolved_commit: 7af14d020210ae97aacefaf8f830b248ec131e62
+  version: unknown
+  virtual_path: skills/writing-project-constitution
+  is_virtual: true
+  depth: 2
+  resolved_by: mazrean/apm-plackage
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/writing-project-constitution
+  - .claude/skills/writing-project-constitution/SKILL.md
+  - .claude/skills/writing-project-constitution/references/CROSS-AGENT.md
+  - .claude/skills/writing-project-constitution/references/EXAMPLES.md
+  deployed_file_hashes:
+    .claude/skills/writing-project-constitution/SKILL.md: sha256:7ac50a98473520c32c5ad0b8491def7d9114f310ef186cf9f943daac9f49dcd1
+    .claude/skills/writing-project-constitution/references/CROSS-AGENT.md: sha256:0e48b2280abca82f7499d6fb2b4b5f04ca6021f3ba7753f4e5005a23c9334de4
+    .claude/skills/writing-project-constitution/references/EXAMPLES.md: sha256:3729bab2c06c4675de615cb40512d2e9cc94d6fb49ae0e7e5912ee8b01f3d56a
+  content_hash: sha256:fec82725044dc8cbe5814237a1b967122416560cc7f95a15d9ad7439779f8895
+- repo_url: mazrean/agent-skills
+  name: writing-technical-design
+  host: github.com
+  resolved_commit: 7af14d020210ae97aacefaf8f830b248ec131e62
+  version: unknown
+  virtual_path: skills/writing-technical-design
+  is_virtual: true
+  depth: 2
+  resolved_by: mazrean/apm-plackage
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/writing-technical-design
+  - .claude/skills/writing-technical-design/SKILL.md
+  - .claude/skills/writing-technical-design/references/COMPONENT-SKILLS.md
+  - .claude/skills/writing-technical-design/references/CONTEXT-LAYERS.md
+  - .claude/skills/writing-technical-design/references/DEEP-RESEARCH.md
+  - .claude/skills/writing-technical-design/references/EXAMPLES.md
+  deployed_file_hashes:
+    .claude/skills/writing-technical-design/SKILL.md: sha256:71de6bb966093f7c5d0e7b3322988d9a1a7685b5ee6d76b9f7a24caf35c21da6
+    .claude/skills/writing-technical-design/references/COMPONENT-SKILLS.md: sha256:0298cdd041bd26ee4b62bf4e80ffbb72f400d6d661add03cbcbed4d14dab5b62
+    .claude/skills/writing-technical-design/references/CONTEXT-LAYERS.md: sha256:984808e18f8a684c3e244399442a419add3a6f848eb821a90a9f15782094410e
+    .claude/skills/writing-technical-design/references/DEEP-RESEARCH.md: sha256:aa19472c31ca4d2609aab22e43e1154fb157f241f677ff722ce8f93086728faf
+    .claude/skills/writing-technical-design/references/EXAMPLES.md: sha256:414a3f03431008220736544fd4f9e7e072ac3bc74fdbf1408eb4f281fe82acb2
+  content_hash: sha256:e3307d513bcec3ee9d23273dafadae0d0b28c1954bae3640885b4608ae193501
+deployments:
+- kind: project-relative
+  target: claude
+  value: .claude/rules/conventions.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/apm-plackage/common
+  active_owner: mazrean/apm-plackage/common
+  content_hash: sha256:54c6d167efff3a33a4b30febca2fe03a7661774ebea06aabeeb42713b4d05603
+- kind: project-relative
+  target: claude
+  value: .claude/rules/go-conventions.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/apm-plackage/go
+  active_owner: mazrean/apm-plackage/go
+  content_hash: sha256:0104258968bb9311b5af647b08662d18a0354a5f7c02adc2ae62e1a393080d8c
+- kind: project-relative
+  target: claude
+  value: .claude/rules/goreleaser-conventions.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/apm-plackage/goreleaser
+  active_owner: mazrean/apm-plackage/goreleaser
+  content_hash: sha256:e28daa306783f3dc4b395db9f66c0417b75c1110c7dd5f8012a52bf60d77357d
+- kind: project-relative
+  target: claude
+  value: .claude/skills/apm-dependency-common
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/apm-plackage/common
+  active_owner: mazrean/apm-plackage/common
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/apm-dependency-common/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/apm-plackage/common
+  active_owner: mazrean/apm-plackage/common
+  content_hash: sha256:8ed66c44c49f5c3b97328be5ad199d7774b805ade05eac953faf540126a2d9ca
+- kind: project-relative
+  target: claude
+  value: .claude/skills/apm-dependency-go
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/apm-plackage/go
+  active_owner: mazrean/apm-plackage/go
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/apm-dependency-go/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/apm-plackage/go
+  active_owner: mazrean/apm-plackage/go
+  content_hash: sha256:1395090d6cf5c402261e9441a5859ae79e40aa6aee698d20eb133f2af5707a0b
+- kind: project-relative
+  target: claude
+  value: .claude/skills/apm-dependency-goreleaser
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/apm-plackage/goreleaser
+  active_owner: mazrean/apm-plackage/goreleaser
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/apm-dependency-goreleaser/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/apm-plackage/goreleaser
+  active_owner: mazrean/apm-plackage/goreleaser
+  content_hash: sha256:e9d49cbb4d9d6f6f9dfcb6e8da9125a7a309e61cf18bc6def94d0b1acb03737a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/committing-code
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/committing-code
+  active_owner: mazrean/agent-skills/skills/committing-code
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/committing-code/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/committing-code
+  active_owner: mazrean/agent-skills/skills/committing-code
+  content_hash: sha256:92491a597541830ac5abdd3db820aade31869a6ee86ad8c1a6f423ed419f5622
+- kind: project-relative
+  target: claude
+  value: .claude/skills/committing-code/references/ATOMIC-COMMITS.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/committing-code
+  active_owner: mazrean/agent-skills/skills/committing-code
+  content_hash: sha256:805a44f9109098762d11ce8ad50fa48f211a5751e12b75ccab04d0a6b00e6674
+- kind: project-relative
+  target: claude
+  value: .claude/skills/committing-code/references/CONVENTIONAL-COMMITS.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/committing-code
+  active_owner: mazrean/agent-skills/skills/committing-code
+  content_hash: sha256:3b25441bdf16a619ffa82c19e0c4ca579e71cf446d91a9b485e14ff662641cc5
+- kind: project-relative
+  target: claude
+  value: .claude/skills/creating-test-cases
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/creating-test-cases
+  active_owner: mazrean/agent-skills/skills/creating-test-cases
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/creating-test-cases/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/creating-test-cases
+  active_owner: mazrean/agent-skills/skills/creating-test-cases
+  content_hash: sha256:ab2e83be598b38021eec9022e6a75ebf6c66d69acba1b02f61ad57e1ec425e51
+- kind: project-relative
+  target: claude
+  value: .claude/skills/creating-test-cases/references/BUG-PATTERNS.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/creating-test-cases
+  active_owner: mazrean/agent-skills/skills/creating-test-cases
+  content_hash: sha256:21e704358181300a4a916a08febd6c5aeef94d39442f783b3d13ac58e3adadfe
+- kind: project-relative
+  target: claude
+  value: .claude/skills/creating-test-cases/references/GO-TESTING.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/creating-test-cases
+  active_owner: mazrean/agent-skills/skills/creating-test-cases
+  content_hash: sha256:18687859fc9e49410f4745f8353dc4df5d6157924015ee454563208283eb0f60
+- kind: project-relative
+  target: claude
+  value: .claude/skills/creating-test-cases/references/HEURISTICS.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/creating-test-cases
+  active_owner: mazrean/agent-skills/skills/creating-test-cases
+  content_hash: sha256:9cc3e1823ef5ff67915cb8fdb1eefe3c88a4ed5f8f581df60512f606c88dcd3e
+- kind: project-relative
+  target: claude
+  value: .claude/skills/creating-test-cases/references/TECHNIQUES.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/creating-test-cases
+  active_owner: mazrean/agent-skills/skills/creating-test-cases
+  content_hash: sha256:e955f4b962d9c486450b489ff8db4c6dc719a3bddd13dbc1f06707b547fcd3a6
+- kind: project-relative
+  target: claude
+  value: .claude/skills/releasing-zig-with-goreleaser
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/releasing-zig-with-goreleaser
+  active_owner: mazrean/agent-skills/skills/releasing-zig-with-goreleaser
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/releasing-zig-with-goreleaser/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/releasing-zig-with-goreleaser
+  active_owner: mazrean/agent-skills/skills/releasing-zig-with-goreleaser
+  content_hash: sha256:cfb242a15a31d4c81ce40829c42073dd856e6353d575088aac9c162469a55d3f
+- kind: project-relative
+  target: claude
+  value: .claude/skills/releasing-zig-with-goreleaser/references/GITHUB-ACTIONS.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/releasing-zig-with-goreleaser
+  active_owner: mazrean/agent-skills/skills/releasing-zig-with-goreleaser
+  content_hash: sha256:5f93826e020dbaf47beda5351c972204dc7969cde378cbc579731f1d266fc84f
+- kind: project-relative
+  target: claude
+  value: .claude/skills/releasing-zig-with-goreleaser/references/GORELEASER-CONFIG.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/releasing-zig-with-goreleaser
+  active_owner: mazrean/agent-skills/skills/releasing-zig-with-goreleaser
+  content_hash: sha256:0fdfed695eb778cc254ba4cf15e0fe4ae3d5e6348a07b613e6e46bdbb478793a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/releasing-zig-with-goreleaser/references/PACKAGING.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/releasing-zig-with-goreleaser
+  active_owner: mazrean/agent-skills/skills/releasing-zig-with-goreleaser
+  content_hash: sha256:334d97157ba6acf53c59191d72590cd5260526b000520e88d324a6fef5639ae1
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/LICENSE.txt
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:dcd4803e61e913e6fc27294184cd3a71f09f5e924ff20c8a9a20173e7b3c2bcf
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/agents/analyzer.md
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:bf68f4cac5a56c673a928c2e6d619586c5b93ea364026ab37547772cb45a663a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/agents/comparator.md
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:fe1fc9787c495d864c5d6eada47396478572325fde1b33a96d78bf4b849b7a3e
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/agents/grader.md
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:57134da0c1a4eea33fbd74a1c9c44aa814f07d6bc64de303edb586f941e5d21a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/assets/eval_review.html
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:ce477dcc74dc1c0d1d3352646a79167b5a63634e936b1019160025065974e452
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/eval-viewer/generate_review.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:fc9d1b9243fe5ab6012ebd579bd76d0035de1b79fd3b969de114defab26478fb
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/eval-viewer/viewer.html
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:a53213426ee1100441d701a3a0d49cda7a842f992d2c36463f4d3cc0258575fa
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/references/schemas.md
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:8e8876180a8989b406a4d3edddf875b04cdfd5805cc8616686d552b11ce4455f
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/__init__.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/aggregate_benchmark.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:123ef128ea5ccc01a4b1ac212ef5567f21e9c13d3d240609780beeb3200c49aa
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/generate_report.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:13df7118a3c50c83c4c3250a606d5f2b20b25a3d44cbc392b3d669ec75281453
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/improve_description.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:87d864570220b699fac52da309d2d6efdb060647bfebc74f768128e646accf80
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/package_skill.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:1a33059b0db1ef73375d46d513e5ea81369d2e8838c970597b0d52ddef8d1c0f
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/quick_validate.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:67cf5703402013936c8fb75ad6a1afecd8841d45cc5e606b634eb05825fde365
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/run_eval.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:43e3b8f80dbf69c343967ba77e268fae991d9fa3ed68b32a0ff02532cd48657f
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/run_loop.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:7bd6f674203168520517eec94c55f493c0d154339b061b4d7c0f0dad187d0f21
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/scripts/utils.py
+  runtime: null
+  scope: project
+  owners:
+  - anthropics/skills/skills/skill-creator
+  active_owner: anthropics/skills/skills/skill-creator
+  content_hash: sha256:3af8ae62c40c73ab712207436a0d9a981e845f25c5a7040229eb189cc8e45bb1
+- kind: project-relative
+  target: claude
+  value: .claude/skills/using-go-tool-directive
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/using-go-tool-directive
+  active_owner: mazrean/agent-skills/skills/using-go-tool-directive
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/using-go-tool-directive/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/using-go-tool-directive
+  active_owner: mazrean/agent-skills/skills/using-go-tool-directive
+  content_hash: sha256:6ff1720b32e668173b687dcd24e39612f9df328ed26a6f9675176d7a8a7350ab
+- kind: project-relative
+  target: claude
+  value: .claude/skills/using-go-tool-directive/references/ADVANCED.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/using-go-tool-directive
+  active_owner: mazrean/agent-skills/skills/using-go-tool-directive
+  content_hash: sha256:4d185111edce2c169dec4107610d613ad247ba01b847ed3dca81d409d7b5a96a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/using-go-tool-directive/references/COMMANDS.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/using-go-tool-directive
+  active_owner: mazrean/agent-skills/skills/using-go-tool-directive
+  content_hash: sha256:5cdf72fd6970256dfc59870b135ce1c0ad9192aae73c8ecc1022f183cbf14a65
+- kind: project-relative
+  target: claude
+  value: .claude/skills/using-go-tool-directive/references/MIGRATION.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/using-go-tool-directive
+  active_owner: mazrean/agent-skills/skills/using-go-tool-directive
+  content_hash: sha256:79c786a1ee425abc5282e45505516e48831033b7fc08c7e985ed704af9824f71
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-feature-spec
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-feature-spec
+  active_owner: mazrean/agent-skills/skills/writing-feature-spec
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-feature-spec/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-feature-spec
+  active_owner: mazrean/agent-skills/skills/writing-feature-spec
+  content_hash: sha256:c67d82e5f5a9eec14af5387debdbecc271a1310678206d54f526186b114f8be4
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-feature-spec/references/CONTEXT-LAYERS.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-feature-spec
+  active_owner: mazrean/agent-skills/skills/writing-feature-spec
+  content_hash: sha256:97fa4095b0fbc93b39d2b0ac19a5e33ce294ce15420bc6c9cf4e88471933573c
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-feature-spec/references/EXAMPLES.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-feature-spec
+  active_owner: mazrean/agent-skills/skills/writing-feature-spec
+  content_hash: sha256:b16f1c5f6ff87795fcf005175fd7e6274c5646d8db579e05b4f95ee735549e03
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-implementation-tasks
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-implementation-tasks
+  active_owner: mazrean/agent-skills/skills/writing-implementation-tasks
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-implementation-tasks/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-implementation-tasks
+  active_owner: mazrean/agent-skills/skills/writing-implementation-tasks
+  content_hash: sha256:24837d8c6cb00840bb4ef3e6981a4709d62926beef3e3d433bf1e68ff0d5d15e
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-implementation-tasks/references/CONTEXT-LAYERS.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-implementation-tasks
+  active_owner: mazrean/agent-skills/skills/writing-implementation-tasks
+  content_hash: sha256:8c123bbc9ebdc6231ec07c3a8eec376b97bb5e27bfab21c762a84a3020024081
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-implementation-tasks/references/EXAMPLES.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-implementation-tasks
+  active_owner: mazrean/agent-skills/skills/writing-implementation-tasks
+  content_hash: sha256:ae60af1cc1853145eafd41a4357134acb9e7712421277a4a0287bf5533b1394e
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-project-constitution
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-project-constitution
+  active_owner: mazrean/agent-skills/skills/writing-project-constitution
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-project-constitution/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-project-constitution
+  active_owner: mazrean/agent-skills/skills/writing-project-constitution
+  content_hash: sha256:7ac50a98473520c32c5ad0b8491def7d9114f310ef186cf9f943daac9f49dcd1
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-project-constitution/references/CROSS-AGENT.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-project-constitution
+  active_owner: mazrean/agent-skills/skills/writing-project-constitution
+  content_hash: sha256:0e48b2280abca82f7499d6fb2b4b5f04ca6021f3ba7753f4e5005a23c9334de4
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-project-constitution/references/EXAMPLES.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-project-constitution
+  active_owner: mazrean/agent-skills/skills/writing-project-constitution
+  content_hash: sha256:3729bab2c06c4675de615cb40512d2e9cc94d6fb49ae0e7e5912ee8b01f3d56a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-technical-design
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-technical-design
+  active_owner: mazrean/agent-skills/skills/writing-technical-design
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-technical-design/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-technical-design
+  active_owner: mazrean/agent-skills/skills/writing-technical-design
+  content_hash: sha256:71de6bb966093f7c5d0e7b3322988d9a1a7685b5ee6d76b9f7a24caf35c21da6
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-technical-design/references/COMPONENT-SKILLS.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-technical-design
+  active_owner: mazrean/agent-skills/skills/writing-technical-design
+  content_hash: sha256:0298cdd041bd26ee4b62bf4e80ffbb72f400d6d661add03cbcbed4d14dab5b62
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-technical-design/references/CONTEXT-LAYERS.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-technical-design
+  active_owner: mazrean/agent-skills/skills/writing-technical-design
+  content_hash: sha256:984808e18f8a684c3e244399442a419add3a6f848eb821a90a9f15782094410e
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-technical-design/references/DEEP-RESEARCH.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-technical-design
+  active_owner: mazrean/agent-skills/skills/writing-technical-design
+  content_hash: sha256:aa19472c31ca4d2609aab22e43e1154fb157f241f677ff722ce8f93086728faf
+- kind: project-relative
+  target: claude
+  value: .claude/skills/writing-technical-design/references/EXAMPLES.md
+  runtime: null
+  scope: project
+  owners:
+  - mazrean/agent-skills/skills/writing-technical-design
+  active_owner: mazrean/agent-skills/skills/writing-technical-design
+  content_hash: sha256:414a3f03431008220736544fd4f9e7e072ac3bc74fdbf1408eb4f281fe82acb2
+- kind: uri
+  target: mcp
+  value: deepwiki
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: uri
+  target: mcp
+  value: gopls
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+mcp_servers:
+- deepwiki
+- gopls
+mcp_configs:
+  deepwiki:
+    name: deepwiki
+    transport: http
+    registry: false
+    url: https://mcp.deepwiki.com/mcp
+  gopls:
+    name: gopls
+    transport: stdio
+    args:
+    - mcp
+    registry: false
+    command: gopls
+mcp_target_servers:
+  claude:
+  - deepwiki
+  - gopls
+mcp_config_provenance:
+  deepwiki: apm-plackage-common
+  gopls: apm-plackage-go

@@ -1,0 +1,9 @@
+name: kessoku
+version: 0.1.0
+description: Compile-time DI library for Go that runs independent providers in parallel. Generates optimised code at compile time with zero runtime overhead.
+
+dependencies:
+  apm:
+    - mazrean/apm-plackage/common
+    - mazrean/apm-plackage/go
+    - mazrean/apm-plackage/goreleaser

@@ -15,10 +15,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.work
+      - name: Set up mise
+        uses: jdx/mise-action@v4
 
       - name: Generate a token
         id: generate-token
@@ -31,7 +29,7 @@ jobs:
             homebrew-tap
 
       - name: Run GoReleaser
-        run: go tool goreleaser release --clean --skip=validate
+        run: mise run release:publish
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
 

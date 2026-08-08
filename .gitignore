@@ -1,10 +1,6 @@
 /dist
 /bin
 /.vscode
-/.serena/cache
-/.claude
-/.specify
-/main.go
 
 # Example binaries
 examples/*/async_parallel
@@ -14,3 +10,9 @@ examples/*/complex_async
 examples/*/cross_package
 examples/*/sets
 examples/*/simple
+
+
+# APM dependencies
+apm_modules/
+/.mcp.json
+/.claude

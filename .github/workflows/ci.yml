@@ -13,13 +13,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.work
+      - name: Set up mise
+        uses: jdx/mise-action@v4
 
       - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out ./internal/...
+        run: mise run test:ci
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -34,15 +32,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.work
+      - name: Set up mise
+        uses: jdx/mise-action@v4
 
       - name: Run custom linter
         run: |
           set -o pipefail
-          go tool lint ./... 2>&1 | tee lint-output.txt || {
+          mise run lint 2>&1 | tee lint-output.txt || {
             echo "::group::Linting Issues"
             while IFS= read -r line; do
               if [[ "$line" =~ ^([^:]+):([0-9]+):([0-9]+):(.*)$ ]]; then
@@ -72,13 +68,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.work
+      - name: Set up mise
+        uses: jdx/mise-action@v4
 
       - name: Build with GoReleaser
-        run: go tool goreleaser build --clean --skip=validate
+        run: mise run release:build
 
       - name: Test binary execution
         run: ./dist/kessoku_linux_amd64_v1/kessoku --version
@@ -96,11 +90,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v9.0.0
+      - name: Set up mise
+        uses: jdx/mise-action@v4
 
       - name: Validate kessoku-di skill
-        run: uvx --from git+https://github.com/agentskills/agentskills.git#subdirectory=skills-ref skills-ref validate internal/llmsetup/skills/kessoku-di
+        run: mise run validate-skills
 
   api-compatibility:
     runs-on: ubuntu-latest
@@ -110,16 +104,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.work
+      - name: Set up mise
+        uses: jdx/mise-action@v4
 
       - name: Check API compatibility
         run: |
-          MODULE_PATH="github.com/mazrean/kessoku"
           # Run API compatibility check and capture output
-          if OUTPUT=$(go tool apicompat "${MODULE_PATH}@latest" "${MODULE_PATH}" 2>&1); then
+          if OUTPUT=$(mise run apicompat 2>&1); then
             echo "No breaking API changes detected"
           else
             echo "$OUTPUT"

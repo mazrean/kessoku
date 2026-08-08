@@ -1,33 +1,71 @@
 [tools]
-node = "24.18.0"
-"npm:@anthropic-ai/claude-code" = "2.1.226"
-"npm:@openai/codex" = "0.147.0"
+# common
+"github:microsoft/apm" = "0.28.0"
+gh = "2.96.0"
 
-python = "3.14.7"
-uv = "0.12.3"
-"pipx:oraios/serena" = "v1.6.1"
-"pipx:github/spec-kit" = "v0.16.1"
-
+# go
 go = "1.26.5"
 "go:golang.org/x/tools/gopls" = "0.23.0"
 
-[tasks.worktree]
-run = '''
-create_worktree() {
-    local branch_name=$1
-    
-    # メインリポジトリのディレクトリを取得
-    local git_common=$(git rev-parse --git-common-dir)
-    local main_repo=$(dirname "$git_common")
-    
-    # worktreesディレクトリを作成
-    local new_worktree="${main_repo}/.worktrees/${branch_name}"
-    mkdir -p "$new_worktree"
-    
-    git worktree add -b "$branch_name" "$new_worktree"
-    echo "✓ worktreeを作成しました: $new_worktree"
-    code "$new_worktree"
-}
-create_worktree $1
-'''
-description = "Create and checkout a new git worktree"
+# goreleaser
+goreleaser = "2.17.1"
+
+# skill validation
+uv = "0.12.3"
+"pipx:skills-ref[uvx=true]" = "0.1.1"
+
+[tasks.fmt]
+description = "Format all Go source"
+run = "go fmt ./..."
+
+[tasks.build]
+description = "Build the kessoku CLI binary"
+run = "go build -o bin/kessoku ./cmd/kessoku"
+
+[tasks.generate]
+description = "Run go:generate across the workspace"
+run = "go generate ./..."
+
+[tasks.test]
+description = "Run the full test suite"
+run = "go test -v ./..."
+
+[tasks."test:ci"]
+description = "Run tests with race detector + coverage (matches CI)"
+run = "go test -v -race -coverprofile=coverage.out ./internal/..."
+
+[tasks."test:golden-update"]
+description = "Regenerate golden codegen fixtures"
+run = "go test -v -run TestGoldenGeneration ./internal/kessoku/... -update"
+
+[tasks.lint]
+description = "Run the custom lint module (govet + staticcheck + stylecheck)"
+run = "go tool lint ./..."
+
+[tasks."lint:fix"]
+description = "Run the custom lint module with autofix"
+run = "go tool lint -fix ./..."
+
+[tasks.apicompat]
+description = "Check public API compatibility against the latest release"
+run = "go tool apicompat github.com/mazrean/kessoku@latest github.com/mazrean/kessoku"
+
+[tasks."validate-skills"]
+description = "Validate the kessoku-di Agent Skill"
+run = "agentskills validate internal/llmsetup/skills/kessoku-di"
+
+[tasks."release:build"]
+description = "Build release binaries with GoReleaser (no publish)"
+run = "goreleaser build --clean --skip=validate"
+
+[tasks."release:snapshot"]
+description = "Build a full snapshot release with GoReleaser (no publish)"
+run = "goreleaser release --snapshot --clean"
+
+[tasks."release:publish"]
+description = "Publish a release with GoReleaser"
+run = "goreleaser release --clean --skip=validate"
+
+[tasks.check]
+description = "Everything required before a commit: format, test, lint"
+depends = ["fmt", "test", "lint", "apicompat", "validate-skills"]
