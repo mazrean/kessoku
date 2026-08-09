@@ -5,7 +5,7 @@ gh = "latest"
 
 # go
 go = "1.26.3"
-"go:golang.org/x/tools/gopls" = "0.21.1"
+"go:golang.org/x/tools/gopls" = "0.23.0"
 
 # goreleaser
 goreleaser = "latest"
