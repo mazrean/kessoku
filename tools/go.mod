@@ -1,6 +1,6 @@
 module github.com/mazrean/kessoku/tools
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/alingse/asasalint v0.0.11
@@ -18,8 +18,8 @@ require (
 	github.com/timakin/bodyclose v0.0.0-20260723120731-857993a2939c
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1
 	github.com/uudashr/iface v1.5.0
-	golang.org/x/exp v0.0.0-20260727155853-b88d891fe743
-	golang.org/x/tools v0.48.0
+	golang.org/x/exp v0.0.0-20260820142414-ca536658362e
+	golang.org/x/tools v0.49.0
 )
 
 require (
@@ -46,7 +46,7 @@ require (
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/hashicorp/go-version v1.7.0 // indirect
-	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/mod v0.39.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	honnef.co/go/tools v0.7.0
