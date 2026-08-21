@@ -1,7 +1,7 @@
 [tools]
 # common
 "github:microsoft/apm" = "0.28.0"
-gh = "2.97.0"
+gh = "2.98.0"
 
 # go
 go = "1.26.5"
