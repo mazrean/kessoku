@@ -1,6 +1,6 @@
 module github.com/mazrean/kessoku/tools
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/alingse/asasalint v0.0.11
@@ -49,7 +49,7 @@ require (
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
-	honnef.co/go/tools v0.7.0
+	honnef.co/go/tools v0.8.1
 )
 
 tool (
