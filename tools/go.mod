@@ -6,7 +6,7 @@ require (
 	github.com/alingse/asasalint v0.0.11
 	github.com/breml/bidichk v0.3.3
 	github.com/charithe/durationcheck v0.0.11
-	github.com/go-critic/go-critic v0.14.4
+	github.com/go-critic/go-critic v0.15.0
 	github.com/gordonklaus/ineffassign v0.2.0
 	github.com/kisielk/errcheck v1.20.0
 	github.com/kyoh86/exportloopref v0.1.11
@@ -19,7 +19,7 @@ require (
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1
 	github.com/uudashr/iface v1.5.0
 	golang.org/x/exp v0.0.0-20260727155853-b88d891fe743
-	golang.org/x/tools v0.48.0
+	golang.org/x/tools v0.49.0
 )
 
 require (
@@ -46,7 +46,7 @@ require (
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/hashicorp/go-version v1.7.0 // indirect
-	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/mod v0.39.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	honnef.co/go/tools v0.7.0
