@@ -23,6 +23,14 @@ Build, test, lint, and release operations are consolidated as `mise` tasks in
 `.mise.toml` (run `mise tasks` to list them); CI calls these same tasks so local
 runs match CI exactly.
 
+Every go-invoking task depends on the hidden `work:sync` task (`go work use`),
+which realigns the `go` directive in `go.work` with the workspace modules.
+Dependency-update PRs raise a module's `go` directive without touching `go.work`
+(e.g. a `honnef.co/go/tools` bump moves `tools/go.mod` to `go 1.26.0` on its
+own), which otherwise breaks every go command with `module tools listed in
+go.work file requires go >= X, but go.work lists go Y`. `work:sync` fixes that
+before the command runs; commit the resulting `go.work` change with the update.
+
 ```bash
 # Build
 mise run build                             # go build -o bin/kessoku ./cmd/kessoku
