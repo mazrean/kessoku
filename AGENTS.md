@@ -30,6 +30,8 @@ Dependency-update PRs raise a module's `go` directive without touching `go.work`
 own), which otherwise breaks every go command with `module tools listed in
 go.work file requires go >= X, but go.work lists go Y`. `work:sync` fixes that
 before the command runs; commit the resulting `go.work` change with the update.
+Renovate handles its own PRs via `postUpgradeTasks` (see Tooling), so `work:sync` is
+the safety net for everything else.
 
 ```bash
 # Build
@@ -159,3 +161,11 @@ Migration tool location: `internal/migrate/`.
 - Code intelligence: `serena` (multi-language LSP) + `gopls` (Go LSP) MCPs declared in `apm.yml`.
 - Spec-driven development uses `mazrean/agent-skills/skills/writing-*`. `cc-sdd` /
   `github/spec-kit` are deprecated org-wide and removed from `mise.toml`.
+- Dependency updates run through **self-hosted Renovate**: `.github/workflows/renovate.yml`
+  (GitHub App token from the `Renovate` environment) plus the global config
+  `.github/renovate-global.json`, which allowlists the single post-upgrade command
+  `go work use`. `renovate.json` attaches that command to every `gomod` update, so a
+  bump that raises a module's `go` directive carries the matching `go.work` change in
+  the same commit. The Mend-hosted Renovate App must stay uninstalled for this repo —
+  running both bots would double every PR. `gitIgnoredAuthors` lets the self-hosted
+  bot adopt the branches the Mend app left behind; drop it once those PRs are gone.
