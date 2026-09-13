@@ -11,7 +11,7 @@ require (
 	github.com/kisielk/errcheck v1.20.0
 	github.com/kyoh86/exportloopref v0.1.11
 	github.com/lufeee/execinquery v1.2.1
-	github.com/nishanths/exhaustive v0.12.0
+	github.com/nishanths/exhaustive v0.13.0
 	github.com/sanposhiho/wastedassign/v2 v2.1.0
 	github.com/sonatard/noctx v0.5.1
 	github.com/tdakkota/asciicheck v0.4.1
