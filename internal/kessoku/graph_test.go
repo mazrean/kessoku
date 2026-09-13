@@ -1995,8 +1995,7 @@ func TestGraph_DetectCycles(t *testing.T) {
 				}
 
 				// Check if error is or wraps a CycleError
-				var cycleErr *CycleError
-				if !errors.As(err, &cycleErr) {
+				if _, ok := errors.AsType[*CycleError](err); !ok {
 					t.Errorf("Expected CycleError but got %T", err)
 				}
 
