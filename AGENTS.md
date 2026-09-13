@@ -23,6 +23,16 @@ Build, test, lint, and release operations are consolidated as `mise` tasks in
 `.mise.toml` (run `mise tasks` to list them); CI calls these same tasks so local
 runs match CI exactly.
 
+Every go-invoking task depends on the hidden `work:sync` task (`go work use`),
+which realigns the `go` directive in `go.work` with the workspace modules.
+Dependency-update PRs raise a module's `go` directive without touching `go.work`
+(e.g. a `honnef.co/go/tools` bump moves `tools/go.mod` to `go 1.26.0` on its
+own), which otherwise breaks every go command with `module tools listed in
+go.work file requires go >= X, but go.work lists go Y`. `work:sync` fixes that
+before the command runs; commit the resulting `go.work` change with the update.
+Renovate handles its own PRs via `postUpgradeTasks` (see Tooling), so `work:sync` is
+the safety net for everything else.
+
 ```bash
 # Build
 mise run build                             # go build -o bin/kessoku ./cmd/kessoku
@@ -151,3 +161,11 @@ Migration tool location: `internal/migrate/`.
 - Code intelligence: `serena` (multi-language LSP) + `gopls` (Go LSP) MCPs declared in `apm.yml`.
 - Spec-driven development uses `mazrean/agent-skills/skills/writing-*`. `cc-sdd` /
   `github/spec-kit` are deprecated org-wide and removed from `mise.toml`.
+- Dependency updates run through **self-hosted Renovate**: `.github/workflows/renovate.yml`
+  (GitHub App token from the `Renovate` environment) plus the global config
+  `.github/renovate-global.json`, which allowlists the single post-upgrade command
+  `go work use`. `renovate.json` attaches that command to every `gomod` update, so a
+  bump that raises a module's `go` directive carries the matching `go.work` change in
+  the same commit. The Mend-hosted Renovate App must stay uninstalled for this repo —
+  running both bots would double every PR. `gitIgnoredAuthors` lets the self-hosted
+  bot adopt the branches the Mend app left behind; drop it once those PRs are gone.

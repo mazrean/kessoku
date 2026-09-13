@@ -1,0 +1,5 @@
+{
+  "platform": "github",
+  "onboarding": false,
+  "allowedCommands": ["^go work use$"]
+}

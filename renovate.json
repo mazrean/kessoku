@@ -2,5 +2,29 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "gitIgnoredAuthors": [
+    "29139614+renovate[bot]@users.noreply.github.com"
+  ],
+  "packageRules": [
+    {
+      "description": "A dependency bump can raise a module's go directive on its own, which leaves go.work behind and breaks every go command in the workspace. Realign it inside the same commit.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "go work use"
+        ],
+        "fileFilters": [
+          "go.work",
+          "go.work.sum"
+        ],
+        "executionMode": "update",
+        "installTools": {
+          "golang": {}
+        }
+      }
+    }
   ]
 }

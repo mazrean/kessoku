@@ -14,40 +14,54 @@ goreleaser = "2.18.1"
 uv = "0.12.13"
 "pipx:skills-ref[uvx=true]" = "0.1.1"
 
+[tasks."work:sync"]
+description = "Sync go.work's go directive with the workspace modules (run before any go invocation)"
+hide = true
+run = "go work use"
+
 [tasks.fmt]
 description = "Format all Go source"
+depends = ["work:sync"]
 run = "go fmt ./..."
 
 [tasks.build]
 description = "Build the kessoku CLI binary"
+depends = ["work:sync"]
 run = "go build -o bin/kessoku ./cmd/kessoku"
 
 [tasks.generate]
 description = "Run go:generate across the workspace"
+depends = ["work:sync"]
 run = "go generate ./..."
 
 [tasks.test]
 description = "Run the full test suite"
+depends = ["work:sync"]
 run = "go test -v ./..."
 
 [tasks."test:ci"]
 description = "Run tests with race detector + coverage (matches CI)"
+depends = ["work:sync"]
 run = "go test -v -race -coverprofile=coverage.out ./internal/..."
 
 [tasks."test:golden-update"]
 description = "Regenerate golden codegen fixtures"
+depends = ["work:sync"]
 run = "go test -v -run TestGoldenGeneration ./internal/kessoku/... -update"
 
 [tasks.lint]
 description = "Run the custom lint module (govet + staticcheck + stylecheck)"
+depends = ["work:sync"]
 run = "go tool lint ./..."
 
 [tasks."lint:fix"]
 description = "Run the custom lint module with autofix"
+depends = ["work:sync"]
 run = "go tool lint -fix ./..."
 
 [tasks.apicompat]
 description = "Check public API compatibility against the latest release"
+depends = ["work:sync"]
 run = "go tool apicompat github.com/mazrean/kessoku@latest github.com/mazrean/kessoku"
 
 [tasks."validate-skills"]
@@ -56,14 +70,17 @@ run = "agentskills validate internal/llmsetup/skills/kessoku-di"
 
 [tasks."release:build"]
 description = "Build release binaries with GoReleaser (no publish)"
+depends = ["work:sync"]
 run = "goreleaser build --clean --skip=validate"
 
 [tasks."release:snapshot"]
 description = "Build a full snapshot release with GoReleaser (no publish)"
+depends = ["work:sync"]
 run = "goreleaser release --snapshot --clean"
 
 [tasks."release:publish"]
 description = "Publish a release with GoReleaser"
+depends = ["work:sync"]
 run = "goreleaser release --clean --skip=validate"
 
 [tasks.check]
