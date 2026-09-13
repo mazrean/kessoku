@@ -32,7 +32,7 @@ permissions:
 jobs:
   renovate:
     runs-on: ubuntu-latest
-    environment: Renovate
+    environment: Renovatebot
     steps:
       - name: Generate GitHub App token
         id: app-token
