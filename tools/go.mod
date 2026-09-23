@@ -15,7 +15,7 @@ require (
 	github.com/sanposhiho/wastedassign/v2 v2.1.0
 	github.com/sonatard/noctx v0.5.1
 	github.com/tdakkota/asciicheck v0.4.1
-	github.com/timakin/bodyclose v0.0.0-20260723120731-857993a2939c
+	github.com/timakin/bodyclose v0.0.0-20260923065923-98ded9ab4ef2
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1
 	github.com/uudashr/iface v1.5.1
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba
