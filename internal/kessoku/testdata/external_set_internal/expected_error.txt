@@ -1,0 +1,1 @@
+cannot be imported from package github.com/mazrean/kessoku/internal/kessoku/testdata/external_set_internal
