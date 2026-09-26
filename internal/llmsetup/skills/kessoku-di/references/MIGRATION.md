@@ -30,6 +30,7 @@ The command reads files with `//go:build wireinject` tag and generates kessoku c
 | `wire.Value(v)` | `kessoku.Value(v)` |
 | Provider function `NewFoo` | `kessoku.Provide(NewFoo)` |
 | Set variable reference | Preserved as-is |
+| Set from another package (`pkg.Set`) | Preserved as-is (`pkg.Set`); migrate `pkg` too (see below) |
 
 ### Bind Mapping
 
@@ -230,3 +231,5 @@ Wire allows some implicit conversions that kessoku doesn't. Check provider retur
 ### Missing Providers
 
 Ensure all providers referenced in sets are included. The migrate command preserves set references but doesn't inline them.
+
+A reference to a set in another package (e.g. `wire.Build(pkg.Set, NewApp)`) is kept as `pkg.Set`, and `kessoku migrate` warns about it. kessoku can only use it once `pkg` itself is migrated so that `pkg.Set` is a `kessoku.Set`; run `kessoku migrate` on that package as well.

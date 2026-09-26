@@ -38,6 +38,7 @@ const (
 	WarnNoWireImport WarningCode = iota
 	WarnNoWirePatterns
 	WarnUnsupportedPattern
+	WarnCrossPackageSetRef
 )
 
 // ParseErrorKind identifies parse error types.
@@ -141,7 +142,12 @@ func (*WireProviderFunc) wirePattern() {}
 // WireSetRef represents a reference to another provider set variable.
 type WireSetRef struct {
 	Expr ast.Expr
+	// Name is the set variable name. For a package-qualified reference
+	// (pkg.FooSet) it is the qualified source text, e.g. "pkg.FooSet".
 	Name string
+	// PkgPath is the import path of the package declaring the set when the
+	// reference is package-qualified; empty for same-package references.
+	PkgPath string
 	baseWirePattern
 }
 

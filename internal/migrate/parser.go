@@ -302,14 +302,26 @@ func (p *Parser) parseSetElement(expr ast.Expr, info *types.Info, wireAlias stri
 				}
 			}
 		}
-		// Variable reference (another set from different package)
+		// Variable reference (another set from different package).
+		// Name is the qualified source text (e.g. "pkg.FooSet") rather than the
+		// bare selector so that same-package lookups keyed by variable name
+		// (setIndex, bindVarTypes) never alias a local set of the same name.
+		name := e.Sel.Name
+		if x, ok := e.X.(*ast.Ident); ok {
+			name = x.Name + "." + e.Sel.Name
+		}
+		var pkgPath string
+		if obj := info.ObjectOf(e.Sel); obj != nil && obj.Pkg() != nil {
+			pkgPath = obj.Pkg().Path()
+		}
 		return &WireSetRef{
 			baseWirePattern: baseWirePattern{
 				Pos:  e.Pos(),
 				File: filePath,
 			},
-			Name: e.Sel.Name,
-			Expr: e,
+			Name:    name,
+			PkgPath: pkgPath,
+			Expr:    e,
 		}
 	}
 
