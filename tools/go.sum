@@ -94,6 +94,8 @@ github.com/tenntenn/text/transform v0.0.0-20200319021203-7eef512accb3 h1:f+jULpR
 github.com/tenntenn/text/transform v0.0.0-20200319021203-7eef512accb3/go.mod h1:ON8b8w4BN/kE1EOhwT0o+d62W65a6aPw1nouo9LMgyY=
 github.com/timakin/bodyclose v0.0.0-20260723120731-857993a2939c h1:d/FUP8GD4QiY/rdFzZmBu3KqL9eBNVzMu7W/5pGkaMM=
 github.com/timakin/bodyclose v0.0.0-20260723120731-857993a2939c/go.mod h1:sDHLK7rb/59v/ZxZ7KtymgcoxuUMxjXq8gtu9VMOK8M=
+github.com/timakin/bodyclose v0.0.0-20260923065923-98ded9ab4ef2 h1:HECVafB2AKntWWRfsiQ4gdunLx5WOYQzFdCsxqOrzp8=
+github.com/timakin/bodyclose v0.0.0-20260923065923-98ded9ab4ef2/go.mod h1:JLoPVtROtNgJ99yXTIxuGNttvmJa85tkJAO6lr05qBA=
 github.com/tommy-muehle/go-mnd/v2 v2.5.1 h1:NowYhSdyE/1zwK9QCLeRb6USWdoif80Ie+v+yU8u1Zw=
 github.com/tommy-muehle/go-mnd/v2 v2.5.1/go.mod h1:WsUAkMJMYww6l/ufffCD3m+P7LEvr8TnZn9lwVDlgzw=
 github.com/uudashr/iface v1.5.0 h1:PgdMt4uAettGG8K/Kbamc4B9FABgUgnS3TLbl6fnjEk=
