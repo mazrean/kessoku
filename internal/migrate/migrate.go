@@ -156,6 +156,9 @@ func (m *Migrator) MigrateFiles(patterns []string, outputPath string) error {
 			if err != nil {
 				return err
 			}
+			transformWarnings := m.transformer.Warnings()
+			allWarnings = append(allWarnings, transformWarnings...)
+			warnings = append(warnings, transformWarnings...)
 
 			results = append(results, MigrationResult{
 				SourceFile:         filePath,

@@ -21,4 +21,4 @@ func NewPostgresStorer() *PostgresStorer {
 }
 
 // StorerSet is the wire set for storage providers.
-var StorerSet = wire.NewSet(NewPostgresStorer)
+var StorerSet = wire.NewSet(NewPostgresStorer, wire.Bind(new(Storer), new(*PostgresStorer)))

@@ -100,9 +100,24 @@ type Return struct {
 
 // BuildDirective represents a kessoku.Inject call.
 type BuildDirective struct {
+	Return *Return
+	// expandedSets records the Set variables already expanded into Providers.
+	expandedSets map[*types.Var]struct{}
 	InjectorName string
-	Return       *Return
 	Providers    []*ProviderSpec
+}
+
+// markSetExpanded records that the Set variable v is being expanded and
+// reports whether it had already been expanded for this injector.
+func (b *BuildDirective) markSetExpanded(v *types.Var) bool {
+	if _, ok := b.expandedSets[v]; ok {
+		return true
+	}
+	if b.expandedSets == nil {
+		b.expandedSets = make(map[*types.Var]struct{})
+	}
+	b.expandedSets[v] = struct{}{}
+	return false
 }
 
 type InjectorParam struct {

@@ -6,6 +6,7 @@ import (
 	"go/format"
 	"go/token"
 	"go/types"
+	"strings"
 	"testing"
 )
 
@@ -906,6 +907,113 @@ func TestAnyProviderReturnsError(t *testing.T) {
 			got := anyProviderReturnsError(tt.elements, tt.setIndex, make(map[string]bool))
 			if got != tt.want {
 				t.Errorf("anyProviderReturnsError() = %v; want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTransformCrossPackageSetRef(t *testing.T) {
+	t.Parallel()
+
+	const storagePath = "example.com/app/storage"
+	crossRef := func() *WireSetRef {
+		return &WireSetRef{
+			Name:    "store.DBSet",
+			PkgPath: storagePath,
+			Expr: &ast.SelectorExpr{
+				X:   ast.NewIdent("store"),
+				Sel: ast.NewIdent("DBSet"),
+			},
+		}
+	}
+	localRef := &WireSetRef{Name: "DBSet", Expr: ast.NewIdent("DBSet")}
+	// A local set sharing the external set's bare name. It must never be
+	// resolved for the qualified reference.
+	localDBSet := &WireNewSet{VarName: "DBSet"}
+
+	tests := []struct {
+		name         string
+		patterns     []WirePattern
+		wantExprs    []string
+		wantWarnings int
+	}{
+		{
+			name:         "cross-package ref is kept as qualified selector and warned",
+			patterns:     []WirePattern{&WireNewSet{VarName: "AppSet", Elements: []WirePattern{crossRef()}}},
+			wantExprs:    []string{"store.DBSet"},
+			wantWarnings: 1,
+		},
+		{
+			name: "repeated cross-package ref warns once",
+			patterns: []WirePattern{
+				&WireNewSet{VarName: "AppSet", Elements: []WirePattern{crossRef()}},
+				&WireNewSet{VarName: "OtherSet", Elements: []WirePattern{crossRef()}},
+			},
+			wantExprs:    []string{"store.DBSet", "store.DBSet"},
+			wantWarnings: 1,
+		},
+		{
+			name: "local ref with same bare name does not warn",
+			patterns: []WirePattern{
+				localDBSet,
+				&WireNewSet{VarName: "AppSet", Elements: []WirePattern{localRef}},
+			},
+			wantExprs:    []string{"DBSet"},
+			wantWarnings: 0,
+		},
+		{
+			name: "cross-package ref alongside same-named local set",
+			patterns: []WirePattern{
+				localDBSet,
+				&WireNewSet{VarName: "AppSet", Elements: []WirePattern{crossRef(), localRef}},
+			},
+			wantExprs:    []string{"store.DBSet", "DBSet"},
+			wantWarnings: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := NewTransformer()
+			got, err := tr.Transform(tt.patterns, types.NewPackage("example.com/app", "app"), nil)
+			if err != nil {
+				t.Fatalf("Transform() error = %v", err)
+			}
+
+			var gotExprs []string
+			for _, p := range got {
+				ks, ok := p.(*KessokuSet)
+				if !ok {
+					continue
+				}
+				for _, elem := range ks.Elements {
+					if ref, ok := elem.(*KessokuSetRef); ok {
+						gotExprs = append(gotExprs, exprToString(ref.Expr))
+					}
+				}
+			}
+			if len(gotExprs) != len(tt.wantExprs) {
+				t.Fatalf("set refs = %v, want %v", gotExprs, tt.wantExprs)
+			}
+			for i := range gotExprs {
+				if gotExprs[i] != tt.wantExprs[i] {
+					t.Errorf("set ref[%d] = %q, want %q", i, gotExprs[i], tt.wantExprs[i])
+				}
+			}
+
+			warnings := tr.Warnings()
+			if len(warnings) != tt.wantWarnings {
+				t.Fatalf("Warnings() = %v, want %d warnings", warnings, tt.wantWarnings)
+			}
+			for _, w := range warnings {
+				if w.Code != WarnCrossPackageSetRef {
+					t.Errorf("warning code = %v, want WarnCrossPackageSetRef", w.Code)
+				}
+				if !strings.Contains(w.Message, storagePath) || !strings.Contains(w.Message, "store.DBSet") {
+					t.Errorf("warning message %q should name the set and its package", w.Message)
+				}
 			}
 		})
 	}

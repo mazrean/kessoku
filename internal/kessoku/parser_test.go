@@ -2042,3 +2042,35 @@ func TestModuleRootForFile(t *testing.T) {
 		_ = got
 	})
 }
+
+func TestCanImport(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		importer string
+		path     string
+		want     bool
+	}{
+		{name: "no internal element", importer: "example.com/app", path: "example.com/lib/pkg", want: true},
+		{name: "internal under parent", importer: "example.com/app/cmd", path: "example.com/app/internal/x", want: true},
+		{name: "importer is parent", importer: "example.com/app", path: "example.com/app/internal/x", want: true},
+		{name: "internal outside parent", importer: "example.com/other", path: "example.com/app/internal/x", want: false},
+		{name: "sibling with common prefix", importer: "example.com/appx", path: "example.com/app/internal/x", want: false},
+		{name: "nested internal uses innermost", importer: "example.com/app/internal/a", path: "example.com/app/internal/a/internal/b", want: true},
+		{name: "nested internal outside innermost", importer: "example.com/app/cmd", path: "example.com/app/internal/a/internal/b", want: false},
+		{name: "internal element suffix is not internal", importer: "example.com/other", path: "example.com/app/internalx", want: true},
+		{name: "std internal from user code", importer: "example.com/app", path: "internal/abi", want: false},
+		{name: "std internal from std", importer: "runtime", path: "internal/abi", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := canImport(tt.importer, tt.path); got != tt.want {
+				t.Errorf("canImport(%q, %q) = %v, want %v", tt.importer, tt.path, got, tt.want)
+			}
+		})
+	}
+}

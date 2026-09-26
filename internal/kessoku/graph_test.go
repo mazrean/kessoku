@@ -490,6 +490,16 @@ func TestCreateASTTypeExpr(t *testing.T) {
 			shouldError:     false,
 		},
 		{
+			name: "unexported named type in different package",
+			pkg:  "main",
+			typeExpr: func() types.Type {
+				pkg := types.NewPackage("example.com/other", "other")
+				obj := types.NewTypeName(0, pkg, "config", nil)
+				return types.NewNamed(obj, types.NewStruct(nil, nil), nil)
+			}(),
+			shouldError: true,
+		},
+		{
 			name: "alias type in different package",
 			pkg:  "main",
 			typeExpr: func() types.Type {

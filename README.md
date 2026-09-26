@@ -250,7 +250,7 @@ Once installed, your coding agent will understand kessoku patterns and can help 
 - **`kessoku.Async(provider)`** - Make this provider run in parallel
 - **`kessoku.Provide(fn)`** - Regular provider (sequential)
 - **`kessoku.Inject[T](name, ...)`** - Generate the injector function
-- **`kessoku.Set(...)`** - Group providers for reuse
+- **`kessoku.Set(...)`** - Group providers for reuse (Sets from other packages work too, e.g. `pkg.Set`, as long as they only reference that package's exported identifiers)
 - **`kessoku.Value(val)`** - Inject constants
 - **`kessoku.Bind[Interface](impl)`** - Interface → implementation
 
