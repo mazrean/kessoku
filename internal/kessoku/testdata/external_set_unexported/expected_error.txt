@@ -1,0 +1,1 @@
+provider references unexported identifier github.com/mazrean/kessoku/internal/kessoku/testdata/external_set_unexported/pkga.newA

@@ -45,6 +45,10 @@ func (e *injectorValidationError) Error() string {
 type Parser struct {
 	fset     *token.FileSet
 	packages map[string]*types.Package
+	// targetPkgPath is the import path of the package the generated file
+	// belongs to. Provider expressions pulled in from Sets declared in other
+	// packages are rewritten relative to this package.
+	targetPkgPath string
 }
 
 // NewParser creates a new parser instance.
@@ -69,6 +73,8 @@ func (p *Parser) ParseFile(filename string, varPool *VarPool) (*MetaData, []*Bui
 	}
 
 	slog.Debug("package", "pkg", pkg, "filename", filename)
+
+	p.targetPkgPath = pkg.PkgPath
 
 	kessokuPkg, ok := pkg.Imports[kessokuPkgPath]
 	if !ok || kessokuPkg == nil {
@@ -768,22 +774,8 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 
 				if varObj.Pkg().Path() != pkg.PkgPath {
 					// The Set variable is from a different package, which happens when the
-					// package is dot-imported (import . "other").  Because NeedDeps is set
-					// in the packages.Load config, pkg.Imports entries have Syntax and
-					// TypesInfo populated, so we can look up the declaration directly.
-					importedPkgPath := varObj.Pkg().Path()
-					importedPkg, ok := pkg.Imports[importedPkgPath]
-					if !ok || importedPkg == nil {
-						return fmt.Errorf("dot-imported package not found: %s", importedPkgPath)
-					}
-					varDeclExpr := p.getVarDecl(importedPkg, varObj)
-					if varDeclExpr == nil {
-						return fmt.Errorf("var declaration not found in dot-imported package %s: %s", importedPkgPath, varObj.Name())
-					}
-					if err := p.parseProviderArgument(importedPkg, kessokuPackageScope, varDeclExpr, build, imports, varPool); err != nil {
-						return fmt.Errorf("parse dot-imported Set %s.%s: %w", importedPkgPath, varObj.Name(), err)
-					}
-					return nil
+					// package is dot-imported (import . "other").
+					return p.parseExternalSet(pkg, kessokuPackageScope, varObj, build, imports, varPool)
 				}
 
 				currentArg = p.getVarDecl(pkg, varObj)
@@ -793,8 +785,13 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 				}
 				continue
 			case *ast.SelectorExpr:
-				//lint:ignore ST1005 is ignored because Set is a kessoku-specific proper noun, so capitalizing it in the error string is intentional and not a generic sentence case issue.
-				return fmt.Errorf("Set call expression from another package is not supported: %s", v.Sel.Name)
+				// A Set variable referenced through a package qualifier (pkg.Set).
+				varObj, varOk := pkg.TypesInfo.ObjectOf(v.Sel).(*types.Var)
+				if !varOk || varObj == nil || varObj.Pkg() == nil || varObj.Parent() != varObj.Pkg().Scope() {
+					return fmt.Errorf("unsupported Set selector expression: %s", v.Sel.Name)
+				}
+
+				return p.parseExternalSet(pkg, kessokuPackageScope, varObj, build, imports, varPool)
 			default:
 				return fmt.Errorf("unsupported Set call expression: %T", currentArg)
 			}
@@ -816,6 +813,14 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 	result, err := p.parseProviderType(pkg, providerType, varPool)
 	if err != nil {
 		return fmt.Errorf("parse provider type: %w", err)
+	}
+
+	// Providers from a Set declared in another package are copied into the
+	// generated file, so they may only reference that package's exported API.
+	if pkg.PkgPath != p.targetPkgPath {
+		if err := checkExportedReferences(arg, pkg.TypesInfo, p.targetPkgPath); err != nil {
+			return err
+		}
 	}
 
 	// Collect dependencies from provider expression and get referenced imports
@@ -862,6 +867,74 @@ func (p *Parser) parseProviderArgument(pkg *packages.Package, kessokuPackageScop
 	}
 
 	return nil
+}
+
+// parseExternalSet expands a Set variable declared in a package other than pkg
+// (referenced as pkg.Set or through a dot import). Because NeedDeps is set in
+// the packages.Load config, pkg.Imports entries have Syntax and TypesInfo
+// populated, so the declaration can be parsed in the context of its own package.
+func (p *Parser) parseExternalSet(pkg *packages.Package, kessokuPackageScope *types.Scope, varObj *types.Var, build *BuildDirective, imports map[string]*Import, varPool *VarPool) error {
+	importedPkgPath := varObj.Pkg().Path()
+	importedPkg, ok := pkg.Imports[importedPkgPath]
+	if !ok || importedPkg == nil {
+		return fmt.Errorf("imported package not found: %s", importedPkgPath)
+	}
+
+	varDeclExpr := p.getVarDecl(importedPkg, varObj)
+	if varDeclExpr == nil {
+		return fmt.Errorf("var declaration not found in package %s: %s", importedPkgPath, varObj.Name())
+	}
+
+	if err := p.parseProviderArgument(importedPkg, kessokuPackageScope, varDeclExpr, build, imports, varPool); err != nil {
+		return fmt.Errorf("parse Set %s.%s: %w", importedPkgPath, varObj.Name(), err)
+	}
+
+	return nil
+}
+
+// checkExportedReferences reports an error if expr, which is declared outside
+// the target package, references an unexported package-level object, field or
+// method of a package other than the target package. Such references cannot be
+// compiled once the expression is copied into the generated file.
+func checkExportedReferences(expr ast.Expr, typeInfo *types.Info, targetPkgPath string) error {
+	var err error
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if err != nil {
+			return false
+		}
+
+		ident, ok := node.(*ast.Ident)
+		if !ok {
+			return true
+		}
+
+		obj := typeInfo.ObjectOf(ident)
+		if obj == nil || obj.Exported() || obj.Pkg() == nil || obj.Pkg().Path() == targetPkgPath {
+			return true
+		}
+
+		switch typedObj := obj.(type) {
+		case *types.PkgName, *types.Label:
+			return true
+		case *types.Var:
+			if !typedObj.IsField() && typedObj.Parent() != typedObj.Pkg().Scope() {
+				// Local variable or parameter of a function literal.
+				return true
+			}
+		case *types.Func:
+			// Package-level function or method: always subject to the check.
+		default:
+			if obj.Parent() != obj.Pkg().Scope() {
+				// Locally declared type or constant, or a type parameter.
+				return true
+			}
+		}
+
+		err = fmt.Errorf("provider references unexported identifier %s.%s, which is not accessible from package %s", obj.Pkg().Path(), obj.Name(), targetPkgPath)
+		return false
+	})
+
+	return err
 }
 
 // parseProviderTypeResult holds the result of parsing a provider type.
@@ -1106,13 +1179,12 @@ func (p *Parser) getVarDecl(pkg *packages.Package, obj *types.Var) ast.Expr {
 //     SelectorExpr (e.g. the "pkg" in "pkg.Foo").  Its Name is rewritten to
 //     match the alias recorded in imports.
 //
-//  2. Any object (*types.Func, *types.TypeName, *types.Var, *types.Const)
-//     whose owning package differs from the package that declares the
-//     identifier in the AST.  This happens exclusively when a package is
-//     dot-imported: the identifier appears as a bare Ident in the source but
-//     the object's package is different.  In this case the identifier is
-//     rewritten to a SelectorExpr (pkgAlias.Name) so that the generated code,
-//     which does not carry the dot-import, can still resolve the symbol.
+//  2. Any package-level object (*types.Func, *types.TypeName, *types.Var,
+//     *types.Const) referenced by a bare Ident whose owning package differs
+//     from the target package.  This happens when a package is dot-imported,
+//     or when the expression comes from a Set declared in another package.
+//     The identifier is rewritten to a SelectorExpr (pkgAlias.Name) so that
+//     the generated code can still resolve the symbol.
 func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, imports map[string]*Import, varPool *VarPool) (ast.Expr, map[string]*Import) {
 	referencedImports := make(map[string]*Import)
 
@@ -1159,45 +1231,31 @@ func (p *Parser) collectDependencies(expr ast.Expr, typeInfo *types.Info, import
 			ident.Name = alias
 
 		default:
-			// Case 2: dot-imported symbol — the owning package differs from the
-			// package in which the identifier syntactically appears.
+			// Case 2: a package-level symbol of another package referenced by a
+			// bare identifier. This happens when the expression comes from a
+			// dot-imported package or from a Set declared in another package.
+			// The generated file lives in the target package, so the identifier
+			// must be qualified with the owning package.
 			objPkg := obj.Pkg()
-			if objPkg == nil {
+			if objPkg == nil || objPkg.Path() == p.targetPkgPath || obj.Parent() != objPkg.Scope() {
+				// Universe, target-package, local, field and method objects keep
+				// their bare name.
 				return true
 			}
-			// Determine the package path that the AST node lives in by looking
-			// up the identifier's position in typeInfo.  If typeInfo has no
-			// package for this position we cannot determine the source package,
-			// so we fall back to the object's package.
-			identPkg := typeInfo.ObjectOf(ident)
-			if identPkg == nil {
-				return true
-			}
-			// The identifier is a dot-imported symbol when its declaring package
-			// (objPkg) is NOT the same as the package that contains the
-			// SelectorExpr's Sel or a non-PkgName ident at the top of the AST.
-			// A simpler heuristic: if the ident's parent is a SelectorExpr and
-			// the ident is the Sel (right-hand side), the package qualifier is
-			// already present — skip.
+			// The Sel of a SelectorExpr already has its package qualifier.
 			if sel, parentIsSel := cursor.Parent().(*ast.SelectorExpr); parentIsSel && sel.Sel == ident {
 				return true
 			}
-			// If the identifier is also a PkgName it was handled above.
-			if _, isPkg := obj.(*types.PkgName); isPkg {
-				return true
-			}
-			// Check whether the owning package is in our imports map.  If it is
-			// not, the symbol is from the current package and needs no qualifier.
-			if _, inImports := imports[objPkg.Path()]; !inImports {
-				// Not in imports — could be a current-package symbol; skip.
-				return true
-			}
 			alias := resolveImport(objPkg.Path(), objPkg.Name())
-			// Replace the bare Ident with a SelectorExpr: alias.Name
-			cursor.Replace(&ast.SelectorExpr{
-				X:   &ast.Ident{Name: alias},
-				Sel: &ast.Ident{Name: ident.Name},
-			})
+			// Replace the bare Ident with a SelectorExpr: alias.Name.
+			// The shared declaration AST is rewritten in place, so register the
+			// new identifiers in typeInfo; a later walk of the same declaration
+			// (e.g. another injector using the same Set) then resolves them again.
+			pkgIdent := &ast.Ident{Name: alias}
+			selIdent := &ast.Ident{Name: ident.Name}
+			typeInfo.Uses[pkgIdent] = types.NewPkgName(token.NoPos, nil, alias, objPkg)
+			typeInfo.Uses[selIdent] = obj
+			cursor.Replace(&ast.SelectorExpr{X: pkgIdent, Sel: selIdent})
 		}
 
 		return true
