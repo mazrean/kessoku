@@ -303,6 +303,25 @@ func generateErrGroupDeclaration(egName, ctxName, errgroupAlias string) *ast.Ass
 	}
 }
 
+// varTypeExpr returns the type expression for the variable holding param.
+// The primary (concrete) type is preferred; when it cannot be written in the
+// target package, e.g. an unexported implementation type from another package
+// hidden behind kessoku.Bind, the first other provided type that can be
+// written (such as the bound interface) is used instead.
+func varTypeExpr(pkg string, param *InjectorParam, fileVarPool *VarPool, imports map[string]*Import) (ast.Expr, error) {
+	var firstErr error
+	for _, t := range param.types {
+		typeExpr, err := createASTTypeExpr(pkg, t, fileVarPool, imports)
+		if err == nil {
+			return typeExpr, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return nil, firstErr
+}
+
 // generateVariableSpecs creates variable declarations for async access.
 // localVarPool is used for local variable name allocation; fileVarPool is used
 // for import-alias allocation in createASTTypeExpr.
@@ -320,7 +339,7 @@ func generateVariableSpecs(pkg string, injector *Injector, localVarPool *VarPool
 			imp.IsUsed = true
 		}
 
-		typeExpr, err := createASTTypeExpr(pkg, param.Type(), fileVarPool, imports)
+		typeExpr, err := varTypeExpr(pkg, param, fileVarPool, imports)
 		if err != nil {
 			return nil, fmt.Errorf("create AST type expression for %s: %w", paramName, err)
 		}

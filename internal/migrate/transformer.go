@@ -18,6 +18,11 @@ type Transformer struct {
 	tc           *TypeConverter
 	setIndex     map[string]*WireNewSet // var name → WireNewSet for dedup (BUG-10)
 	bindVarTypes map[string]string      // VarName -> implementation type string for top-level WireBind vars (BUG-14)
+	// warnedSetRefs dedups WarnCrossPackageSetRef within one Transform call.
+	warnedSetRefs map[string]bool
+	// warnings collects non-fatal issues found during the current Transform
+	// call; read them with Warnings.
+	warnings []Warning
 }
 
 // NewTransformer creates a new Transformer instance.
@@ -29,6 +34,8 @@ func NewTransformer() *Transformer {
 // If tc is non-nil, it will be used for proper package-qualified type expressions.
 func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *TypeConverter) ([]KessokuPattern, error) {
 	t.tc = tc
+	t.warnings = nil
+	t.warnedSetRefs = nil
 
 	// Build a set index so that transformElements can look up set contents by name.
 	// This is used to deduplicate providers when wire.Build references both a set
@@ -124,11 +131,7 @@ func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *
 			}
 			result = append(result, transformed)
 		case *WireSetRef:
-			transformed, err := t.transformSetRef(wp)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, transformed)
+			result = append(result, t.transformSetRef(wp))
 		case *WireBuild:
 			transformed, err := t.transformBuild(wp, pkg)
 			if err != nil {
@@ -139,6 +142,11 @@ func (t *Transformer) Transform(patterns []WirePattern, pkg *types.Package, tc *
 	}
 
 	return result, nil
+}
+
+// Warnings returns the non-fatal issues found during the most recent Transform call.
+func (t *Transformer) Warnings() []Warning {
+	return t.warnings
 }
 
 // typeExpr converts a types.Type to ast.Expr using TypeConverter if available,

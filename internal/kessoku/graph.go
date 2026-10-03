@@ -22,7 +22,13 @@ func namedASTTypeExpr(pkg string, obj *types.TypeName, typeArgs *types.TypeList,
 	if objPkg := obj.Pkg(); objPkg != nil && objPkg.Path() != pkg {
 		// For types from other packages, create a selector expression
 		// Format: package.TypeName
+		if !obj.Exported() {
+			return nil, fmt.Errorf("type %s.%s is not exported and cannot be referenced from package %s", objPkg.Path(), obj.Name(), pkg)
+		}
 		pkgPath := objPkg.Path()
+		if !canImport(pkg, pkgPath) {
+			return nil, fmt.Errorf("type %s.%s is in package %s, which cannot be imported from package %s", pkgPath, obj.Name(), pkgPath, pkg)
+		}
 		pkgName := objPkg.Name()
 
 		// Check if package is already imported

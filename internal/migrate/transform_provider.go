@@ -80,20 +80,47 @@ func isCleanupFuncType(t types.Type) bool {
 }
 
 // transformSetRef transforms a set reference.
-// Returns an error if the reference is to a set defined in another package,
-// because kessoku's parser does not support cross-package set references.
-func (t *Transformer) transformSetRef(ws *WireSetRef) (*KessokuSetRef, error) {
+// A package-qualified reference (pkg.FooSet) is emitted as-is: kessoku can use
+// a kessoku.Set declared in another package, but only once that package has
+// itself been migrated from wire.NewSet to kessoku.Set, so a warning is
+// recorded (once per referenced set per file) to remind the user.
+func (t *Transformer) transformSetRef(ws *WireSetRef) *KessokuSetRef {
 	if _, isCrossPkg := ws.Expr.(*ast.SelectorExpr); isCrossPkg {
-		return nil, &ParseError{
-			Kind:    ParseErrorTypeResolution,
-			File:    ws.File,
-			Pos:     ws.Pos,
-			Message: fmt.Sprintf("cross-package set reference %q is not supported: kessoku cannot use wire sets defined in other packages; copy the providers into the current package or inline them directly in wire.Build", ws.Name),
-		}
+		t.warnCrossPackageSetRef(ws)
 	}
 	return &KessokuSetRef{
 		Name:      ws.Name,
 		Expr:      ws.Expr,
 		SourcePos: ws.Pos,
-	}, nil
+	}
+}
+
+// warnCrossPackageSetRef records a WarnCrossPackageSetRef warning for ws unless
+// one was already recorded for the same set during the current Transform call.
+func (t *Transformer) warnCrossPackageSetRef(ws *WireSetRef) {
+	key := ws.Name
+	if ws.PkgPath != "" {
+		key = ws.PkgPath + "." + ws.Name
+	}
+	if t.warnedSetRefs == nil {
+		t.warnedSetRefs = make(map[string]bool)
+	}
+	if t.warnedSetRefs[key] {
+		return
+	}
+	t.warnedSetRefs[key] = true
+
+	pkgDesc := "its package"
+	if ws.PkgPath != "" {
+		pkgDesc = fmt.Sprintf("package %q", ws.PkgPath)
+	}
+	loc := ""
+	if ws.File != "" {
+		loc = " in " + ws.File
+	}
+	t.warnings = append(t.warnings, Warning{
+		Code:    WarnCrossPackageSetRef,
+		Pos:     ws.Pos,
+		Message: fmt.Sprintf("cross-package set reference %s%s is kept as-is: %s must also be migrated to kessoku (its wire.NewSet replaced by kessoku.Set) for the generated code to work", ws.Name, loc, pkgDesc),
+	})
 }
