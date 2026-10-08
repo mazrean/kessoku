@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/alingse/asasalint v0.0.11
-	github.com/breml/bidichk v0.3.3
+	github.com/breml/bidichk v0.3.4
 	github.com/charithe/durationcheck v0.0.11
 	github.com/go-critic/go-critic v0.15.0
 	github.com/gordonklaus/ineffassign v0.2.0
