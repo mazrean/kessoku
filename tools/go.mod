@@ -19,7 +19,7 @@ require (
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1
 	github.com/uudashr/iface v1.5.3
 	golang.org/x/exp v0.0.0-20261009195045-ca0d7ba23607
-	golang.org/x/tools v0.51.0
+	golang.org/x/tools v0.52.0
 )
 
 require (
@@ -46,8 +46,8 @@ require (
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/hashicorp/go-version v1.7.0 // indirect
-	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/mod v0.42.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	honnef.co/go/tools v0.8.1
 )
