@@ -1,6 +1,6 @@
 [tools]
 # common
-"github:microsoft/apm" = "0.32.0"
+"github:microsoft/apm" = "0.33.0"
 gh = "2.102.0"
 
 # go
