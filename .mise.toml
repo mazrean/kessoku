@@ -11,7 +11,7 @@ go = "1.27.2"
 goreleaser = "2.18.3"
 
 # skill validation
-uv = "0.12.22"
+uv = "0.13.0"
 "pipx:skills-ref[uvx=true]" = "0.1.1"
 
 [tasks."work:sync"]
