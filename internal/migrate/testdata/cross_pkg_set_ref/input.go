@@ -18,6 +18,6 @@ func NewApp(storer pkg.Storer) *App {
 }
 
 func InitializeApp() *App {
-	wire.Build(pkg.StorerSet, wire.Bind(new(pkg.Storer), new(*pkg.PostgresStorer)), NewApp)
+	wire.Build(pkg.StorerSet, NewApp)
 	return nil
 }

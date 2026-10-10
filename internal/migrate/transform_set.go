@@ -418,11 +418,7 @@ func (t *Transformer) transformElementsWithBoundTypes(elements []WirePattern, pk
 					}
 				}
 			}
-			transformed, err := t.transformSetRef(we)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, transformed)
+			result = append(result, t.transformSetRef(we))
 		}
 	}
 

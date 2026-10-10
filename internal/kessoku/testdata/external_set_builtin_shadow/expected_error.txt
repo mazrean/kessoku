@@ -1,0 +1,1 @@
+provider uses builtin len, which is shadowed by a declaration in package github.com/mazrean/kessoku/internal/kessoku/testdata/external_set_builtin_shadow
